@@ -89,6 +89,11 @@ interface LuckinShopArgsFixture {
   status: string;
 }
 
+interface FirecrawlMonitorArgsFixture {
+  id: string;
+  confirmed?: boolean;
+}
+
 function action(id: string, prompt: string, kind: string = 'client', args: Object | null = null): A2uiAction {
   const next: A2uiAction = {
     id: id,
@@ -193,6 +198,101 @@ export default function htmlHomeActionPolicyTest() {
       expect(isHtmlHomeActionAllowed(doc, action('gmail.open.web', 'https://evil.example/'))).assertFalse();
       expect(isHtmlHomeActionAllowed(doc, action('html_open_food_map', '{"index":0,"name":"Coffee"}'))).assertTrue();
       expect(isHtmlHomeActionAllowed(doc, action('html_open_food_map', '{"index":99,"name":"Other"}'))).assertFalse();
+    });
+
+    it('allows only visible Firecrawl source and monitor actions from the current document', 0, () => {
+      const doc = documentFixture();
+      const visibleMonitorArgs: FirecrawlMonitorArgsFixture = { id: 'monitor-current' };
+      const forgedMonitorArgs: FirecrawlMonitorArgsFixture = { id: 'monitor-forged' };
+      const visibleSourceAction: A2uiAction = {
+        id: 'web.open.source',
+        label: '打开来源',
+        prompt: 'https://www.firecrawl.dev/monitor',
+        variant: 'secondary',
+        kind: 'client'
+      };
+      const sourceActionWithDifferentUrl: A2uiAction = {
+        id: 'web.open.source',
+        label: '打开来源',
+        prompt: 'https://evil.example/',
+        variant: 'secondary',
+        kind: 'client'
+      };
+      const visibleMonitorAction: A2uiAction = {
+        id: 'web.monitor.detail',
+        label: '查看详情',
+        prompt: '查看详情',
+        variant: 'secondary',
+        kind: 'prompt',
+        args: visibleMonitorArgs
+      };
+      const monitorActionWithDifferentId: A2uiAction = {
+        id: 'web.monitor.detail',
+        label: '查看详情',
+        prompt: '查看详情',
+        variant: 'secondary',
+        kind: 'prompt',
+        args: forgedMonitorArgs
+      };
+      doc.blocks = [{
+        id: 'firecrawl-monitor-current',
+        kind: 'generic-tool-result',
+        title: 'Firecrawl Monitor',
+        subtitle: '',
+        status: 'success',
+        source: 'Firecrawl',
+        metrics: [{ label: 'toolName', value: 'web.monitor.list' }],
+        rows: [{ label: 'Monitor ID', value: 'monitor-current' }],
+        actions: [visibleSourceAction, visibleMonitorAction]
+      }];
+      doc.actions = doc.blocks[0].actions.slice();
+
+      expect(isHtmlHomeActionAllowed(doc, visibleSourceAction)).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, sourceActionWithDifferentUrl)).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc, visibleMonitorAction)).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, monitorActionWithDifferentId)).assertFalse();
+    });
+
+    it('allows only the visible confirmed Firecrawl monitor mutation', 0, () => {
+      const confirmDoc = documentFixture();
+      const visibleConfirmArgs: FirecrawlMonitorArgsFixture = {
+        id: 'monitor-current',
+        confirmed: true
+      };
+      const unconfirmedArgs: FirecrawlMonitorArgsFixture = {
+        id: 'monitor-current'
+      };
+      const visibleMonitorConfirmAction: A2uiAction = {
+        id: 'web.monitor.delete.confirm',
+        label: '确认删除',
+        prompt: '确认删除',
+        variant: 'danger',
+        kind: 'prompt',
+        args: visibleConfirmArgs
+      };
+      const confirmActionWithoutConfirmedFlag: A2uiAction = {
+        id: 'web.monitor.delete.confirm',
+        label: '确认删除',
+        prompt: '确认删除',
+        variant: 'danger',
+        kind: 'prompt',
+        args: unconfirmedArgs
+      };
+      confirmDoc.blocks = [{
+        id: 'firecrawl-monitor-delete-confirm',
+        kind: 'generic-tool-result',
+        title: '确认删除 Monitor',
+        subtitle: '',
+        status: 'needs_user',
+        source: 'Firecrawl',
+        metrics: [{ label: 'toolName', value: 'web.monitor.list' }],
+        rows: [{ label: 'Monitor ID', value: 'monitor-current' }],
+        actions: [visibleMonitorConfirmAction]
+      }];
+      confirmDoc.actions = confirmDoc.blocks[0].actions.slice();
+
+      expect(isHtmlHomeActionAllowed(confirmDoc, visibleMonitorConfirmAction)).assertTrue();
+      expect(isHtmlHomeActionAllowed(confirmDoc, confirmActionWithoutConfirmedFlag)).assertFalse();
     });
 
     it('allows only the visible 12306 booking action arguments', 0, () => {

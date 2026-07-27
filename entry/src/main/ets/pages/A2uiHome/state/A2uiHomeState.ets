@@ -94,12 +94,37 @@ export function nextSendSpinnerRotation(current: number, isBusy: boolean): numbe
   return current + A2UI_SEND_SPINNER_STEP_DEG;
 }
 
+export function nextPendingToolRenderTick(
+  current: number,
+  currentToolId: string,
+  nextToolId: string
+): number {
+  return currentToolId === nextToolId ? current : current + 1;
+}
+
 export function isPromptInputEnabled(isBusy: boolean): boolean {
   return !isBusy;
 }
 
 export function shouldShowQueryPendingSurface(isBusy: boolean, isAwaitingFirstSurface: boolean): boolean {
   return isBusy && isAwaitingFirstSurface;
+}
+
+export function shouldShowFirecrawlPendingSurface(
+  isBusy: boolean,
+  pendingToolId: string,
+  surface: A2uiSurfaceState
+): boolean {
+  if (!isBusy || pendingToolId.length === 0) {
+    return false;
+  }
+  for (let index = 0; index < surface.components.length; index++) {
+    if (surface.intent === pendingToolId &&
+      surface.components[index].component === 'GenericToolResults') {
+      return false;
+    }
+  }
+  return true;
 }
 
 export function isWelcomeSurface(surface: A2uiSurfaceState): boolean {

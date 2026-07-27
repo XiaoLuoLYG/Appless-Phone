@@ -1,12 +1,14 @@
 # 当前工具能力总表
 
-更新时间：2026-07-22
+更新时间：2026-07-27
 
 来源：`agent_core/src/main/ets/aiphone/AiphoneToolDefinitions.ets`、`agent_core/src/main/ets/aiphone/runtime/ToolDefinitionRegistry.ets`、`entry/src/main/ets/pages/A2uiHome/agent/MultiAgentRuntime.ets`、`entry/src/main/ets/pages/A2uiHome/agent/MultiAgentCanaryRuntime.ets`、`agent_core/src/main/ets/aiphone/runtime/AggregateSearchClient.ets`、`agent_core/src/main/ets/aiphone/runtime/ComposioDynamicBackend.ets`、`scripts/aiphone-device-smoke.mjs`、支付/Composio 相关单测。
 
-当前 agent 工具箱：46 个固定 `ToolDefinition`（25 个 Data Agent + 21 个 Action Agent）+ `memory.update` + `dynamic.search` 两个虚拟 owner。`hotel.navigate`、`hotel.booking.open` 与 `gmail.message.send` 只从当前 surface 派生，不直接暴露给模型；结合按 query 收窄的瑞幸预览，运行时最多 45 个模型可选工具。Composio 不新增固定 toolId，主要挂在 `dynamic.search`；自动回归以 core/full/manual-only/excluded/review-required 标记为准。
+当前 agent 工具箱：52 个固定 `ToolDefinition` + `memory.update` + `dynamic.search` 两个虚拟 owner。`hotel.navigate`、`hotel.booking.open` 与 `gmail.message.send` 只从当前 surface 派生，不直接暴露给模型；结合按 query 收窄的瑞幸预览，运行时模型只看到当前允许的工具。Composio 不新增固定 toolId，主要挂在 `dynamic.search`；自动回归以 core/full/manual-only/excluded/review-required 标记为准。
 
 授权页统一显示 app 名称。Slack、X 的读取和授权统一走当前用户的 Composio connected account；用户确认发送 Slack 回复时固定执行 `SLACK_CHAT_POST_MESSAGE`，X 回复仍不支持。QQ 邮箱、瑞幸、滴滴继续使用当前默认凭证和原有 provider 逻辑，授权页只新增各自官方授权/开发者页面入口，不会把网页登录结果自动写回 App。
+
+Firecrawl 六个固定工具由 HAP 携带 `FIRECRAWL_API_KEY`，直接连接 Firecrawl Hosted MCP；这是当前产品配置选择，不依赖 Mac gateway，也不会在手机上运行 Chromium。Credit、Monitor 检查和套餐计费均由 Firecrawl 账号/Provider 管理。Monitor 是退出 App 后仍保留的 Firecrawl 云状态；此版本没有 HarmonyOS 原生推送。
 
 ## multi-Agent smoke 证据边界
 
@@ -88,6 +90,12 @@
 | 社交 | `social.reply.draft` | `帮我给这条 Slack 消息起草回复` | 对已选真实 SocialHub item 生成本地草稿，不发送 | `draft` | 需要已有真实 item 上下文 | 起草本身不需要；来源读取按平台 | 否 | 单元/动作链路 |
 | 社交 | SocialHub Slack 回复动作 | 在真实 Slack 消息草稿上点击发送 | 使用原消息的 channel/thread ID，经当前用户 Composio 执行 `SLACK_CHAT_POST_MESSAGE`；provider 未确认时不显示成功 | `write` | Composio Slack connected account + 可写 scope | 通常需要外网/VPN | 是 | 参数映射单测；真实发送 manual-only |
 | X | `x.post.search` | `帮我查看 X 上 openai 最近的公开 post` | X 公开 post 结果或真实 Composio/provider 错误；不进入 SocialHub | `read` | Composio X/Twitter connected account | 通常需要外网/VPN | 是 | 默认 smoke |
+| Firecrawl / 开放网页 | `web.research.search` | `研究 Firecrawl Monitor 的工作方式、限制和适用场景，给出多个公开来源` | Search 最多 10 条、去重后深读最多 3 页；保留来源与真实 partial/blocked 状态 | `read` | `FIRECRAWL_API_KEY`；可选 `FIRECRAWL_MCP_URL` | Hosted MCP 与目标站点需可达，部分网络需 VPN | 否 | `--firecrawl-tools` FC-A1 |
+| Firecrawl / 单页 | `web.page.read` | `读取 https://www.firecrawl.dev/monitor 并总结它如何监控网页变化` | 只读一个公开 HTTP(S) URL，不递归 crawl；正文预览上限 1,200/12,000 字符并标注截断 | `read` | 同上 | Hosted MCP 与目标页需可达，部分网络需 VPN | 否 | `--firecrawl-tools` FC-A2 + 来源打开 |
+| Firecrawl / 商品 | `shopping.research` | `比较 Sony WH-1000XM6 和 Bose QuietComfort Ultra 的公开规格与页面价格，保留来源` | 最多 3 个商品页；价格只保留页面观察文本，不推断库存、订单或支付 | `read` | 同上 | Hosted MCP、搜索源及商品页需可达 | 否 | `--firecrawl-tools` FC-A3 |
+| Firecrawl / 公开社交 | `social.public.search` | `搜索小红书和知乎上关于鸿蒙应用开发的公开讨论，只展示公开可验证内容` | 最多 10 条搜索、深读最多 2 页；小红书只是公开索引网页补充，登录墙/CAPTCHA/无公开结果可为 `PARTIAL`，不读取私密内容 | `read` | 同上 | Hosted MCP 与公开索引需可达；小红书/部分站点可能受网络或站点限制 | 否 | `--firecrawl-tools` FC-B1（允许真实 `PARTIAL`） |
+| Firecrawl / Monitor | `web.monitor.create` | `创建名为 Appless Firecrawl QA {RUN_ID} 的每日监控…` | 页面最多 5 个或查询最多 3 个；先展示确认，确认后才创建真实云 Monitor | `confirm_required` | 同上；需要 Firecrawl Monitor/credit 权限 | Hosted MCP 需可达，检查按 Firecrawl 套餐计费 | 否 | `--firecrawl-tools` FC-B2-CREATE |
+| Firecrawl / Monitor | `web.monitor.list` | `列出我的 Firecrawl monitors，找到 Appless Firecrawl QA {RUN_ID}` | 读取云状态；运行/暂停/恢复/删除均二次确认并绑定当前真实 ID，删除后重新列表确认 | `read` | 同上；真实 Monitor ID 来自 Provider | Hosted MCP 需可达；云状态在 App 退出后保持，无原生 HarmonyOS push | 否 | `--firecrawl-tools` FC-B2-LIST 生命周期 |
 | 邮箱 | `mail.search` | `帮我查看邮箱里最新的重要邮件` | 聚合 Gmail、QQ Mail、Outlook；不模拟邮件 | `read` | Gmail、QQ Mail、Outlook 对应账号能力；Outlook 可经 Composio extra | Gmail/Outlook 通常需要；QQ 通常不需要 | Outlook extra 可走 Composio；普通聚合不替换成 Composio | 默认 smoke；`--composio-tools` 对照 |
 | 邮箱 | `mail.thread.read` | `打开第一封邮件详情` | 读取已选聚合邮箱线程 | `read` | 需要 provider + messageId/threadId | 按邮件 provider | Outlook 线程若来自 Composio extra 取决于后续支持；固定工具本身否 | 单元/动作链路 |
 | 邮箱 | `mail.draft.create` | `帮我给 QQ 邮箱里最近一封邮件起草回复` | 基于真实线程创建草稿，不发送 | `draft` | 需要真实邮件上下文；QQ IMAP/Gmail OAuth | 按邮件 provider | 否 | 规则/动作链路 |

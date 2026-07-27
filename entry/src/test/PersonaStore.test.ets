@@ -44,6 +44,15 @@ export default function personaStoreTest() {
       expect(pack.skillList[1].status).assertEqual('placeholder');
     });
 
+    it('uses fixed shopping research for the shopping persona', 0, () => {
+      configureDefaultPersonaStoreForTests();
+      const pack = personaPackForId('shopping_companion');
+
+      expect(pack.manifest.defaultTools.join(',')).assertEqual('shopping.research');
+      expect(pack.skills.indexOf('shopping.research')).assertLarger(-1);
+      expect(pack.skills.indexOf('dynamic.search')).assertEqual(-1);
+    });
+
     it('falls back to default persona when requested pack is missing', 0, () => {
       configureDefaultPersonaStoreForTests();
       const pack = personaPackForId('missing_persona');

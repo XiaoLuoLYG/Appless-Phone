@@ -80,6 +80,13 @@ import {
   saveGmailOAuthTokenSet
 } from './GmailOAuthClient';
 import { buildInitializeRequest, buildToolsCallRequest, GenericMcpClient, McpToolCallResult } from './GenericMcpClient';
+import {
+  DEFAULT_FIRECRAWL_MCP_URL,
+  FIRECRAWL_MCP_READ_TIMEOUT_MS,
+  FirecrawlConfig,
+  FirecrawlMcpClient,
+  FirecrawlToolOutput
+} from './FirecrawlMcpClient';
 import { DataResult, DataSource } from '../../agent/message/DataResult';
 import {
   errorDataResult,
@@ -173,7 +180,7 @@ import { AggregateSearchResult, AggregateSearchSourceStatus } from './AggregateS
 import { discoverDynamicToolForPrompt, DynamicToolDiscoveryResult } from './DynamicToolDiscovery';
 import { DynamicToolRegistry, isBuiltInToolId, isUnsafeMcpTool, selectBestRemoteTransport } from './DynamicToolRegistry';
 import { sampleManifestForToolId, sampleRecordsForDiscovery } from './DynamicToolSamples';
-import { dataAgentToolDefinitions, isCalendarToolId, isGmailToolId, isHotelToolId, isKnownDomainToolId, isLuckinToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isRideToolId, isYouTubeToolId, toolDefinitionForToolId } from './ToolDefinitionRegistry';
+import { dataAgentToolDefinitions, isCalendarToolId, isFirecrawlToolId, isGmailToolId, isHotelToolId, isKnownDomainToolId, isLuckinToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isRideToolId, isYouTubeToolId, toolDefinitionForToolId } from './ToolDefinitionRegistry';
 import { ToolBackendType, ToolDefinition } from './ToolDefinitionTypes';
 import {
   PaymentAccount,
@@ -323,6 +330,8 @@ interface LocalProviderConfig {
   variflightApiUrl: string;
   hotelMcpKey: string;
   hotelMcpUrl: string;
+  firecrawlApiKey: string;
+  firecrawlMcpUrl: string;
   amapKey: string;
   amapDefaultLocation: string;
   amapRadius: string;
@@ -395,6 +404,8 @@ interface LocalProviderRawConfig {
   FLIGHT_VARIFLIGHT_URL?: string;
   ROLLINGGO_HOTEL_MCP_KEY?: string;
   ROLLINGGO_HOTEL_MCP_URL?: string;
+  FIRECRAWL_API_KEY?: string;
+  FIRECRAWL_MCP_URL?: string;
   AMAP_KEY?: string;
   AMAP_DEFAULT_LOCATION?: string;
   FOOD_DEFAULT_LOCATION?: string;
@@ -463,6 +474,8 @@ interface LocalProviderRawConfig {
   variflightApiUrl?: string;
   hotelMcpKey?: string;
   hotelMcpUrl?: string;
+  firecrawlApiKey?: string;
+  firecrawlMcpUrl?: string;
   amapKey?: string;
   amapDefaultLocation?: string;
   amapRadius?: string;
@@ -1297,6 +1310,8 @@ let localProviderConfig: LocalProviderConfig = {
   variflightApiUrl: DEFAULT_VARIFLIGHT_API_URL,
   hotelMcpKey: '',
   hotelMcpUrl: '',
+  firecrawlApiKey: '',
+  firecrawlMcpUrl: DEFAULT_FIRECRAWL_MCP_URL,
   amapKey: '',
   amapDefaultLocation: '',
   amapRadius: DEFAULT_AMAP_RADIUS,
@@ -1696,6 +1711,9 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
     variflightApiUrl: config.variflightApiUrl.trim().length > 0 ? config.variflightApiUrl.trim() : DEFAULT_VARIFLIGHT_API_URL,
     hotelMcpKey: config.hotelMcpKey.trim(),
     hotelMcpUrl: config.hotelMcpUrl.trim(),
+    firecrawlApiKey: config.firecrawlApiKey.trim(),
+    firecrawlMcpUrl: config.firecrawlMcpUrl.trim().length > 0 ?
+      config.firecrawlMcpUrl.trim() : DEFAULT_FIRECRAWL_MCP_URL,
     amapKey: config.amapKey.trim(),
     amapDefaultLocation: config.amapDefaultLocation.trim(),
     amapRadius: config.amapRadius.trim().length > 0 ? config.amapRadius.trim() : DEFAULT_AMAP_RADIUS,
@@ -1763,6 +1781,8 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
     ' flightKeyChars=' + localProviderConfig.flightMcpKey.length.toString() +
     ' hotelKeyChars=' + localProviderConfig.hotelMcpKey.length.toString() +
     ' hotelUrlPresent=' + (localProviderConfig.hotelMcpUrl.length > 0 ? 'true' : 'false') +
+    ' firecrawlApiKeyChars=' + localProviderConfig.firecrawlApiKey.length.toString() +
+    ' firecrawlMcpUrlPresent=' + (localProviderConfig.firecrawlMcpUrl.length > 0 ? 'true' : 'false') +
     ' amapKeyChars=' + localProviderConfig.amapKey.length.toString() +
     ' tencentMapKeyChars=' + localProviderConfig.tencentMapKey.length.toString() +
     ' baiduMapAkChars=' + localProviderConfig.baiduMapAk.length.toString() +
@@ -1824,6 +1844,8 @@ export function configureLocalProviderConfigFromRawJson(rawJson: string): void {
     variflightApiUrl: firstText([parsed.VARIFLIGHT_API_URL, parsed.FLIGHT_VARIFLIGHT_URL, parsed.variflightApiUrl]),
     hotelMcpKey: firstText([parsed.ROLLINGGO_HOTEL_MCP_KEY, parsed.hotelMcpKey]),
     hotelMcpUrl: firstText([parsed.ROLLINGGO_HOTEL_MCP_URL, parsed.hotelMcpUrl]),
+    firecrawlApiKey: firstText([parsed.FIRECRAWL_API_KEY, parsed.firecrawlApiKey]),
+    firecrawlMcpUrl: firstText([parsed.FIRECRAWL_MCP_URL, parsed.firecrawlMcpUrl]),
     amapKey: firstText([parsed.AMAP_KEY, parsed.amapKey]),
     amapDefaultLocation: firstText([parsed.AMAP_DEFAULT_LOCATION, parsed.FOOD_DEFAULT_LOCATION, parsed.amapDefaultLocation]),
     amapRadius: firstText([parsed.AMAP_RADIUS, parsed.amapRadius]),
@@ -1893,6 +1915,8 @@ export function localProviderConfigDebugSummary(): string {
     ', flightKey=' + (localProviderConfig.flightMcpKey.length > 0 ? 'present(' + localProviderConfig.flightMcpKey.length.toString() + ')' : 'missing') +
     ', hotelKey=' + (localProviderConfig.hotelMcpKey.length > 0 ? 'present(' + localProviderConfig.hotelMcpKey.length.toString() + ')' : 'missing') +
     ', hotelUrl=' + (localProviderConfig.hotelMcpUrl.length > 0 ? 'present' : 'missing') +
+    ', firecrawlApiKey=' + (localProviderConfig.firecrawlApiKey.length > 0 ? 'present(' + localProviderConfig.firecrawlApiKey.length.toString() + ')' : 'missing') +
+    ', firecrawlMcpUrl=' + (localProviderConfig.firecrawlMcpUrl.length > 0 ? 'present' : 'missing') +
     ', amapKey=' + (localProviderConfig.amapKey.length > 0 ? 'present(' + localProviderConfig.amapKey.length.toString() + ')' : 'missing') +
     ', tencentMapKey=' + (localProviderConfig.tencentMapKey.length > 0 ? 'present(' + localProviderConfig.tencentMapKey.length.toString() + ')' : 'missing') +
     ', baiduMapAk=' + (localProviderConfig.baiduMapAk.length > 0 ? 'present(' + localProviderConfig.baiduMapAk.length.toString() + ')' : 'missing') +
@@ -9739,12 +9763,16 @@ interface DynamicPromptArgs {
 
 const dynamicToolRegistry: DynamicToolRegistry = new DynamicToolRegistry();
 const genericMcpClient: GenericMcpClient = new GenericMcpClient();
+const defaultFirecrawlMcpClient: FirecrawlMcpClient = new FirecrawlMcpClient(
+  new GenericMcpClient(FIRECRAWL_MCP_READ_TIMEOUT_MS)
+);
 const dynamicCredentialStore: AssetCredentialStore = new AssetCredentialStore();
 const socialHubClient: SocialHubClient = new SocialHubClient();
 let dynamicReadExecutor: DynamicReadExecutor = defaultDynamicReadExecutor;
 let gmailMcpClient: GenericMcpClient = genericMcpClient;
 let gmailComposioResultForTests: DynamicGenericToolResult | null = null;
 let hotelMcpClient: GenericMcpClient = genericMcpClient;
+let firecrawlMcpClient: FirecrawlMcpClient = defaultFirecrawlMcpClient;
 let gmailCredentialStore: CredentialStore = dynamicCredentialStore;
 export type HotelTimestampProvider = () => string;
 const defaultHotelTimestampProvider: HotelTimestampProvider = (): string => new Date().toISOString();
@@ -9780,6 +9808,10 @@ export function configureDynamicReadExecutorForTests(executor: DynamicReadExecut
 
 export function configureHotelMcpClientForTests(client: GenericMcpClient | null): void {
   hotelMcpClient = client === null ? genericMcpClient : client;
+}
+
+export function configureFirecrawlMcpClientForTests(client: FirecrawlMcpClient | null): void {
+  firecrawlMcpClient = client === null ? defaultFirecrawlMcpClient : client;
 }
 
 export function configureHotelTimestampProviderForTests(provider: HotelTimestampProvider | null): void {
@@ -14445,6 +14477,57 @@ async function callLocalHotelTool(toolId: string, surfaceId: string, args: Objec
   return hotelFailureA2ui(surfaceId, toolId, result.error?.message === undefined ? '酒店供应商调用失败。' : result.error.message);
 }
 
+async function callLocalFirecrawlTool(
+  toolId: string,
+  prompt: string,
+  surfaceId: string,
+  actionId: string,
+  args: Object | null,
+  emitJsonl: LocalA2uiEmitter | null
+): Promise<string> {
+  const config: FirecrawlConfig = {
+    apiKey: localProviderConfig.firecrawlApiKey,
+    mcpUrl: localProviderConfig.firecrawlMcpUrl
+  };
+  const adapterActionId = toolId === 'web.monitor.create' && actionId === 'model_tool_request' ?
+    '' : actionId;
+  let output: FirecrawlToolOutput;
+  try {
+    output = await firecrawlMcpClient.execute(
+      toolId,
+      prompt,
+      adapterActionId,
+      args,
+      config,
+      emitJsonl === null ? null : (partial: FirecrawlToolOutput): void => {
+        emitJsonl(genericToolResultsA2ui(
+          surfaceId,
+          toolId,
+          partial.results,
+          partial.intent,
+          partial.title
+        ));
+      }
+    );
+  } catch (error) {
+    let message = error instanceof Error ? error.message : JSON.stringify(error);
+    if (config.apiKey.length > 0) {
+      message = message.split(config.apiKey).join('[REDACTED]');
+    }
+    if (config.mcpUrl.length > 0) {
+      message = message.split(config.mcpUrl).join('[REDACTED]');
+    }
+    throw new Error(message.substring(0, 1200));
+  }
+  return genericToolResultsA2ui(
+    surfaceId,
+    toolId,
+    output.results,
+    output.intent,
+    output.title
+  );
+}
+
 async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: string, actionId: string, emitJsonl: LocalA2uiEmitter | null = null, args: Object | null = null): Promise<string> {
   if (toolId === 'whatsapp.message.send') {
     return callLocalWhatsAppTool(prompt, surfaceId, actionId, args);
@@ -14499,6 +14582,9 @@ async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: st
   }
   if (toolId === 'food.search') {
     return callLocalFoodSearch(prompt, surfaceId, emitJsonl, args);
+  }
+  if (isFirecrawlToolId(toolId)) {
+    return callLocalFirecrawlTool(toolId, prompt, surfaceId, actionId, args, emitJsonl);
   }
   return buildDynamicToolJsonl(toolId, prompt, surfaceId, args);
 }

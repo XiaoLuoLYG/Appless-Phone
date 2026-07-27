@@ -243,6 +243,19 @@ export function validateRegisteredPageActionArgs(
       'CALENDAR_EVENT_ARGS_INVALID', 'Calendar delete requires the exact Event ID.'
     );
   }
+  if (actionId === 'web.monitor.create') {
+    const pages = values['pages'];
+    const queries = values['queries'];
+    const pageCount = Array.isArray(pages) ? pages.length : 0;
+    const queryCount = Array.isArray(queries) ? queries.length : 0;
+    return validation(
+      argText(values, ['goal']).length > 0 &&
+        ((pageCount > 0 && pageCount <= 5 && queryCount === 0) ||
+          (queryCount > 0 && queryCount <= 3 && pageCount === 0)),
+      'FIRECRAWL_MONITOR_ARGS_INVALID',
+      'Firecrawl Monitor requires a goal and either pages or queries.'
+    );
+  }
   if (actionId === 'payment.send') {
     return validation(
       originalQuery.length > 0 ||

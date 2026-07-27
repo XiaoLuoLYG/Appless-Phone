@@ -6,10 +6,12 @@ import {
   inputTextAfterPromptSubmit,
   isWelcomeSurface,
   isPromptInputEnabled,
+  nextPendingToolRenderTick,
   nextSendSpinnerRotation,
   runtimeCallbackIsCurrent,
   runtimeOwnerAllowsSurfaceAction,
   runtimeSurfaceIdentityMatches,
+  shouldShowFirecrawlPendingSurface,
   shouldShowWelcome,
   shouldShowQueryPendingSurface,
   shouldApplySurfaceUpdate,
@@ -171,6 +173,39 @@ export default function a2uiHomeStateTest() {
       expect(shouldShowQueryPendingSurface(true, true)).assertTrue();
       expect(shouldShowQueryPendingSurface(true, false)).assertFalse();
       expect(shouldShowQueryPendingSurface(false, true)).assertFalse();
+    });
+
+    it('reveals Firecrawl partial results while the tool is still busy', 0, () => {
+      const pending = surface(7, 'calling_tool');
+      pending.intent = 'social.public.search';
+      pending.components = [{
+        id: 'thinking',
+        component: 'ThinkingStream'
+      }];
+      const partial = surface(8, 'ready');
+      partial.intent = 'social.public.search';
+      partial.components = [{
+        id: 'results',
+        component: 'GenericToolResults'
+      }];
+
+      expect(shouldShowFirecrawlPendingSurface(
+        true,
+        'social.public.search',
+        pending
+      )).assertTrue();
+      expect(shouldShowFirecrawlPendingSurface(
+        true,
+        'social.public.search',
+        partial
+      )).assertFalse();
+    });
+
+    it('forces an HTML refresh when the pending Firecrawl tool changes', 0, () => {
+      expect(nextPendingToolRenderTick(7, '', 'shopping.research')).assertEqual(8);
+      expect(nextPendingToolRenderTick(8, 'shopping.research', 'shopping.research'))
+        .assertEqual(8);
+      expect(nextPendingToolRenderTick(8, 'shopping.research', '')).assertEqual(9);
     });
 
     it('shows welcome only for an idle seed surface with no messages', 0, () => {

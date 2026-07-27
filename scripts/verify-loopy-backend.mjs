@@ -1196,7 +1196,7 @@ function verifySourceContracts() {
     'public compatibility module derives the runtime registry'
   );
   assert(runtimeIds.length === runtimeUniqueIds.size, 'runtime tool ids are unique');
-  assert(runtimeIds.length === 46, 'AIPhone runtime tool registry has expected fixed count', `found ${runtimeIds.length}`);
+  assert(runtimeIds.length === 52, 'AIPhone runtime tool registry has expected fixed count', `found ${runtimeIds.length}`);
   for (const id of [
     'travel.search',
     'train.search',

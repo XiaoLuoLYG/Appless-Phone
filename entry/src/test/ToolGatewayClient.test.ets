@@ -15,12 +15,18 @@ import {
   TrainStructuredData,
   TravelStructuredData
 } from '@loop/agent-core';
-import { genericToolResults, dynamicToolConnect } from '@loop/agent-core';
+import { genericToolResults, dynamicToolConnect, summaryData } from '@loop/agent-core';
 import { planA2uiPartialUpdate, A2uiPartialUpdateResult } from '@loop/agent-core';
 import { buildSystemFoodNavigationUri, foodMapsLatLng } from '@loop/agent-core';
 import { build12306BookingUrl, trainLowestAvailablePriceForTest } from '@loop/agent-core';
 import { DynamicGenericToolResult } from '@loop/agent-core';
-import { DynamicToolRegistration, GenericMcpClient, McpToolCallResult, MemoryCredentialStore } from '@loop/agent-core';
+import { DynamicPreflightResult, DynamicToolRegistration, GenericMcpClient, McpToolCallResult, MemoryCredentialStore } from '@loop/agent-core';
+import {
+  DEFAULT_FIRECRAWL_MCP_URL,
+  FirecrawlConfig,
+  FirecrawlMcpClient,
+  FirecrawlToolOutput
+} from '@loop/agent-core';
 import { GMAIL_ACCESS_TOKEN_REF } from '@loop/agent-core';
 import { MailDetail, MailDetailRequest, MailDraftArgs, MailReplyCommand, MailSearchArgs } from '@loop/agent-core';
 import { gmailReplyDraftAction } from '@loop/agent-core';
@@ -37,6 +43,7 @@ import {
   configureGmailCredentialStoreForTests,
   configureGmailMcpClientForTests,
   configureMailDetailReaderForTests,
+  configureFirecrawlMcpClientForTests,
   configureHotelMcpClientForTests,
   configureHotelTimestampProviderForTests,
   configureLocalPaymentAccountBookJson,
@@ -221,8 +228,122 @@ class ThrowingHotelMcpClient extends GenericMcpClient {
   }
 }
 
+class ScriptedFirecrawlMcpClient extends FirecrawlMcpClient {
+  callCount: number = 0;
+  lastActionId: string = '';
+  lastConfig: FirecrawlConfig = {
+    apiKey: '',
+    mcpUrl: ''
+  };
+
+  constructor() {
+    super(new GenericMcpClient());
+  }
+
+  async execute(
+    toolId: string,
+    _prompt: string,
+    _actionId: string,
+    _args: Object | null,
+    config: FirecrawlConfig,
+    onPartial: ((output: FirecrawlToolOutput) => void) | null = null
+  ): Promise<FirecrawlToolOutput> {
+    this.callCount += 1;
+    this.lastActionId = _actionId;
+    this.lastConfig = config;
+    const first: DynamicGenericToolResult = {
+      sourceTag: 'Firecrawl',
+      toolName: toolId,
+      title: 'Firecrawl 固定路由',
+      status: 'success',
+      summary: '已通过固定 Firecrawl 客户端执行。',
+      rows: [],
+      rawPreview: ''
+    };
+    if (toolId === 'social.public.search' && onPartial !== null) {
+      onPartial({
+        title: '小红书公开搜索',
+        intent: toolId,
+        results: [first]
+      });
+    }
+    const results: DynamicGenericToolResult[] = [first];
+    if (toolId === 'social.public.search') {
+      results.push({
+        sourceTag: 'Firecrawl',
+        toolName: toolId,
+        title: '第二条笔记',
+        status: 'success',
+        summary: '第二条已完成。',
+        rows: [],
+        rawPreview: ''
+      });
+    }
+    return {
+      title: 'Firecrawl 固定路由',
+      intent: toolId,
+      results: results
+    };
+  }
+}
+
+class NoCallFirecrawlGenericMcpClient extends GenericMcpClient {
+  preflightCount: number = 0;
+  callCount: number = 0;
+
+  async preflight(
+    _registration: DynamicToolRegistration,
+    _credentialValue: string
+  ): Promise<DynamicPreflightResult> {
+    this.preflightCount += 1;
+    throw new Error('Monitor preview must not preflight.');
+  }
+
+  async callToolPayload(
+    _registration: DynamicToolRegistration,
+    _credentialValue: string,
+    _args: Object
+  ): Promise<McpToolCallResult> {
+    this.callCount += 1;
+    throw new Error('Monitor preview must not call MCP.');
+  }
+}
+
+class ThrowingFirecrawlMcpClient extends FirecrawlMcpClient {
+  constructor() {
+    super(new GenericMcpClient());
+  }
+
+  async execute(
+    _toolId: string,
+    _prompt: string,
+    _actionId: string,
+    _args: Object | null,
+    config: FirecrawlConfig
+  ): Promise<FirecrawlToolOutput> {
+    throw new Error(
+      'Firecrawl upstream reset for key ' + config.apiKey + ' at ' + config.mcpUrl
+    );
+  }
+}
+
 interface YouTubeSearchArgsFixture {
   query: string;
+}
+
+interface FirecrawlPageArgsFixture {
+  url: string;
+}
+
+interface FirecrawlSocialArgsFixture {
+  query: string;
+  platforms: string[];
+}
+
+interface FirecrawlMonitorCreateArgsFixture {
+  pages: string[];
+  goal: string;
+  confirmed?: boolean;
 }
 
 interface MediaVideoSearchArgsFixture {
@@ -1595,6 +1716,254 @@ export default function toolGatewayClientTest() {
       expect(error.status).assertEqual('error');
       expect(error.error?.code).assertEqual('HOTEL_CONFIG_MISSING');
       expect(error.sources.length).assertEqual(0);
+    });
+
+    it('loads uppercase Firecrawl config with the default MCP URL without exposing the key', 0, async () => {
+      const client = new ScriptedFirecrawlMcpClient();
+      const secret = 'fc-uppercase-secret';
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          FIRECRAWL_API_KEY: secret
+        }));
+        configureFirecrawlMcpClientForTests(client);
+        const summary = localProviderConfigDebugSummary();
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const args: FirecrawlPageArgsFixture = { url: 'https://www.firecrawl.dev/' };
+
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'web.page.read',
+          '读取 Firecrawl 文档',
+          'surface_firecrawl_uppercase',
+          'model_tool_request',
+          noop,
+          null,
+          args
+        );
+
+        expect(client.callCount).assertEqual(1);
+        expect(client.lastConfig.apiKey).assertEqual(secret);
+        expect(client.lastConfig.mcpUrl).assertEqual(DEFAULT_FIRECRAWL_MCP_URL);
+        expect(summary.indexOf('firecrawlApiKey=present(19)')).assertLarger(-1);
+        expect(summary.indexOf('firecrawlMcpUrl=present')).assertLarger(-1);
+        expect(summary.indexOf(secret)).assertEqual(-1);
+        expect(summary.indexOf(DEFAULT_FIRECRAWL_MCP_URL)).assertEqual(-1);
+        expect(result.raw.indexOf(secret)).assertEqual(-1);
+        expect(JSON.stringify(result.surface).indexOf(secret)).assertEqual(-1);
+        expect(genericToolResults(result.surface)[0].sourceTag).assertEqual('Firecrawl');
+      } finally {
+        configureFirecrawlMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('loads camel-case Firecrawl config aliases', 0, async () => {
+      const client = new ScriptedFirecrawlMcpClient();
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          firecrawlApiKey: 'fc-camel-secret',
+          firecrawlMcpUrl: 'https://firecrawl.example.test/mcp'
+        }));
+        configureFirecrawlMcpClientForTests(client);
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const args: FirecrawlPageArgsFixture = { url: 'https://example.com/article' };
+
+        await callToolGateway(
+          defaultToolGatewayUrl(),
+          'web.page.read',
+          '读取指定网页',
+          'surface_firecrawl_camel',
+          'model_tool_request',
+          noop,
+          null,
+          args
+        );
+
+        expect(client.callCount).assertEqual(1);
+        expect(client.lastConfig.apiKey).assertEqual('fc-camel-secret');
+        expect(client.lastConfig.mcpUrl).assertEqual('https://firecrawl.example.test/mcp');
+      } finally {
+        configureFirecrawlMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('streams each Firecrawl social snapshot through the existing local surface callback', 0,
+      async () => {
+        const client = new ScriptedFirecrawlMcpClient();
+        try {
+          configureLocalProviderConfigFromRawJson(JSON.stringify({
+            FIRECRAWL_API_KEY: 'fc-stream-secret'
+          }));
+          configureFirecrawlMcpClientForTests(client);
+          const counts: number[] = [];
+          const onSurface = (surface: A2uiSurfaceState, _raw: string): void => {
+            const results = genericToolResults(surface);
+            if (results.length > 0) {
+              counts.push(results.length);
+            }
+          };
+          const args: FirecrawlSocialArgsFixture = {
+            query: '深圳周末去哪玩',
+            platforms: ['小红书']
+          };
+
+          const result = await callToolGateway(
+            defaultToolGatewayUrl(),
+            'social.public.search',
+            '搜索小红书公开笔记',
+            'surface_firecrawl_stream',
+            'model_tool_request',
+            onSurface,
+            null,
+            args
+          );
+
+          expect(JSON.stringify(counts)).assertEqual('[1,2]');
+          expect(genericToolResults(result.surface).length).assertEqual(2);
+        } finally {
+          configureFirecrawlMcpClientForTests(null);
+          configureLocalProviderConfigFromRawJson('{}');
+        }
+      });
+
+    it('returns truthful Firecrawl needs_auth instead of dynamic discovery when the key is missing', 0, async () => {
+      try {
+        configureFirecrawlMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const args: FirecrawlPageArgsFixture = { url: 'https://example.com/article' };
+
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'web.page.read',
+          '读取指定网页',
+          'surface_firecrawl_missing_key',
+          'model_tool_request',
+          noop,
+          null,
+          args
+        );
+        const rendered = genericToolResults(result.surface);
+
+        expect(result.ok).assertTrue();
+        expect(rendered.length).assertEqual(1);
+        expect(rendered[0].sourceTag).assertEqual('Firecrawl');
+        expect(rendered[0].toolName).assertEqual('web.page.read');
+        expect(rendered[0].status).assertEqual('needs_auth');
+        expect(result.raw.indexOf('dynamicToolConnect')).assertEqual(-1);
+      } finally {
+        configureFirecrawlMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('turns a model-requested Monitor create into a zero-call confirmation preview', 0, async () => {
+      const genericClient = new NoCallFirecrawlGenericMcpClient();
+      const client = new FirecrawlMcpClient(genericClient);
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          FIRECRAWL_API_KEY: 'fc-monitor-preview-key'
+        }));
+        configureFirecrawlMcpClientForTests(client);
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const args: FirecrawlMonitorCreateArgsFixture = {
+          pages: ['https://example.com/releases'],
+          goal: '监控新版本'
+        };
+
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'web.monitor.create',
+          '监控这个发布页面',
+          'surface_firecrawl_monitor_preview',
+          'model_tool_request',
+          noop,
+          null,
+          args
+        );
+        const rendered = genericToolResults(result.surface);
+
+        expect(rendered.length).assertEqual(1);
+        expect(rendered[0].status).assertEqual('confirm_required');
+        expect(JSON.stringify(rendered[0].actions).indexOf('web.monitor.create.confirm')).assertLarger(-1);
+        expect(genericClient.preflightCount).assertEqual(0);
+        expect(genericClient.callCount).assertEqual(0);
+      } finally {
+        configureFirecrawlMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('preserves the direct Monitor create confirmation action at the gateway boundary', 0, async () => {
+      const client = new ScriptedFirecrawlMcpClient();
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          FIRECRAWL_API_KEY: 'fc-monitor-confirm-key'
+        }));
+        configureFirecrawlMcpClientForTests(client);
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const args: FirecrawlMonitorCreateArgsFixture = {
+          pages: ['https://example.com/releases'],
+          goal: '监控新版本',
+          confirmed: true
+        };
+
+        await callToolGateway(
+          defaultToolGatewayUrl(),
+          'web.monitor.create',
+          '确认创建监控',
+          'surface_firecrawl_monitor_confirm',
+          'web.monitor.create.confirm',
+          noop,
+          null,
+          args
+        );
+
+        expect(client.lastActionId).assertEqual('web.monitor.create.confirm');
+      } finally {
+        configureFirecrawlMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('redacts Firecrawl key and URL from gateway exception JSONL, A2UI, and summary', 0, async () => {
+      const secret = 'fc-throwing-gateway-secret';
+      const mcpUrl = 'https://secret-firecrawl.example.test/mcp';
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          FIRECRAWL_API_KEY: secret,
+          FIRECRAWL_MCP_URL: mcpUrl
+        }));
+        configureFirecrawlMcpClientForTests(new ThrowingFirecrawlMcpClient());
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const args: FirecrawlPageArgsFixture = { url: 'https://example.com/article' };
+
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'web.page.read',
+          '读取指定网页',
+          'surface_firecrawl_throwing',
+          'model_tool_request',
+          noop,
+          null,
+          args
+        );
+        const surfaceJson = JSON.stringify(result.surface);
+        const summary = summaryData(result.surface).text;
+
+        expect(result.raw.indexOf(secret)).assertEqual(-1);
+        expect(result.raw.indexOf(mcpUrl)).assertEqual(-1);
+        expect(surfaceJson.indexOf(secret)).assertEqual(-1);
+        expect(surfaceJson.indexOf(mcpUrl)).assertEqual(-1);
+        expect(summary.indexOf(secret)).assertEqual(-1);
+        expect(summary.indexOf(mcpUrl)).assertEqual(-1);
+        expect(result.raw.indexOf('Firecrawl upstream reset')).assertLarger(-1);
+        expect(summary.indexOf('Firecrawl upstream reset')).assertLarger(-1);
+      } finally {
+        configureFirecrawlMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
     });
 
     it('returns a structured missing-config hotel error', 0, async () => {

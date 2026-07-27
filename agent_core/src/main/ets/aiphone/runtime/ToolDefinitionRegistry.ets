@@ -558,6 +558,78 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     outputSchema: 'genericToolResults',
     a2uiComponent: 'GenericToolResults',
     actions: ['ride.driver.location.refresh', 'ride.order.cancel']
+  },
+  {
+    toolId: 'web.research.search',
+    domain: 'firecrawl',
+    intent: 'web.research.search',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key'],
+    inputSchema: 'webResearchQuery',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['web.page.read', 'web.open.source']
+  },
+  {
+    toolId: 'web.page.read',
+    domain: 'firecrawl',
+    intent: 'web.page.read',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key'],
+    inputSchema: 'webPageReadRequest',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['web.open.source']
+  },
+  {
+    toolId: 'shopping.research',
+    domain: 'firecrawl',
+    intent: 'shopping.research',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key'],
+    inputSchema: 'shoppingResearchQuery',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['web.page.read', 'web.open.source']
+  },
+  {
+    toolId: 'social.public.search',
+    domain: 'firecrawl',
+    intent: 'social.public.search',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key'],
+    inputSchema: 'socialPublicSearchQuery',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['web.page.read', 'web.open.source']
+  },
+  {
+    toolId: 'web.monitor.create',
+    domain: 'firecrawl',
+    intent: 'web.monitor.create',
+    riskLevel: 'confirm_required',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key'],
+    inputSchema: 'webMonitorCreateRequest',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['web.monitor.create.confirm']
+  },
+  {
+    toolId: 'web.monitor.list',
+    domain: 'firecrawl',
+    intent: 'web.monitor.list',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key'],
+    inputSchema: 'webMonitorListQuery',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['web.monitor.detail', 'web.monitor.checks', 'web.monitor.run', 'web.monitor.pause', 'web.monitor.resume', 'web.monitor.delete']
   }
 ];
 
@@ -668,6 +740,18 @@ export function toolPlanningDescriptionForToolId(toolId: string): string {
     description += '. Use for taxi/ride-hailing fare estimate requests. Shows Didi price estimates only and also returns Didi/Amap app ride links. Required input must include args.origin/from, args.destination/to, and args.city when the city is known or inferable from the user text. If origin, destination, or city is missing, ask for it; never guess coordinates. Never create, cancel, query, or track ride orders, even if the user says "直接帮我叫车".';
   } else if (definition.toolId === 'ride.app.link') {
     description += '. Use when the user wants taxi/ride-hailing app links without prices. Returns Didi and Amap app ride links for user-tapped handoff only. Required input must include args.origin/from, args.destination/to, and args.city when the city is known or inferable from the user text. Do not describe Amap as a price estimate provider. Never create, cancel, query, or track ride orders.';
+  } else if (definition.toolId === 'web.research.search') {
+    description += '. Input must be JSON with args.query and optional args.recency, args.domains, args.maxResults; maxResults must be 1..10. Search open public web only and cite URLs.';
+  } else if (definition.toolId === 'web.page.read') {
+    description += '. Input must be JSON with args.url and optional args.question, args.includeFullText. Read one public HTTP(S) URL only; no recursive crawl.';
+  } else if (definition.toolId === 'shopping.research') {
+    description += '. Use for natural single-product price queries. Input must be JSON with args.query and optional args.preferences, args.domains, args.maxProducts; maxProducts cap 3. Return observed price text only and does not claim stock or purchases.';
+  } else if (definition.toolId === 'social.public.search') {
+    description += '. Input must be JSON with args.query, args.platforms fixed to ["xiaohongshu"], and optional args.recency, args.maxResults. Search Xiaohongshu public indexed pages only; no login/CAPTCHA bypass.';
+  } else if (definition.toolId === 'web.monitor.create') {
+    description += '. Input must provide pages max 5 XOR queries max 3, required goal, and optional name, scheduleText, timezone, email. The first call is preview only.';
+  } else if (definition.toolId === 'web.monitor.list') {
+    description += '. Read cloud state; monitor mutations come only from exact visible actions with current IDs.';
   }
   return description;
 }
@@ -752,6 +836,11 @@ export function isKnownDomainToolId(toolId: string): boolean {
 export function isGmailToolId(toolId: string): boolean {
   const definition = toolDefinitionForToolId(toolId);
   return definition !== null && definition.domain === 'gmail';
+}
+
+export function isFirecrawlToolId(toolId: string): boolean {
+  const definition = toolDefinitionForToolId(toolId);
+  return definition !== null && definition.domain === 'firecrawl';
 }
 
 export function isMailToolId(toolId: string): boolean {

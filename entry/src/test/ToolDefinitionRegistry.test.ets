@@ -9,6 +9,7 @@ import {
   backendLabel,
   dataAgentToolDefinitions,
   isCalendarToolId,
+  isFirecrawlToolId,
   isGmailToolId,
   isHotelToolId,
   isKnownDomainToolId,
@@ -49,6 +50,16 @@ function hotelDefinitions(definitions: ToolDefinition[]): ToolDefinition[] {
     }
   }
   return hotels;
+}
+
+function firecrawlDefinitions(definitions: ToolDefinition[]): ToolDefinition[] {
+  const firecrawl: ToolDefinition[] = [];
+  for (let index = 0; index < definitions.length; index++) {
+    if (definitions[index].domain === 'firecrawl') {
+      firecrawl.push(definitions[index]);
+    }
+  }
+  return firecrawl;
 }
 
 export default function toolDefinitionRegistryTest() {
@@ -259,6 +270,98 @@ export default function toolDefinitionRegistryTest() {
       expect(description.indexOf('Never add synonyms')).assertLarger(-1);
       expect(description.indexOf('never "ECCV OR paper OR manuscript OR review OR conference"')).assertLarger(-1);
       expect(description.indexOf('expand the Gmail query with likely English terms')).assertEqual(-1);
+    });
+
+    it('registers fixed Firecrawl business tools with aligned public contracts', 0, () => {
+      const expectedIds: string[] = [
+        'web.research.search',
+        'web.page.read',
+        'shopping.research',
+        'social.public.search',
+        'web.monitor.create',
+        'web.monitor.list'
+      ];
+      expect(expectedIds.map((id: string): boolean => isFirecrawlToolId(id)).join(','))
+        .assertEqual('true,true,true,true,true,true');
+      expect((toolDefinitionForToolId('web.monitor.create') as ToolDefinition).riskLevel)
+        .assertEqual('confirm_required');
+      expect((toolDefinitionForToolId('web.monitor.list') as ToolDefinition).riskLevel)
+        .assertEqual('read');
+      expect(JSON.stringify(firecrawlDefinitions(allAiphoneToolDefinitions())))
+        .assertEqual(JSON.stringify(firecrawlDefinitions(allToolDefinitions())));
+
+      const expectedContracts: string[] = [
+        'web.research.search|read|webResearchQuery|web.page.read,web.open.source',
+        'web.page.read|read|webPageReadRequest|web.open.source',
+        'shopping.research|read|shoppingResearchQuery|web.page.read,web.open.source',
+        'social.public.search|read|socialPublicSearchQuery|web.page.read,web.open.source',
+        'web.monitor.create|confirm_required|webMonitorCreateRequest|web.monitor.create.confirm',
+        'web.monitor.list|read|webMonitorListQuery|web.monitor.detail,web.monitor.checks,web.monitor.run,web.monitor.pause,web.monitor.resume,web.monitor.delete'
+      ];
+      const contracts = firecrawlDefinitions(allToolDefinitions()).map((definition: ToolDefinition): string => {
+        return definition.toolId + '|' + definition.riskLevel + '|' + definition.inputSchema + '|' + definition.actions.join(',');
+      });
+      expect(contracts.join(';')).assertEqual(expectedContracts.join(';'));
+      for (let index = 0; index < firecrawlDefinitions(allToolDefinitions()).length; index++) {
+        const definition = firecrawlDefinitions(allToolDefinitions())[index];
+        expect(definition.domain).assertEqual('firecrawl');
+        expect(definition.backendPriority.join(',')).assertEqual('local_adapter');
+        expect(definition.authModes.join(',')).assertEqual('provider_key');
+        expect(definition.outputSchema).assertEqual('genericToolResults');
+        expect(definition.a2uiComponent).assertEqual('GenericToolResults');
+      }
+    });
+
+    it('gives the model bounded public-web Firecrawl contracts', 0, () => {
+      const descriptions: string[] = [
+        aiphoneToolDescriptionForModel('web.research.search'),
+        aiphoneToolDescriptionForModel('web.page.read'),
+        aiphoneToolDescriptionForModel('shopping.research'),
+        aiphoneToolDescriptionForModel('social.public.search'),
+        aiphoneToolDescriptionForModel('web.monitor.create'),
+        aiphoneToolDescriptionForModel('web.monitor.list')
+      ];
+      expect(descriptions[0].indexOf('args.query')).assertLarger(-1);
+      expect(descriptions[0].indexOf('recency')).assertLarger(-1);
+      expect(descriptions[0].indexOf('domains')).assertLarger(-1);
+      expect(descriptions[0].indexOf('maxResults')).assertLarger(-1);
+      expect(descriptions[0].indexOf('1..10')).assertLarger(-1);
+      expect(descriptions[0].indexOf('cite URLs')).assertLarger(-1);
+      expect(descriptions[1].indexOf('args.url')).assertLarger(-1);
+      expect(descriptions[1].indexOf('args.question')).assertLarger(-1);
+      expect(descriptions[1].indexOf('includeFullText')).assertLarger(-1);
+      expect(descriptions[1].indexOf('one public HTTP(S) URL')).assertLarger(-1);
+      expect(descriptions[1].indexOf('no recursive crawl')).assertLarger(-1);
+      expect(descriptions[2].indexOf('maxProducts')).assertLarger(-1);
+      expect(descriptions[2].indexOf('args.query')).assertLarger(-1);
+      expect(descriptions[2].indexOf('args.preferences')).assertLarger(-1);
+      expect(descriptions[2].indexOf('args.domains')).assertLarger(-1);
+      expect(descriptions[2].indexOf('cap 3')).assertLarger(-1);
+      expect(descriptions[2].indexOf('natural single-product price queries')).assertLarger(-1);
+      expect(descriptions[3].indexOf('["xiaohongshu"]')).assertLarger(-1);
+      expect(descriptions[2].indexOf('observed price text only')).assertLarger(-1);
+      expect(descriptions[2].indexOf('does not claim stock or purchases')).assertLarger(-1);
+      expect(descriptions[3].indexOf('platforms')).assertLarger(-1);
+      expect(descriptions[3].indexOf('args.query')).assertLarger(-1);
+      expect(descriptions[3].indexOf('recency')).assertLarger(-1);
+      expect(descriptions[3].indexOf('maxResults')).assertLarger(-1);
+      expect(descriptions[3].indexOf('public indexed pages only')).assertLarger(-1);
+      expect(descriptions[3].indexOf('login/CAPTCHA bypass')).assertLarger(-1);
+      expect(descriptions[4].indexOf('pages max 5 XOR queries max 3')).assertLarger(-1);
+      expect(descriptions[4].indexOf('required goal')).assertLarger(-1);
+      expect(descriptions[4].indexOf('name')).assertLarger(-1);
+      expect(descriptions[4].indexOf('scheduleText')).assertLarger(-1);
+      expect(descriptions[4].indexOf('timezone')).assertLarger(-1);
+      expect(descriptions[4].indexOf('email')).assertLarger(-1);
+      expect(descriptions[4].indexOf('preview only')).assertLarger(-1);
+      expect(descriptions[5].indexOf('Read cloud state')).assertLarger(-1);
+      expect(descriptions[5].indexOf('exact visible actions with current IDs')).assertLarger(-1);
+      const forbidden: string[] = ['firecrawl_agent', 'firecrawl_interact', 'login bypass', 'order', 'inventory', 'payment'];
+      for (let index = 0; index < descriptions.length; index++) {
+        for (let forbiddenIndex = 0; forbiddenIndex < forbidden.length; forbiddenIndex++) {
+          expect(descriptions[index].indexOf(forbidden[forbiddenIndex])).assertEqual(-1);
+        }
+      }
     });
 
     it('registers Calendar writes and Maps POI search explicitly', 0, () => {
@@ -523,10 +626,10 @@ export default function toolDefinitionRegistryTest() {
       const action: ToolDefinition[] = actionAgentToolDefinitions();
       const ids: string[] = data.concat(action).map((item: ToolDefinition): string => item.toolId);
 
-      expect(all.length).assertEqual(46);
-      expect(data.length).assertEqual(25);
-      expect(action.length).assertEqual(21);
-      expect(new Set<string>(ids).size).assertEqual(46);
+      expect(all.length).assertEqual(52);
+      expect(data.length).assertEqual(30);
+      expect(action.length).assertEqual(22);
+      expect(new Set<string>(ids).size).assertEqual(52);
       expect(all.filter((item: ToolDefinition): boolean => item.riskLevel === 'blocked').length)
         .assertEqual(0);
       expect(ids.indexOf('hotel.navigate') >= 0).assertTrue();

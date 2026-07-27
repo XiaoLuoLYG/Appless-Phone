@@ -122,6 +122,17 @@ Copy `tool-gateway/.env.example` to `tool-gateway/.env.local`, then fill the key
 node scripts/sync-provider-config.mjs
 ```
 
+### Firecrawl Hosted MCP
+
+```env
+FIRECRAWL_API_KEY=
+FIRECRAWL_MCP_URL=https://mcp.firecrawl.dev/v2/mcp
+```
+
+Run `node scripts/sync-provider-config.mjs` before rebuilding the HAP. The HAP carries this key and connects directly to Firecrawl Hosted MCP; the optional Node gateway is not in that runtime path. Firecrawl account credits and Monitor checks are billed by Firecrawl. Hosted MCP and target pages must be reachable from the phone, so some networks require VPN access.
+
+Public social search is fixed to 小红书 public indexed pages. Results are supplementary and may truthfully be `PARTIAL`; the app does not automate login, bypass CAPTCHA, or read private content. Monitor state is Firecrawl cloud state that survives App exit, but this version has no native HarmonyOS push channel.
+
 ## Recommended Real Providers
 
 ### Train

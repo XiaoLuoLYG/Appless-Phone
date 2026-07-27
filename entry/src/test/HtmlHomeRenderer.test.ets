@@ -9,8 +9,14 @@ import {
 } from '@loop/agent-core';
 import { renderHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeRenderer';
 import { buildMultiTaskHomePayload } from '../main/ets/pages/A2uiHome/html/HtmlMultiTaskHomeRenderer';
+import { createFirecrawlPendingDocument } from '../main/ets/pages/A2uiHome/html/HtmlFirecrawlHomeRenderer';
 import { createHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeSnapshot';
-import { HtmlHomeAction, HtmlHomeBlock, HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
+import {
+  HtmlHomeAction,
+  HtmlHomeBlock,
+  HtmlHomeDocument,
+  HtmlHomeMetric
+} from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
 import { parseHtmlHomeAction } from '../main/ets/pages/A2uiHome/components/HtmlHomeSurfaceView';
 import { renderRideDriverMapHtml } from '../main/ets/pages/A2uiHome/html/RideDriverMapHtmlRenderer';
 
@@ -105,6 +111,165 @@ function dynamicCredentialDocumentFixture(): HtmlHomeDocument {
     rows: [],
     actions: []
   }];
+  return doc;
+}
+
+function firecrawlDocumentFixture(toolName: string = 'web.research.search'): HtmlHomeDocument {
+  const doc = documentFixture();
+  const monitorConfirmArgs = JSON.parse(
+    '{"name":"Appless Firecrawl QA","confirmed":true}'
+  ) as Object;
+  doc.kind = 'dynamic-tools';
+  doc.title = toolName === 'web.page.read' ? '网页读取' :
+    (toolName === 'shopping.research' ? '商品研究' :
+    (toolName === 'social.public.search' ? '小红书公开搜索' :
+      (toolName === 'web.monitor.create' ? '创建网页监控' : '网页研究')));
+  doc.subtitle = '仅展示可验证的公开来源';
+  doc.blocks = [{
+    id: 'firecrawl-overview',
+    kind: 'generic-tool-result',
+    title: toolName === 'web.monitor.create' ? '确认创建 Firecrawl Monitor' :
+      (toolName === 'web.page.read' ? 'Firecrawl Monitor 使用说明' :
+        (toolName === 'shopping.research' ? '商品研究综述' :
+          (toolName === 'social.public.search' ? '小红书公开结果' : '网页研究综述'))),
+    subtitle: toolName === 'web.monitor.create' ? '确认后才会调用 Provider 创建真实 Monitor。' :
+      '已核验 2 个公开来源。',
+    status: toolName === 'web.monitor.create' ? 'confirm_required' : 'success',
+    source: 'Firecrawl',
+    metrics: [
+      { label: 'source', value: 'Firecrawl' },
+      { label: 'toolName', value: toolName }
+    ],
+    rows: toolName === 'web.monitor.create' ? [
+      { label: 'Monitor 名称', value: 'Appless Firecrawl QA' },
+      { label: '页面 1', value: 'https://www.firecrawl.dev/changelog' },
+      { label: '计划', value: 'daily' },
+      { label: '时区', value: 'Asia/Shanghai' }
+    ] : (toolName === 'web.page.read' ? [
+      { label: 'URL', value: 'https://www.firecrawl.dev/monitor' }
+    ] : (toolName === 'shopping.research' ? [
+      { label: '品牌', value: 'Firecrawl' },
+      { label: '价格', value: '¥ 99' },
+      { label: '规格', value: '公开页面价格' },
+      { label: 'URL', value: 'https://www.firecrawl.dev/monitor' }
+    ] : (toolName === 'social.public.search' ? [
+      { label: 'URL', value: 'https://www.xiaohongshu.com/explore/example' },
+      { label: '作者', value: '周末探店员' },
+      { label: '发布时间', value: '07-24' },
+      { label: '封面图', value: 'https://sns-webpic-qc.xhscdn.com/note-cover.webp' },
+      {
+        label: '图片列表',
+        value: 'https://sns-webpic-qc.xhscdn.com/note-cover.webp\n' +
+          'https://sns-webpic-qc.xhscdn.com/note-second.webp\n' +
+          'https://sns-webpic-qc.xhscdn.com/note-third.webp'
+      },
+      { label: '图片数量', value: '3' },
+      { label: '内容类型', value: '视频' },
+      { label: '视频时长', value: '0:42' },
+      { label: '完整正文', value: '这是应用内展示的完整笔记正文。\n第二段继续展示笔记内容。' }
+    ] : [
+      { label: 'Search ID', value: 'search-current' },
+      { label: 'Search Credits', value: '2' }
+    ]))),
+    actions: toolName === 'web.monitor.create' ? [{
+      id: 'web.monitor.create.confirm',
+      label: '确认创建监控',
+      prompt: '确认创建 Firecrawl Monitor',
+      variant: 'primary',
+      kind: 'prompt',
+      args: monitorConfirmArgs
+    }] : [{
+      id: 'web.open.source',
+      label: '打开原网页',
+      prompt: 'https://www.firecrawl.dev/monitor',
+      variant: 'secondary',
+      kind: 'client'
+    }]
+  }];
+  doc.actions = doc.blocks[0].actions.slice();
+  return doc;
+}
+
+function shoppingSourceFixture(
+  id: string,
+  url: string,
+  price: string,
+  eligible: boolean,
+  priceFen: number,
+  comparisonKey: string,
+  priceKind: string = 'public'
+): HtmlHomeBlock {
+  const action: HtmlHomeAction = {
+    id: 'web.open.source',
+    label: '打开原网页',
+    prompt: url,
+    variant: 'secondary',
+    kind: 'client'
+  };
+  const readAction: HtmlHomeAction = {
+    id: 'web.page.read',
+    label: '深入阅读此来源',
+    prompt: '深入阅读此来源',
+    variant: 'secondary',
+    kind: 'prompt'
+  };
+  return {
+    id: id,
+    kind: 'generic-tool-result',
+    title: 'Sony WH-1000XM6 黑色',
+    subtitle: '公开页面商品信息。',
+    status: 'success',
+    source: 'Firecrawl',
+    toolId: 'shopping.research',
+    metrics: [
+      { label: 'source', value: 'Firecrawl' },
+      { label: 'toolName', value: 'shopping.research' }
+    ],
+    rows: [
+      { label: '品牌', value: 'Sony' },
+      { label: '平台', value: id === 'shopping-jd' ? '京东' : '苏宁易购' },
+      { label: '卖家', value: id === 'shopping-jd' ? '京东自营' : '苏宁自营' },
+      { label: priceKind === 'estimated' ? '预估到手价' : '价格', value: price },
+      { label: 'comparisonEligible', value: eligible ? 'true' : 'false' },
+      { label: 'comparisonPriceFen', value: priceFen.toString() },
+      { label: 'comparisonPriceKind', value: priceKind },
+      { label: 'comparisonKey', value: comparisonKey },
+      { label: '规格', value: 'WH-1000XM6 · 黑色' },
+      { label: '优惠券', value: id === 'shopping-jd' ? '满 3000 减 100' : '无公开优惠券' },
+      { label: '运费', value: '包邮' },
+      { label: '抓取时间', value: '2026-07-27 10:00' },
+      { label: '数据页面', value: id === 'shopping-jd' ?
+        'https://detail.zol.com.cn/headphone/sony-wh-1000xm6.html' :
+        'https://product.pconline.com.cn/headphone/sony-wh-1000xm6.html' },
+      { label: '市场', value: 'CN' },
+      { label: '币种', value: 'CNY' },
+      { label: 'URL', value: url }
+    ],
+    actions: [action, readAction]
+  };
+}
+
+function shoppingComparisonDocumentFixture(): HtmlHomeDocument {
+  const doc = firecrawlDocumentFixture('shopping.research');
+  doc.blocks = [
+    shoppingSourceFixture(
+      'shopping-jd',
+      'https://item.jd.com/sony-wh-1000xm6',
+      '¥2,999',
+      true,
+      299900,
+      'sony|wh-1000xm6 黑色'
+    ),
+    shoppingSourceFixture(
+      'shopping-suning',
+      'https://product.suning.com/sony-wh-1000xm6',
+      '¥3,199',
+      true,
+      319900,
+      'sony|wh-1000xm6 黑色'
+    )
+  ];
+  doc.actions = doc.blocks[0].actions.concat(doc.blocks[1].actions);
   return doc;
 }
 
@@ -2432,6 +2597,278 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('第三方预订（离开 Appless）：')).assertEqual(-1);
       expect(html.indexOf('下单成功')).assertEqual(-1);
       expect(html.indexOf('订单编号')).assertEqual(-1);
+    });
+
+    it('renders a dedicated Firecrawl workspace with visible source and monitor actions', 0, () => {
+      const researchHtml = renderHtmlHomeDocument(firecrawlDocumentFixture());
+      const pageHtml = renderHtmlHomeDocument(firecrawlDocumentFixture('web.page.read'));
+      const productHtml = renderHtmlHomeDocument(shoppingComparisonDocumentFixture());
+      const socialDoc = firecrawlDocumentFixture('social.public.search');
+      socialDoc.blocks[0].actions.unshift({
+        id: 'dynamic_retry',
+        label: '重新查询',
+        prompt: '重新调用动态工具 social.public.search',
+        variant: 'primary',
+        kind: 'prompt'
+      });
+      socialDoc.blocks[0].actions.push(socialDoc.blocks[0].actions[1]);
+      socialDoc.blocks[0].status = 'partial';
+      const socialHtml = renderHtmlHomeDocument(socialDoc);
+      const monitorHtml = renderHtmlHomeDocument(firecrawlDocumentFixture('web.monitor.create'));
+      const pendingHtml = renderHtmlHomeDocument(createFirecrawlPendingDocument('web.research.search'), true);
+
+      expect(researchHtml.indexOf('data-scene="firecrawl"')).assertLarger(-1);
+      expect(researchHtml.indexOf('网页研究工作台')).assertLarger(-1);
+      expect(researchHtml.indexOf('公开网页')).assertLarger(-1);
+      expect(researchHtml.indexOf('固定工具')).assertEqual(-1);
+      expect(researchHtml.indexOf('firecrawl-route')).assertEqual(-1);
+      expect(researchHtml.indexOf('来源证据')).assertLarger(-1);
+      expect(researchHtml.indexOf('打开原网页')).assertLarger(-1);
+      expect(researchHtml.indexOf('data-firecrawl-action-index')).assertLarger(-1);
+      expect(researchHtml.indexOf('window.AIPhoneHome.postAction')).assertLarger(-1);
+      expect(researchHtml.indexOf('min-height: 44px')).assertLarger(-1);
+      expect(researchHtml.indexOf('@media (prefers-reduced-motion: reduce)')).assertLarger(-1);
+      expect(pageHtml.indexOf('阅读摘要')).assertLarger(-1);
+      expect(pageHtml.indexOf('firecrawl-read-card')).assertLarger(-1);
+      expect(pageHtml.indexOf('剩余额度')).assertEqual(-1);
+      expect(productHtml.indexOf('商品研究')).assertLarger(-1);
+      expect(productHtml.indexOf('¥2,999')).assertLarger(-1);
+      expect(productHtml.indexOf('商品比价')).assertLarger(-1);
+      expect(productHtml.indexOf('firecrawl-shopping-source-list')).assertLarger(-1);
+      expect(productHtml.indexOf('剩余额度')).assertEqual(-1);
+      expect(socialHtml.indexOf('小红书公开搜索')).assertLarger(-1);
+      expect(socialHtml.indexOf('xiaohongshu.com')).assertLarger(-1);
+      expect(socialHtml.indexOf('小红书笔记')).assertLarger(-1);
+      expect(socialHtml.indexOf('firecrawl-social-card')).assertLarger(-1);
+      expect(socialHtml.indexOf('firecrawl-social-card is-featured')).assertLarger(-1);
+      expect(socialHtml.indexOf('firecrawl-social-media')).assertLarger(-1);
+      expect(socialHtml.indexOf('sns-webpic-qc.xhscdn.com/note-cover.webp')).assertLarger(-1);
+      expect(socialHtml.indexOf('firecrawl-social-carousel')).assertLarger(-1);
+      expect(socialHtml.indexOf('firecrawl-social-slide')).assertLarger(-1);
+      expect(socialHtml.indexOf('scroll-snap-type: x mandatory')).assertLarger(-1);
+      expect(socialHtml.indexOf('笔记图片，可左右滑动')).assertLarger(-1);
+      expect(socialHtml.indexOf('role="link"')).assertEqual(-1);
+      expect(socialHtml.indexOf('role="button"')).assertLarger(-1);
+      expect(socialHtml.indexOf('aria-label="应用内查看完整笔记')).assertLarger(-1);
+      expect(socialHtml.indexOf('data-firecrawl-note-index="0"')).assertLarger(-1);
+      expect(socialHtml.indexOf('data-firecrawl-action-index="1"')).assertEqual(-1);
+      expect(socialHtml.indexOf('部分返回')).assertEqual(-1);
+      expect(socialHtml.indexOf('firecrawl-social-play')).assertLarger(-1);
+      expect(socialHtml.indexOf('0:42')).assertLarger(-1);
+      expect(socialHtml.indexOf('loading="eager"')).assertLarger(-1);
+      expect(socialHtml.indexOf('referrerpolicy="no-referrer"')).assertLarger(-1);
+      expect(socialHtml.indexOf('查看原笔记')).assertEqual(-1);
+      expect(socialHtml.indexOf('firecrawl-social-detail')).assertLarger(-1);
+      expect(socialHtml.indexOf('data-firecrawl-detail-index="0"')).assertLarger(-1);
+      expect(socialHtml.indexOf('这是应用内展示的完整笔记正文')).assertLarger(-1);
+      expect(socialHtml.indexOf('返回笔记列表')).assertLarger(-1);
+      expect(socialHtml.indexOf("detail.classList.add('is-open')")).assertLarger(-1);
+      expect(socialHtml.indexOf('<video')).assertEqual(-1);
+      expect(socialHtml.indexOf('点开卡片可在应用内查看正文和图片')).assertLarger(-1);
+      expect(socialHtml.indexOf('剩余额度')).assertEqual(-1);
+      expect(monitorHtml.indexOf('确认创建监控')).assertLarger(-1);
+      expect(monitorHtml.indexOf('网页监控')).assertLarger(-1);
+      expect(monitorHtml.indexOf('Appless Firecrawl QA')).assertLarger(-1);
+      expect(pendingHtml.indexOf('firecrawl-loading')).assertLarger(-1);
+      expect(pendingHtml.indexOf('正在读取公开来源')).assertLarger(-1);
+      expect(pendingHtml.indexOf('分身')).assertEqual(-1);
+    });
+
+    it('renders same-product shopping sources as one accessible vertical list', 0, () => {
+      const productHtml = renderHtmlHomeDocument(shoppingComparisonDocumentFixture());
+
+      expect(productHtml.indexOf('商品比价')).assertLarger(-1);
+      expect(productHtml.indexOf('当前最低公开价')).assertLarger(-1);
+      expect(productHtml.indexOf('class="firecrawl-shopping-source-list"')).assertLarger(-1);
+      expect(productHtml.indexOf('class="firecrawl-shopping-source-row is-lowest"')).assertLarger(-1);
+      expect(productHtml.indexOf('<table class="firecrawl-compare-table"')).assertEqual(-1);
+      expect(productHtml.indexOf('firecrawl-compare-scroll')).assertEqual(-1);
+      expect(productHtml.indexOf('min-width: 650px')).assertEqual(-1);
+      expect(productHtml.indexOf('data-shopping-source-count="2"')).assertLarger(-1);
+      expect(productHtml.indexOf('data-shopping-comparable-count="2"')).assertLarger(-1);
+      expect(productHtml.indexOf('data-shopping-detail="0"')).assertLarger(-1);
+      expect(productHtml.indexOf('aria-expanded="false"')).assertLarger(-1);
+      expect(productHtml.indexOf('aria-controls="shopping-detail-0"')).assertLarger(-1);
+      expect(productHtml.indexOf('id="shopping-detail-0"')).assertLarger(-1);
+      expect(productHtml.indexOf('打开原网页')).assertLarger(-1);
+      expect(productHtml.indexOf('>深入阅读此来源<')).assertEqual(-1);
+      expect(productHtml.indexOf('data-firecrawl-action-index="1"')).assertEqual(-1);
+      expect(productHtml.indexOf('>京东<')).assertLarger(-1);
+      expect(productHtml.indexOf('数据页面：detail.zol.com.cn')).assertLarger(-1);
+      expect(productHtml.indexOf('京东自营')).assertLarger(-1);
+      expect(productHtml.indexOf('满 3000 减 100')).assertLarger(-1);
+      expect(productHtml.indexOf('firecrawl-product-card')).assertEqual(-1);
+      expect(productHtml.indexOf('comparisonEligible')).assertEqual(-1);
+      expect(productHtml.indexOf('comparisonPriceFen')).assertEqual(-1);
+      expect(productHtml.indexOf('comparisonPriceKind')).assertEqual(-1);
+      expect(productHtml.indexOf('comparisonKey')).assertEqual(-1);
+      expect(productHtml.indexOf("target.closest('[data-shopping-detail]')")).assertLarger(-1);
+      expect(productHtml.indexOf("detailButton.setAttribute('aria-expanded'")).assertLarger(-1);
+    });
+
+    it('does not claim a lowest price from one comparable source', 0, () => {
+      const singleDoc = shoppingComparisonDocumentFixture();
+      singleDoc.blocks = [singleDoc.blocks[0]];
+      singleDoc.actions = singleDoc.blocks[0].actions.slice();
+      const singleHtml = renderHtmlHomeDocument(singleDoc);
+
+      expect(singleHtml.indexOf('来源不足，暂不能形成比价')).assertLarger(-1);
+      expect(singleHtml.indexOf('当前最低公开价')).assertEqual(-1);
+    });
+
+    it('shows a ranged price without treating it as comparable', 0, () => {
+      const rangeDoc = shoppingComparisonDocumentFixture();
+      rangeDoc.blocks = [shoppingSourceFixture(
+        'shopping-jd',
+        'https://item.jd.com/sony-wh-1000xm6',
+        '¥2,999起',
+        false,
+        0,
+        'sony|wh-1000xm6 黑色'
+      )];
+      rangeDoc.actions = rangeDoc.blocks[0].actions.slice();
+      const rangeHtml = renderHtmlHomeDocument(rangeDoc);
+
+      expect(rangeHtml.indexOf('当前可见公开价')).assertLarger(-1);
+      expect(rangeHtml.indexOf('当前最低公开价')).assertEqual(-1);
+    });
+
+    it('does not calculate a lowest price across different comparison keys', 0, () => {
+      const mismatchedDoc = shoppingComparisonDocumentFixture();
+      const comparisonKey = mismatchedDoc.blocks[1].rows.find((row: HtmlHomeMetric): boolean =>
+        row.label === 'comparisonKey'
+      );
+      if (comparisonKey !== undefined) {
+        comparisonKey.value = 'sony|wh-1000xm6 银色';
+      }
+      const mismatchedHtml = renderHtmlHomeDocument(mismatchedDoc);
+
+      expect(mismatchedHtml.indexOf('来源规格不同，暂不计算最低价')).assertLarger(-1);
+      expect(mismatchedHtml.indexOf('当前最低公开价')).assertEqual(-1);
+    });
+
+    it('does not claim a minimum when a third visible source has a different key', 0, () => {
+      const mixedDoc = shoppingComparisonDocumentFixture();
+      const third = shoppingSourceFixture(
+        'shopping-third',
+        'https://detail.zol.com.cn/sony-wh-1000xm6-silver',
+        '¥2,799起',
+        false,
+        0,
+        'sony|wh-1000xm6 银色'
+      );
+      mixedDoc.blocks.push(third);
+      mixedDoc.actions = mixedDoc.actions.concat(third.actions);
+      const mixedHtml = renderHtmlHomeDocument(mixedDoc);
+
+      expect(mixedHtml.indexOf('来源规格不同，暂不计算最低价')).assertLarger(-1);
+      expect(mixedHtml.indexOf('当前最低公开价')).assertEqual(-1);
+      expect(mixedHtml.indexOf('firecrawl-shopping-source-row is-lowest')).assertEqual(-1);
+    });
+
+    it('shows missing runtime commerce details without inferring the seller from host', 0, () => {
+      const runtimeDoc = shoppingComparisonDocumentFixture();
+      runtimeDoc.blocks[0].rows = runtimeDoc.blocks[0].rows.filter(
+        (row: HtmlHomeMetric): boolean =>
+          row.label !== '卖家' && row.label !== '优惠券' && row.label !== '运费'
+      );
+      runtimeDoc.blocks = [runtimeDoc.blocks[0]];
+      runtimeDoc.actions = runtimeDoc.blocks[0].actions.slice();
+      const runtimeHtml = renderHtmlHomeDocument(runtimeDoc);
+
+      expect(runtimeHtml.indexOf(
+        '<div class="firecrawl-row"><b>卖家</b><span>页面未返回</span></div>'
+      )).assertLarger(-1);
+      expect(runtimeHtml.indexOf(
+        '<div class="firecrawl-row"><b>优惠券</b><span>页面未返回</span></div>'
+      )).assertLarger(-1);
+      expect(runtimeHtml.indexOf(
+        '<div class="firecrawl-row"><b>运费</b><span>页面未返回</span></div>'
+      )).assertLarger(-1);
+    });
+
+    it('labels an estimated lowest price in both the shopping hero and row', 0, () => {
+      const estimatedDoc = shoppingComparisonDocumentFixture();
+      estimatedDoc.blocks[0] = shoppingSourceFixture(
+        'shopping-jd',
+        'https://item.jd.com/sony-wh-1000xm6',
+        '¥2,899',
+        true,
+        289900,
+        'sony|wh-1000xm6 黑色',
+        'estimated'
+      );
+      estimatedDoc.actions = estimatedDoc.blocks[0].actions.concat(estimatedDoc.blocks[1].actions);
+      const estimatedHtml = renderHtmlHomeDocument(estimatedDoc);
+
+      expect(estimatedHtml.indexOf('当前最低预估到手价')).assertLarger(-1);
+      expect(estimatedHtml.indexOf(
+        '<span class="firecrawl-shopping-hero-price-kind">预估到手价</span>'
+      )).assertLarger(-1);
+      expect(estimatedHtml.indexOf('<span class="firecrawl-shopping-price-kind">预估到手价</span>'))
+        .assertLarger(-1);
+    });
+
+    it('keeps overseas references separate from the domestic minimum', 0, () => {
+      const marketDoc = shoppingComparisonDocumentFixture();
+      const overseas = shoppingSourceFixture(
+        'shopping-amazon',
+        'https://amazon.com/dp/sony-wh-1000xm6',
+        '$399',
+        true,
+        39900,
+        'US|USD|sony|wh-1000xm6 黑色'
+      );
+      const platform = overseas.rows.find((row: HtmlHomeMetric): boolean => row.label === '平台');
+      const evidence = overseas.rows.find((row: HtmlHomeMetric): boolean => row.label === '数据页面');
+      const market = overseas.rows.find((row: HtmlHomeMetric): boolean => row.label === '市场');
+      const currency = overseas.rows.find((row: HtmlHomeMetric): boolean => row.label === '币种');
+      if (platform !== undefined) {
+        platform.value = 'Amazon';
+      }
+      if (evidence !== undefined) {
+        evidence.value = 'https://www.amazon.com/dp/sony-wh-1000xm6';
+      }
+      if (market !== undefined) {
+        market.value = 'US';
+      }
+      if (currency !== undefined) {
+        currency.value = 'USD';
+      }
+      marketDoc.blocks.push(overseas);
+      marketDoc.actions = marketDoc.actions.concat(overseas.actions);
+      const marketHtml = renderHtmlHomeDocument(marketDoc);
+
+      expect(marketHtml.indexOf('当前最低公开价')).assertLarger(-1);
+      expect(marketHtml.indexOf('海外参考')).assertLarger(-1);
+      expect(marketHtml.indexOf('>Amazon<')).assertLarger(-1);
+      expect(marketHtml.indexOf('$399')).assertLarger(-1);
+      expect(marketHtml.indexOf('data-shopping-comparable-count="2"')).assertLarger(-1);
+    });
+
+    it('renders shopping-specific empty and pending states', 0, () => {
+      const emptyDoc = shoppingComparisonDocumentFixture();
+      emptyDoc.blocks[0].rows = emptyDoc.blocks[0].rows.filter((row: HtmlHomeMetric): boolean =>
+        row.label !== 'URL'
+      );
+      emptyDoc.blocks = [emptyDoc.blocks[0]];
+      emptyDoc.actions = [];
+      const emptyHtml = renderHtmlHomeDocument(emptyDoc);
+      const pendingHtml = renderHtmlHomeDocument(
+        createFirecrawlPendingDocument('shopping.research'),
+        true
+      );
+
+      expect(emptyHtml.indexOf('暂未找到可核验的同款公开价格')).assertLarger(-1);
+      expect(pendingHtml.indexOf('正在查询固定公开来源')).assertLarger(-1);
+      expect(pendingHtml.indexOf('先返回的价格会先显示，无需等待全部站点')).assertLarger(-1);
+      expect(pendingHtml.indexOf('class="firecrawl-shopping-source-list"')).assertLarger(-1);
+      expect(pendingHtml.indexOf('正在查询第一个公开来源')).assertLarger(-1);
+      expect(pendingHtml.indexOf('仍在寻找第二个可比来源')).assertLarger(-1);
+      expect(pendingHtml.indexOf('<table class="firecrawl-compare-table"')).assertEqual(-1);
+      expect(pendingHtml.indexOf('分身')).assertEqual(-1);
+      expect(pendingHtml.indexOf('credits')).assertEqual(-1);
+      expect(pendingHtml.indexOf('debug')).assertEqual(-1);
     });
 
     it('drops a retained hotel pending block once real search results exist', 0, () => {

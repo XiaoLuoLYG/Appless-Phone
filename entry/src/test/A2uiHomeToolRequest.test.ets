@@ -647,6 +647,20 @@ export default function a2uiHomeToolRequestTest() {
       expect(resolved.actionId).assertEqual('client_aggregate_search_reroute');
     });
 
+    it('reroutes Xiaohongshu searches to the public Firecrawl tool', 0, () => {
+      const prompt = '搜索小红书鸿蒙应用开发公开内容';
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('social.feed.search', prompt, 'model_tool_request', null),
+        prompt,
+        ''
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('social.public.search');
+      expect(resolved.actionId).assertEqual('client_firecrawl_social_reroute');
+      expect(argText(resolved.args, 'query')).assertEqual(prompt);
+    });
+
     it('does not steal single-source YouTube or X public post prompts', 0, () => {
       const youtube = resolveA2uiHomeToolRequest(
         surfaceWithToolRequest('', '', '', null),
@@ -1081,6 +1095,119 @@ export default function a2uiHomeToolRequestTest() {
 
       expect(resolved.hasTool).assertFalse();
       expect(resolved.toolId).assertEqual('');
+    });
+
+    it('routes the six explicit Firecrawl scenes when Loopy omits a tool request', 0, () => {
+      const empty = surfaceWithToolRequest('', '', '');
+      const researchPrompt =
+        '研究 Firecrawl Monitor 的工作方式、限制和适用场景，给出多个公开来源';
+      const pagePrompt =
+        '读取 https://www.firecrawl.dev/monitor 并总结它如何监控网页变化';
+      const shoppingPrompt =
+        '比较 Sony WH-1000XM6 和 Bose QuietComfort Ultra 的公开规格与页面价格，保留来源';
+      const socialPrompt =
+        '搜索小红书上关于鸿蒙应用开发的公开讨论，只展示公开可验证内容';
+      const createPrompt =
+        '创建名为 Appless Firecrawl QA 20260723074749 的每日监控，监控 ' +
+        'https://www.firecrawl.dev/changelog 的产品更新，时区 Asia/Shanghai';
+      const listPrompt =
+        '列出我的 Firecrawl monitors，找到 Appless Firecrawl QA 20260723074749';
+      const research = resolveA2uiHomeToolRequest(empty, researchPrompt, '', null, false);
+      const page = resolveA2uiHomeToolRequest(empty, pagePrompt, '', null, false);
+      const shopping = resolveA2uiHomeToolRequest(empty, shoppingPrompt, '', null, false);
+      const social = resolveA2uiHomeToolRequest(empty, socialPrompt, '', null, false);
+      const create = resolveA2uiHomeToolRequest(empty, createPrompt, '', null, false);
+      const list = resolveA2uiHomeToolRequest(empty, listPrompt, '', null, false);
+
+      expect(research.toolId).assertEqual('web.research.search');
+      expect(research.actionId).assertEqual('');
+      expect(JSON.stringify(research.args))
+        .assertEqual('{"query":' + JSON.stringify(researchPrompt) + ',"maxResults":5}');
+      expect(page.toolId).assertEqual('web.page.read');
+      expect(page.actionId).assertEqual('');
+      expect(JSON.stringify(page.args)).assertEqual(
+        '{"url":"https://www.firecrawl.dev/monitor","question":' +
+        JSON.stringify(pagePrompt) + '}'
+      );
+      expect(shopping.toolId).assertEqual('shopping.research');
+      expect(shopping.actionId).assertEqual('');
+      expect(JSON.stringify(shopping.args))
+        .assertEqual('{"query":' + JSON.stringify(shoppingPrompt) + ',"maxProducts":3}');
+      expect(social.toolId).assertEqual('social.public.search');
+      expect(social.actionId).assertEqual('');
+      expect(JSON.stringify(social.args)).assertEqual(
+        '{"query":' + JSON.stringify(socialPrompt) +
+        ',"platforms":["xiaohongshu"],"maxResults":5}'
+      );
+      expect(create.toolId).assertEqual('web.monitor.create');
+      expect(create.actionId).assertEqual('');
+      expect(JSON.stringify(create.args)).assertEqual(
+        '{"pages":["https://www.firecrawl.dev/changelog"],"goal":' +
+        JSON.stringify(createPrompt) +
+        ',"name":"Appless Firecrawl QA 20260723074749","scheduleText":"daily",' +
+        '"timezone":"Asia/Shanghai"}'
+      );
+      expect(list.toolId).assertEqual('web.monitor.list');
+      expect(list.actionId).assertEqual('');
+      expect(JSON.stringify(list.args)).assertEqual('{}');
+    });
+
+    it('keeps the Firecrawl Loopy fallback narrow and never overrides a model tool', 0, () => {
+      const empty = surfaceWithToolRequest('', '', '');
+      const negatives: string[] = [
+        '你好，今天怎么样',
+        '比较深圳和北京明天的天气',
+        '打开小红书',
+        '创建 Firecrawl Monitor 帮我监控产品变化',
+        '读取 https://example.com:65536/private'
+      ];
+      for (let index = 0; index < negatives.length; index++) {
+        const resolved = resolveA2uiHomeToolRequest(
+          empty,
+          negatives[index],
+          '',
+          null,
+          false
+        );
+        expect(resolved.hasTool).assertFalse();
+        expect(resolved.toolId).assertEqual('');
+      }
+
+      const model = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest(
+          'media.aggregate.search',
+          '研究 Firecrawl Monitor 的工作方式，给出多个公开来源',
+          'model_tool_request'
+        ),
+        '研究 Firecrawl Monitor 的工作方式，给出多个公开来源',
+        '',
+        null,
+        false
+      );
+      expect(model.toolId).assertEqual('media.aggregate.search');
+      expect(model.actionId).assertEqual('model_tool_request');
+    });
+
+    it('keeps model-generated shopping parameters ahead of the client fallback', 0, () => {
+      const modelArgs = JSON.parse(
+        '{"query":"Dyson V12 Detect Slim Fluffy","domains":["jd.com"],"maxProducts":2}'
+      ) as Object;
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest(
+          'shopping.research',
+          '查询 Dyson V12 Detect Slim Fluffy 的公开价格',
+          'model_tool_request',
+          modelArgs
+        ),
+        '比较 Dyson V12 Detect Slim Fluffy 的公开规格与页面价格，保留来源',
+        '',
+        null,
+        false
+      );
+
+      expect(resolved.toolId).assertEqual('shopping.research');
+      expect(resolved.actionId).assertEqual('model_tool_request');
+      expect(JSON.stringify(resolved.args)).assertEqual(JSON.stringify(modelArgs));
     });
 
     it('routes Gmail AI reply action and merges action context with model body args', 0, () => {

@@ -1,4 +1,8 @@
-import { A2uiSurfaceState, aggregateSearchQueryFromArgs } from '@loop/agent-core';
+import {
+  A2uiSurfaceState,
+  aggregateSearchQueryFromArgs,
+  firecrawlHttpUrlOf
+} from '@loop/agent-core';
 import { genericToolResults, summaryData, toolRequest } from '@loop/agent-core';
 
 type ToolRequestArgValue = Object | string | number | boolean | null | undefined;
@@ -38,6 +42,21 @@ interface PaymentFallbackArgs {
   originalQuery: string;
 }
 
+interface FirecrawlFallbackArgs {
+  query?: string;
+  url?: string;
+  question?: string;
+  domains?: string[];
+  platforms?: string[];
+  pages?: string[];
+  goal?: string;
+  name?: string;
+  scheduleText?: string;
+  timezone?: string;
+  maxResults?: number;
+  maxProducts?: number;
+}
+
 export interface A2uiHomeResolvedToolRequest {
   hasTool: boolean;
   toolId: string;
@@ -54,6 +73,120 @@ function containsAny(text: string, words: string[]): boolean {
     }
   }
   return false;
+}
+
+function firstFirecrawlHttpUrl(prompt: string): string {
+  const lower = prompt.toLowerCase();
+  const https = lower.indexOf('https://');
+  const http = lower.indexOf('http://');
+  let start = https >= 0 ? https : http;
+  if (https >= 0 && http >= 0) {
+    start = Math.min(https, http);
+  }
+  if (start < 0) {
+    return '';
+  }
+  let end = start;
+  while (end < prompt.length) {
+    const char = prompt.charAt(end);
+    if (char.charCodeAt(0) <= 32 || containsAny(char, ['，', '。', '；', '、', '）', '】', '》'])) {
+      break;
+    }
+    end++;
+  }
+  return firecrawlHttpUrlOf(prompt.substring(start, end));
+}
+
+function firecrawlMonitorName(prompt: string): string {
+  const marker = '名为';
+  const markerIndex = prompt.indexOf(marker);
+  if (markerIndex < 0) {
+    return '';
+  }
+  let start = markerIndex + marker.length;
+  while (start < prompt.length && prompt.charAt(start).trim().length === 0) {
+    start++;
+  }
+  const end = prompt.indexOf(' 的', start);
+  return end > start ? prompt.substring(start, end).trim() : '';
+}
+
+function firecrawlSocialPlatforms(prompt: string): string[] {
+  const lower = prompt.toLowerCase();
+  if (prompt.indexOf('小红书') >= 0 || lower.indexOf('xiaohongshu') >= 0 ||
+    lower.indexOf(' xhs ') >= 0) {
+    return ['xiaohongshu'];
+  }
+  return [];
+}
+
+function explicitFirecrawlFallback(
+  prompt: string
+): A2uiHomeResolvedToolRequest | null {
+  const lower = prompt.toLowerCase();
+  const url = firstFirecrawlHttpUrl(prompt);
+  const hasFirecrawl = lower.indexOf('firecrawl') >= 0;
+  const hasMonitor = lower.indexOf('monitor') >= 0 || prompt.indexOf('监控') >= 0;
+  const result = (
+    toolId: string,
+    args: FirecrawlFallbackArgs
+  ): A2uiHomeResolvedToolRequest => {
+    return {
+      hasTool: true,
+      toolId: toolId,
+      prompt: prompt,
+      actionId: '',
+      args: args,
+      modelPromptChars: prompt.length
+    };
+  };
+
+  if (hasFirecrawl && hasMonitor && containsAny(prompt, ['创建', '新建'])) {
+    const name = firecrawlMonitorName(prompt);
+    if (url.length === 0 || name.length === 0) {
+      return null;
+    }
+    const args: FirecrawlFallbackArgs = {
+      pages: [url],
+      goal: prompt,
+      name: name,
+      scheduleText: containsAny(prompt, ['每小时', '每个小时']) ? 'hourly' :
+        (containsAny(prompt, ['每周', '每星期']) ? 'weekly' : 'daily'),
+      timezone: lower.indexOf('asia/shanghai') >= 0 ? 'Asia/Shanghai' : ''
+    };
+    return result('web.monitor.create', args);
+  }
+  if (hasFirecrawl && hasMonitor &&
+    containsAny(prompt, ['列出', '列表', '查看', '查询', '找到'])) {
+    return result('web.monitor.list', {});
+  }
+  if (url.length > 0 && containsAny(prompt, ['读取', '阅读', '总结', '提取'])) {
+    const args: FirecrawlFallbackArgs = { url: url, question: prompt };
+    return result('web.page.read', args);
+  }
+  const platforms = firecrawlSocialPlatforms(prompt);
+  if (platforms.length > 0 &&
+    containsAny(prompt, ['搜索', '查询', '查找', '搜'])) {
+    const args: FirecrawlFallbackArgs = {
+      query: prompt,
+      platforms: platforms,
+      maxResults: 5
+    };
+    return result('social.public.search', args);
+  }
+  if (containsAny(prompt, ['比较', '对比']) &&
+    containsAny(prompt, ['价格', '页面价格']) &&
+    containsAny(prompt, ['规格', '商品', '产品']) &&
+    containsAny(prompt, ['来源', '公开'])) {
+    const args: FirecrawlFallbackArgs = { query: prompt, maxProducts: 3 };
+    return result('shopping.research', args);
+  }
+  if (containsAny(prompt, ['研究', '调研']) &&
+    containsAny(prompt, ['多个公开来源', '公开来源'])) {
+    const args: FirecrawlFallbackArgs = { query: prompt, maxResults: 5 };
+    return result('web.research.search', args);
+  }
+  return null;
 }
 
 function hasExplicitMapsIntent(prompt: string): boolean {
@@ -845,6 +978,10 @@ export function resolveA2uiHomeToolRequest(
 ): A2uiHomeResolvedToolRequest {
   const request = toolRequest(surface);
   if (!allowIntentFallback && request.toolId.length === 0) {
+    const firecrawl = explicitFirecrawlFallback(fallbackPrompt);
+    if (firecrawl !== null) {
+      return firecrawl;
+    }
     return {
       hasTool: false,
       toolId: '',
@@ -865,6 +1002,10 @@ export function resolveA2uiHomeToolRequest(
   const forcedPaymentToolId = inferredPaymentToolIdForPrompt(fallbackPrompt.length > 0 ? fallbackPrompt : prompt);
   const forcedLuckinOrderToolId = inferredLuckinOrderToolIdForPrompt(fallbackPrompt.length > 0 ? fallbackPrompt : prompt);
   const forcedMapsToolId = inferredMapsToolIdForPrompt(prompt);
+  const forcedFirecrawlRequest = explicitFirecrawlFallback(originalPrompt);
+  const forcedFirecrawlToolId = forcedFirecrawlRequest !== null &&
+    forcedFirecrawlRequest.toolId === 'social.public.search' ?
+    forcedFirecrawlRequest.toolId : '';
   const forcedAggregateToolId = inferredAggregateSearchToolIdForPrompt(originalPrompt);
   const forcedMediaToolId = inferredMediaToolIdForPrompt(prompt);
   const actionToolId = toolIdForActionId(fallbackActionId);
@@ -908,6 +1049,11 @@ export function resolveA2uiHomeToolRequest(
   } else if (forcedMapsToolId.length > 0 && toolId !== forcedMapsToolId) {
     actionId = request.toolId.length > 0 ? 'client_maps_explicit_reroute' : 'client_intent_fallback';
     toolId = forcedMapsToolId;
+  } else if (forcedFirecrawlToolId.length > 0 && toolId !== forcedFirecrawlToolId) {
+    actionId = request.toolId.length > 0 ?
+      'client_firecrawl_social_reroute' : 'client_intent_fallback';
+    toolId = forcedFirecrawlToolId;
+    prompt = originalPrompt;
   } else if (forcedAggregateToolId.length > 0 && toolId !== forcedAggregateToolId) {
     actionId = request.toolId.length > 0 ? 'client_aggregate_search_reroute' : 'client_intent_fallback';
     toolId = forcedAggregateToolId;
@@ -928,6 +1074,9 @@ export function resolveA2uiHomeToolRequest(
     }
   }
   let args = mergeArgs(fallbackArgs, request.args === undefined || request.args === null ? null : request.args);
+  if (forcedFirecrawlToolId.length > 0 && forcedFirecrawlRequest !== null) {
+    args = mergeArgs(args, forcedFirecrawlRequest.args);
+  }
   if (toolId === 'media.video.search') {
     args = mergeArgs(mediaArgsForPrompt(prompt), args);
   }

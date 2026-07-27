@@ -398,6 +398,9 @@ function fixedActionArgs(actionId: string): Object {
   if (actionId === 'payment.account.setup') {
     return object('{"country":"US","businessType":"individual"}');
   }
+  if (actionId === 'web.monitor.create') {
+    return object('{"pages":["https://example.com/releases"],"goal":"Track releases"}');
+  }
   return object('{"origin":"深圳北","destination":"香港西九龙","travelMode":"driving","navigate":false}');
 }
 
@@ -831,18 +834,19 @@ export default function aiphoneRegisteredActionExecutorTest() {
       }
     });
 
-    it('validates invalid and minimal args for all 21 fixed Action definitions', 0, () => {
+    it('validates invalid and minimal args for all 22 fixed Action definitions', 0, () => {
       const expected: string[] = [
         'hotel.navigate', 'hotel.booking.open', 'luckin.order.preview', 'luckin.order.create',
         'social.post.preview', 'social.reply.draft', 'mail.draft.create',
         'gmail.draft.create', 'gmail.draft.apply',
         'gmail.open.web', 'gmail.message.send', 'worldcup.open', 'calendar.event.create',
         'calendar.event.update', 'calendar.event.delete', 'payment.send', 'payment.account.setup',
-        'maps.route.open', 'whatsapp.message.send', 'ride.order.create', 'ride.order.cancel'
+        'maps.route.open', 'whatsapp.message.send', 'ride.order.create', 'ride.order.cancel',
+        'web.monitor.create'
       ];
       const definitions = actionAgentToolDefinitions();
 
-      expect(definitions.length).assertEqual(21);
+      expect(definitions.length).assertEqual(22);
       expect(definitions.map((current: ToolDefinition): string => current.toolId).sort().join(','))
         .assertEqual(expected.slice().sort().join(','));
       for (let index = 0; index < expected.length; index++) {

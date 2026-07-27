@@ -3,6 +3,7 @@ import { renderMultiTaskHomeDocument, shouldRenderMultiTaskHomeDocument } from '
 import { renderAggregateSearchHomeDocument, shouldRenderAggregateSearchHomeDocument } from './HtmlAggregateSearchHomeRenderer';
 import { renderCalendarHomeDocument, shouldRenderCalendarHomeDocument } from './HtmlCalendarHomeRenderer';
 import { renderFoodHomeDocument, shouldRenderFoodHomeDocument } from './HtmlFoodHomeRenderer';
+import { renderFirecrawlHomeDocument, shouldRenderFirecrawlHomeDocument } from './HtmlFirecrawlHomeRenderer';
 import { renderHotelHomeDocument, shouldRenderHotelHomeDocument } from './HtmlHotelHomeRenderer';
 import { renderMediaHomeDocument, shouldRenderMediaHomeDocument } from './HtmlMediaHomeRenderer';
 import { renderPaymentHomeDocument, shouldRenderPaymentHomeDocument } from './HtmlPaymentHomeRenderer';
@@ -5434,6 +5435,9 @@ const HTML_HOME_JS: string = `
 export function renderHtmlHomeDocument(document: HtmlHomeDocument, isBusy: boolean = false): string {
   if (shouldRenderMultiTaskHomeDocument(document)) {
     return renderMultiTaskHomeDocument(document, isBusy);
+  }
+  if (shouldRenderFirecrawlHomeDocument(document)) {
+    return renderFirecrawlHomeDocument(document, isBusy);
   }
   if (shouldRenderCalendarHomeDocument(document)) {
     return renderCalendarHomeDocument(document, isBusy);
