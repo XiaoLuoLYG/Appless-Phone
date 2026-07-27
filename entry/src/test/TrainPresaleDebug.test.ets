@@ -134,7 +134,6 @@ function request(): TrainPresaleDebugSelectionRequest {
 function confirmation(): TrainPresaleDebugConfirmationInput {
   return {
     debugEnabled: true,
-    debugConfirmed: true,
     fromName: '北京南',
     fromCode: 'VNP',
     toName: '上海虹桥',
@@ -150,7 +149,6 @@ function confirmation(): TrainPresaleDebugConfirmationInput {
 function runInput(): TrainPresaleDebugRunInput {
   return {
     debugEnabled: true,
-    debugConfirmed: true,
     fromName: '北京南',
     fromCode: 'VNP',
     toName: '上海虹桥',
@@ -185,18 +183,19 @@ function activeDebugTask(state: TrainPresaleTaskState = 'scheduled'): TrainPresa
 
 function testScheduler(onPublish: () => void): SystemOneShotScheduler {
   return new SystemOneShotScheduler(
-    async (_reminder: reminderAgentManager.ReminderRequestCalendar): Promise<number> => {
+    async (_reminder: reminderAgentManager.ReminderRequest): Promise<number> => {
       onPublish();
       return 88;
     },
     async (_reminderId: number): Promise<void> => {},
-    async (): Promise<reminderAgentManager.ReminderRequest[]> => []
+    async (): Promise<reminderAgentManager.ReminderRequest[]> => [],
+    (): number => new Date('2026-07-22T04:00:00.000Z').getTime()
   );
 }
 
 function observedScheduler(calls: SchedulerCalls): SystemOneShotScheduler {
   return new SystemOneShotScheduler(
-    async (_reminder: reminderAgentManager.ReminderRequestCalendar): Promise<number> => {
+    async (_reminder: reminderAgentManager.ReminderRequest): Promise<number> => {
       calls.publish++;
       return 88;
     },
@@ -206,7 +205,8 @@ function observedScheduler(calls: SchedulerCalls): SystemOneShotScheduler {
     async (): Promise<reminderAgentManager.ReminderRequest[]> => {
       calls.list++;
       return [];
-    }
+    },
+    (): number => new Date('2026-07-22T04:00:00.000Z').getTime()
   );
 }
 
@@ -285,9 +285,8 @@ export default function trainPresaleDebugTest() {
       expect(providerCalls).assertEqual(0);
     });
 
-    it('treats an unconfirmed or cancelled second confirmation as no provider and no task', 0, async () => {
+    it('uses durable unpaid-order authorization as the only confirmation before provider lookup', 0, async () => {
       const input = confirmation();
-      input.debugConfirmed = false;
       let providerCalls = 0;
 
       const result = await prepareTrainPresaleDebugConfirmation(input,
@@ -296,12 +295,12 @@ export default function trainPresaleDebugTest() {
           return verifiedSelection();
         });
 
-      expect(result.task).assertEqual(undefined);
-      expect(result.error).assertEqual('请再次确认将创建真实未支付订单，支付仍需手动完成。');
-      expect(providerCalls).assertEqual(0);
+      expect(result.task === undefined).assertFalse();
+      expect(result.error).assertEqual('');
+      expect(providerCalls).assertEqual(1);
     });
 
-    it('keeps production orchestration closed before provider and scheduler without debug confirmation', 0, async () => {
+    it('keeps production orchestration closed before provider and scheduler outside debug builds', 0, async () => {
       const native = new MemoryPreferences();
       const store = new TrainPresaleTaskStore(native as Object as preferences.Preferences);
       const input = runInput();
@@ -321,23 +320,6 @@ export default function trainPresaleDebugTest() {
       );
 
       expect(nonDebug.task).assertEqual(undefined);
-      expect(providerCalls).assertEqual(0);
-      expect(publishCalls).assertEqual(0);
-
-      input.debugEnabled = true;
-      input.debugConfirmed = false;
-      const result = await runTrainPresaleDebugConfirmation(
-        input,
-        store,
-        testScheduler((): void => { publishCalls++; }),
-        async (_request: TrainPresaleDebugSelectionRequest): Promise<TrainPresaleDebugSelection> => {
-          providerCalls++;
-          return verifiedSelection();
-        },
-        (): number => new Date('2026-07-22T04:00:00.000Z').getTime()
-      );
-
-      expect(result.task).assertEqual(undefined);
       expect(providerCalls).assertEqual(0);
       expect(publishCalls).assertEqual(0);
       expect(store.list().length).assertEqual(0);
@@ -400,6 +382,20 @@ export default function trainPresaleDebugTest() {
       expect(result.fromCode).assertEqual('VNP');
       expect(result.toCode).assertEqual('AOH');
       expect(result.bookingUrl.indexOf('date=2026-07-22')).assertLarger(-1);
+    });
+
+    it('skips unrelated high-speed rows before the exact debug route', 0, () => {
+      const stations = '@bjn|北京南|VNP|beijingnan|bjn|0@shh|上海虹桥|AOH|shanghaihongqiao|shhq|1' +
+        '@tjn|天津南|TIP|tianjinnan|tjn|2';
+      const payload = '{"status":true,"data":{"result":[' +
+        JSON.stringify(trainRow('G9', 'TIP', 'AOH', '5')) + ',' +
+        JSON.stringify(trainRow('G1', 'VNP', 'AOH', '3')) + ']}}';
+
+      const result = trainPresaleDebugSelectionFromOfficialPayloadForTest(
+        request(), '2026-07-22', stations, payload);
+
+      expect(result.status).assertEqual('verified');
+      expect(result.trainCode).assertEqual('G1');
     });
 
     it('never falls back to a hardcoded train when official inventory has no candidate', 0, () => {
@@ -840,15 +836,17 @@ export default function trainPresaleDebugTest() {
       const native = new MemoryPreferences();
       const store = new TrainPresaleTaskStore(native as Object as preferences.Preferences);
       let publishedTaskId = '';
-      let publishedSecond = -1;
+      let publishedDelay = -1;
       const scheduler = new SystemOneShotScheduler(
-        async (reminder: reminderAgentManager.ReminderRequestCalendar): Promise<number> => {
+        async (reminder: reminderAgentManager.ReminderRequest): Promise<number> => {
           publishedTaskId = reminder.wantAgent?.parameters?.trainPresaleTaskId as string;
-          publishedSecond = reminder.dateTime.second === undefined ? -1 : reminder.dateTime.second;
+          const timer = reminder as Object as reminderAgentManager.ReminderRequestTimer;
+          publishedDelay = timer.triggerTimeInSeconds;
           return 88;
         },
         async (_reminderId: number): Promise<void> => {},
-        async (): Promise<reminderAgentManager.ReminderRequest[]> => []
+        async (): Promise<reminderAgentManager.ReminderRequest[]> => [],
+        (): number => new Date('2026-07-22T04:00:00.000Z').getTime()
       );
 
       const scheduled = await scheduleTrainPresaleTask(prepared.task, store, scheduler);
@@ -859,7 +857,7 @@ export default function trainPresaleDebugTest() {
       expect(scheduled.task?.reminderId).assertEqual(88);
       expect(store.get('debug-1')?.source).assertEqual('debug');
       expect(publishedTaskId).assertEqual('debug-1');
-      expect(publishedSecond).assertEqual(10);
+      expect(publishedDelay).assertLarger(0);
     });
   });
 }

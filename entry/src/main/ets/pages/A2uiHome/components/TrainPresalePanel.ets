@@ -44,7 +44,6 @@ export interface TrainPresalePanelSubmission {
   passengerNames: string[];
   seatPriority: string;
   unpaidOrderAuthorized: boolean;
-  debugConfirmed: boolean;
 }
 
 export interface TrainPresaleConfirmationInput extends TrainPresaleTrip, TrainPresalePanelSubmission {
@@ -55,7 +54,6 @@ export interface TrainPresaleConfirmationInput extends TrainPresaleTrip, TrainPr
 
 interface TrainPresaleDebugSafetyInput {
   debugEnabled: boolean;
-  debugConfirmed: boolean;
   fromName: string;
   fromCode: string;
   toName: string;
@@ -327,9 +325,6 @@ export function validateTrainPresaleConfirmation(
   if (input.source === 'debug' && !input.debugEnabled) {
     return validationError('当前版本不允许调试测试。');
   }
-  if (input.source === 'debug' && !input.debugConfirmed) {
-    return validationError('请再次确认将创建真实未支付订单，支付仍需手动完成。');
-  }
   return {
     error: '',
     task: {
@@ -422,7 +417,6 @@ export async function prepareTrainPresaleDebugConfirmation(
     seatPriority: input.seatPriority,
     unpaidOrderAuthorized: input.unpaidOrderAuthorized,
     debugEnabled: input.debugEnabled,
-    debugConfirmed: input.debugConfirmed,
     taskId: input.taskId,
     createdAt: createdAt
   });
@@ -438,9 +432,6 @@ function existingDebugTaskResult(task: TrainPresaleTask): TrainPresaleScheduleRe
 function validateTrainPresaleDebugSafetyGate(input: TrainPresaleDebugSafetyInput): string {
   if (!input.debugEnabled) {
     return '当前版本不允许调试测试。';
-  }
-  if (!input.debugConfirmed) {
-    return '请再次确认将创建真实未支付订单，支付仍需手动完成。';
   }
   if (!input.unpaidOrderAuthorized) {
     return '请明确授权在开售时提交真实未支付订单。';
@@ -503,7 +494,6 @@ export async function runTrainPresaleDebugConfirmation(
   }
   const prepared = await prepareTrainPresaleDebugConfirmation({
     debugEnabled: input.debugEnabled,
-    debugConfirmed: input.debugConfirmed,
     fromName: input.fromName,
     fromCode: input.fromCode,
     toName: input.toName,
@@ -837,7 +827,6 @@ export struct TrainPresalePanel {
   @State seatPriority: string = TRAIN_PRESALE_SEAT_PREFERENCES[0];
   @State unpaidOrderAuthorized: boolean = false;
   @State debugMode: boolean = false;
-  @State debugConfirmed: boolean = false;
   onConfirm: (submission: TrainPresalePanelSubmission) => void = (_submission: TrainPresalePanelSubmission): void => {};
   onClose: () => void = (): void => {};
   onCancelTask: () => void = (): void => {};
@@ -881,8 +870,7 @@ export struct TrainPresalePanel {
       source: this.debugMode && this.isDebugBuild ? 'debug' : 'presale',
       passengerNames: [this.passengerName],
       seatPriority: this.seatPriority,
-      unpaidOrderAuthorized: this.unpaidOrderAuthorized,
-      debugConfirmed: this.debugConfirmed
+      unpaidOrderAuthorized: this.unpaidOrderAuthorized
     });
   }
 
@@ -1090,7 +1078,6 @@ export struct TrainPresalePanel {
                 .enabled(!this.isWorking)
                 .onClick(() => {
                   this.debugMode = !this.debugMode;
-                  this.debugConfirmed = false;
                 })
               if (this.debugMode) {
                 Text('调试模式 · 将查询真实在售车次')
@@ -1104,24 +1091,6 @@ export struct TrainPresalePanel {
             .alignItems(VerticalAlign.Center)
             .margin({ top: 12 })
 
-            if (this.debugMode) {
-              Row() {
-                Text('确认创建真实未支付订单，支付仍需手动完成')
-                  .fontSize(13)
-                  .fontColor(COLOR_TEXT)
-                  .layoutWeight(1)
-                Toggle({ type: ToggleType.Switch, isOn: this.debugConfirmed })
-                  .accessibilityText('确认创建真实未支付订单，支付仍需手动完成')
-                  .selectedColor(COLOR_ACCENT)
-                  .enabled(!this.isWorking)
-                  .onChange((isOn: boolean) => {
-                    this.debugConfirmed = isOn;
-                  })
-              }
-              .width('100%')
-              .alignItems(VerticalAlign.Center)
-              .padding({ top: 10, bottom: 4 })
-            }
           }
 
           if (this.errorMessage.length > 0) {

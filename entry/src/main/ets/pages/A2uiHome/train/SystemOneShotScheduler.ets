@@ -19,6 +19,19 @@ async function listSystemReminderRequests(): Promise<reminderAgentManager.Remind
   return requests;
 }
 
+export async function ensureReminderNotificationEnabled(
+  isEnabled: () => Promise<boolean>,
+  requestEnable: () => Promise<void>
+): Promise<void> {
+  if (await isEnabled()) {
+    return;
+  }
+  await requestEnable();
+  if (!await isEnabled()) {
+    throw new Error('通知权限未授权，无法创建开售提醒');
+  }
+}
+
 export function buildReminderRequest(
   task: TrainPresaleTask,
   fireAt: string
@@ -52,24 +65,57 @@ export function buildReminderRequest(
   };
 }
 
+function buildDebugReminderRequest(
+  task: TrainPresaleTask,
+  fireAt: string,
+  now: number
+): reminderAgentManager.ReminderRequestTimer {
+  const fireTime = new Date(fireAt).getTime();
+  const triggerTimeInSeconds = Math.ceil((fireTime - now) / 1000);
+  if (!Number.isFinite(fireTime) || !Number.isFinite(now) || triggerTimeInSeconds <= 0) {
+    throw new Error('Invalid reminder time');
+  }
+  return {
+    reminderType: reminderAgentManager.ReminderType.REMINDER_TYPE_TIMER,
+    triggerTimeInSeconds: triggerTimeInSeconds,
+    wantAgent: {
+      pkgName: BUNDLE_NAME,
+      abilityName: ABILITY_NAME,
+      parameters: { trainPresaleTaskId: task.taskId }
+    },
+    maxScreenWantAgent: {
+      pkgName: BUNDLE_NAME,
+      abilityName: ABILITY_NAME
+    },
+    title: task.trainCode + ' 开售提醒',
+    content: task.fromName + ' → ' + task.toName + ' 即将开售',
+    tapDismissed: true
+  };
+}
+
 export class SystemOneShotScheduler {
-  private publishReminder: (request: reminderAgentManager.ReminderRequestCalendar) => Promise<number>;
+  private publishReminder: (request: reminderAgentManager.ReminderRequest) => Promise<number>;
   private cancelReminder: (reminderId: number) => Promise<void>;
   private getValidReminders: () => Promise<reminderAgentManager.ReminderRequest[]>;
+  private clock: () => number;
 
   constructor(
-    publishReminder: (request: reminderAgentManager.ReminderRequestCalendar) => Promise<number> =
+    publishReminder: (request: reminderAgentManager.ReminderRequest) => Promise<number> =
       reminderAgentManager.publishReminder,
     cancelReminder: (reminderId: number) => Promise<void> = reminderAgentManager.cancelReminder,
-    getValidReminders: () => Promise<reminderAgentManager.ReminderRequest[]> = listSystemReminderRequests
+    getValidReminders: () => Promise<reminderAgentManager.ReminderRequest[]> = listSystemReminderRequests,
+    clock: () => number = (): number => Date.now()
   ) {
     this.publishReminder = publishReminder;
     this.cancelReminder = cancelReminder;
     this.getValidReminders = getValidReminders;
+    this.clock = clock;
   }
 
   async schedule(task: TrainPresaleTask, fireAt: string): Promise<number> {
-    const reminderId = await this.publishReminder(buildReminderRequest(task, fireAt));
+    const request = task.source === 'debug' ? buildDebugReminderRequest(task, fireAt, this.clock()) :
+      buildReminderRequest(task, fireAt);
+    const reminderId = await this.publishReminder(request);
     task.reminderId = reminderId;
     return reminderId;
   }

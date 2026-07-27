@@ -14,6 +14,7 @@ import { abilityAccessCtrl, bundleManager, common, Permissions } from '@kit.Abil
 import { preferences } from '@kit.ArkData';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { formBindingData, formProvider } from '@kit.FormKit';
+import { notificationManager } from '@kit.NotificationKit';
 import fs from '@ohos.file.fs';
 import { geoLocationManager } from '@kit.LocationKit';
 import util from '@ohos.util';
@@ -142,7 +143,10 @@ import { createHtmlHomeDocument } from './html/HtmlHomeSnapshot';
 import { renderHtmlHomeDocument } from './html/HtmlHomeRenderer';
 import { isHtmlHomeActionAllowed } from './html/HtmlHomeActionPolicy';
 import { HtmlHomeAction, HtmlHomeBlock, HtmlHomeDocument } from './html/HtmlHomeTypes';
-import { SystemOneShotScheduler } from './train/SystemOneShotScheduler';
+import {
+  ensureReminderNotificationEnabled,
+  SystemOneShotScheduler
+} from './train/SystemOneShotScheduler';
 import {
   transitionBoundTrainPresaleCheckout,
   transitionTrainPresaleHandoff,
@@ -3193,6 +3197,7 @@ struct Index {
       this.checkoutWebKind = 'train';
       this.checkoutWebUrl = decision.bookingUrl;
       this.trainPresaleCheckoutTaskId = taskId;
+      this.showTrainPresalePanel = false;
       this.showCheckoutWeb = true;
       aiLogInfo('[AIPhone][TrainPresaleResume] taskId=' + taskId + ' status=verified');
     } catch (error) {
@@ -3261,7 +3266,6 @@ struct Index {
       seatPriority: submission.seatPriority,
       unpaidOrderAuthorized: submission.unpaidOrderAuthorized,
       debugEnabled: this.isDebugBuild,
-      debugConfirmed: submission.debugConfirmed,
       taskId: 'train-presale-' + now.getTime().toString(),
       createdAt: now.toISOString()
     };
@@ -3270,11 +3274,20 @@ struct Index {
       if (store === null) {
         throw new Error('缺少应用上下文');
       }
+      const validated: TrainPresaleConfirmationResult = validateTrainPresaleConfirmation(input);
+      if (validated.task === undefined) {
+        this.trainPresaleError = validated.error;
+        return;
+      }
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      await ensureReminderNotificationEnabled(
+        (): Promise<boolean> => notificationManager.isNotificationEnabled(),
+        (): Promise<void> => notificationManager.requestEnableNotification(context)
+      );
       let scheduleResult: TrainPresaleScheduleResult;
       if (submission.source === 'debug') {
         const debugInput: TrainPresaleDebugRunInput = {
           debugEnabled: this.isDebugBuild,
-          debugConfirmed: submission.debugConfirmed,
           fromName: this.trainPresaleTrip.fromName,
           fromCode: this.trainPresaleTrip.fromCode,
           toName: this.trainPresaleTrip.toName,
@@ -3286,12 +3299,7 @@ struct Index {
         scheduleResult = await runTrainPresaleDebugConfirmation(
           debugInput, store, new SystemOneShotScheduler(), select12306DebugTrain);
       } else {
-        const result: TrainPresaleConfirmationResult = validateTrainPresaleConfirmation(input);
-        if (result.task === undefined) {
-          this.trainPresaleError = result.error;
-          return;
-        }
-        scheduleResult = await scheduleTrainPresaleTask(result.task, store, new SystemOneShotScheduler());
+        scheduleResult = await scheduleTrainPresaleTask(validated.task, store, new SystemOneShotScheduler());
       }
       if (scheduleResult.task === undefined) {
         this.trainPresaleError = scheduleResult.error;
@@ -4025,6 +4033,11 @@ struct Index {
       this.trainPresaleCheckoutTaskId = '';
       this.showCheckoutWeb = true;
       aiLogInfo('[AIPhone][TrainBookingOpen] urlChars=' + bookingUrl.length.toString());
+      return;
+    }
+    if (action.id === 'train.booking.alipay.open') {
+      aiLogInfo('[AIPhone][TrainAlipayOpen] chars=' + action.prompt.length.toString());
+      await this.openExternalUrl(action.prompt, ['alipays']);
       return;
     }
     if (action.id === 'luckin.pay.open') {

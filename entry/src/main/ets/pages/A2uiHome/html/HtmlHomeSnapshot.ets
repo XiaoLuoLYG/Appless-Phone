@@ -393,6 +393,14 @@ function appendTrainBlocks(document: HtmlHomeDocument, surface: A2uiSurfaceState
         sourceComponentId: component.id,
         args: bookingArgs
       });
+      block.actions.push({
+        id: 'train.booking.alipay.open',
+        label: '支付宝购票',
+        prompt: 'alipays://platformapi/startapp?appId=20000135',
+        variant: 'secondary',
+        kind: 'client',
+        sourceComponentId: component.id
+      });
     }
     block.actions.push(clientAction('html_pin_train', '固定到桌面', JSON.stringify({
       index: index,

@@ -3,9 +3,10 @@ import { TrainPresaleTask, TrainPresaleTaskState } from './TrainPresaleTaskStore
 export interface TrainWebAssistRetryOutcome { state: 'retry'; stage: 'query' | 'passenger' | 'confirm'; progress: string; }
 export interface TrainWebAssistReadyOutcome { state: 'ready_to_confirm'; }
 export interface TrainWebAssistAwaitingPaymentOutcome { state: 'awaiting_payment'; }
+export interface TrainWebAssistWaitingUserOutcome { state: 'waiting_user'; reason: string; }
 export interface TrainWebAssistNeedsUserOutcome { state: 'needs_user'; reason: string; }
 export type TrainWebAssistOutcome = TrainWebAssistRetryOutcome | TrainWebAssistReadyOutcome |
-  TrainWebAssistAwaitingPaymentOutcome | TrainWebAssistNeedsUserOutcome;
+  TrainWebAssistAwaitingPaymentOutcome | TrainWebAssistWaitingUserOutcome | TrainWebAssistNeedsUserOutcome;
 
 interface TrainWebAssistConfig {
   trainCode: string;
@@ -54,7 +55,7 @@ function sanitizedReason(value: string): string {
 }
 
 export function trainWebAssistRetryLimit(stage: 'query' | 'passenger' | 'confirm'): number {
-  return stage === 'query' ? 20 : 40;
+  return stage === 'query' ? 20 : (stage === 'confirm' ? 80 : 40);
 }
 
 export function trainWebAssistRetryExhausted(stage: TrainWebAssistRunStage,
@@ -188,6 +189,7 @@ function commonScript(config: TrainWebAssistConfig): string {
     `const labelFor=(box,labels)=>Array.from(labels).filter((label)=>label.htmlFor===box.id);` +
     `const marker=window.__aiphoneTrainAssist||(window.__aiphoneTrainAssist={});` +
     `const retry=(stage,progress)=>out({state:'retry',stage:stage,progress:progress});` +
+    `const waitUser=(reason)=>out({state:'waiting_user',reason:reason});` +
     `const stop=(reason)=>out({state:'needs_user',reason:reason});` +
     `const queryTrip=()=>{const params=new URLSearchParams(location.search);return ` +
     `params.get('date')===cfg.travelDate&&params.get('fs')===cfg.fromName+','+cfg.fromCode&&` +
@@ -198,13 +200,15 @@ function commonScript(config: TrainWebAssistConfig): string {
     `if(parts.length<3||parts[parts.length-2]!==cfg.fromCode||parts[parts.length-1]!==cfg.toCode)return false;` +
     `const names=Array.from(row.querySelectorAll('.cdz strong')).filter(visible).map((n)=>compact(n.getAttribute('title')||txt(n)));` +
     `return names.length===2&&(names[0]!==cfg.fromName||names[1]!==cfg.toName?false:true);};` +
-    `const formTrip=()=>{const form=window.ticketInfoForPassengerForm,detail=form&&form.queryLeftNewDetailDTO;` +
-    `if(!detail||detail.station_train_code!==cfg.trainCode||detail.from_station_name!==cfg.fromName||` +
+    `const formTrip=()=>{const form=window.ticketInfoForPassengerForm,detail=form&&form.queryLeftNewDetailDTO,` +
+    `request=form&&form.queryLeftTicketRequestDTO;if(!detail||!request||detail.station_train_code!==cfg.trainCode||` +
+    `detail.from_station_name!==cfg.fromName||` +
     `detail.from_station_telecode!==cfg.fromCode||detail.to_station_name!==cfg.toName||` +
-    `detail.to_station_telecode!==cfg.toCode||!exactDate(detail.start_train_date))return false;return true;};` +
-    `const modalRows=(modal)=>Array.from(modal.querySelectorAll('.passenger-info tbody tr,#orderTable tbody tr')).filter(visible);` +
+    `detail.to_station_telecode!==cfg.toCode||!exactDate(request.train_date))return false;return true;};` +
+    `const modalRows=(modal)=>Array.from(modal.querySelectorAll('#check_ticketInfo_id tr')).filter(visible);` +
     `const verifyModal=()=>{const modal=document.querySelector('#checkticketinfo_id');` +
-    `if(!visible(modal))return 'wait';const cells=Array.from(modal.querySelectorAll('td,th,span,strong')).filter(visible).map(txt);` +
+    `if(!modal||!Array.from(modal.querySelectorAll('td,th,span,strong')).some(visible))return 'wait';` +
+    `const cells=Array.from(modal.querySelectorAll('td,th,span,strong')).filter(visible).map(txt);` +
     `if(cells.filter((v)=>v===cfg.trainCode).length!==1)return 'confirmation_mismatch';` +
     `if(!cells.some((v)=>exactDate(v))||!cells.some((v)=>exactStation(v,cfg.fromName,'from'))||` +
     `!cells.some((v)=>exactStation(v,cfg.toName,'to')))return 'confirmation_mismatch';` +
@@ -223,8 +227,15 @@ export function buildTrainPresaleWebAssistScript(task: TrainPresaleTask): string
   return `(function(){${commonScript(config)}` +
     `if(payment())return out({state:'awaiting_payment'});` +
     `if(location.protocol.toLowerCase()!=='https:'||location.hostname.toLowerCase()!=='kyfw.12306.cn')return stop('page_mismatch');` +
-    `if(shown('#login_user,.login-hd-account,#J-login'))return stop('login_required');` +
-    `if(shown('#J-loginImg,.touclick-wrapper'))return stop('captcha_required');` +
+    `if(shown('.login-hd-account,#J-login'))return waitUser('login_required');` +
+    `if(shown('#J-loginImg,.touclick-wrapper'))return waitUser('captcha_required');` +
+    `const warningHeader=document.querySelector('#content_defaultwarningAlert_hearder');if(visible(warningHeader)){` +
+    `const warningText=compact(txt(warningHeader));` +
+    `if(warningText.indexOf('您选择的列车距开车时间很近了')!==0)return stop('unexpected_warning');` +
+    `const proceed=document.querySelector('#qd_closeDefaultWarningWindowDialog_id');` +
+    `if(!visible(proceed))return retry('query','waiting_departure_warning');` +
+    `if(!marker.departureWarningConfirmed){marker.departureWarningConfirmed=true;proceed.click();}` +
+    `return retry('query','departure_warning_confirmed');}` +
     `const table=document.querySelector('#queryLeftTable');if(table){if(!queryTrip())return stop('trip_mismatch');` +
     `const rows=Array.from(table.querySelectorAll('tr'));` +
     `const matches=rows.filter((row)=>{const link=row.querySelector('a.number');return visible(link)&&` +
@@ -260,18 +271,19 @@ export function buildTrainPresaleFinalConfirmScript(task: TrainPresaleTask): str
     seatPriority: task.seatPriority, unpaidOrderAuthorized: task.unpaidOrderAuthorized };
   return `(function(){${commonScript(config)}if(payment())return out({state:'awaiting_payment'});` +
     `if(location.protocol.toLowerCase()!=='https:'||location.hostname.toLowerCase()!=='kyfw.12306.cn')return stop('page_mismatch');` +
-    `if(shown('#login_user,.login-hd-account,#J-login'))return stop('login_required');` +
-    `if(shown('#J-loginImg,.touclick-wrapper'))return stop('captcha_required');` +
+    `if(shown('.login-hd-account,#J-login'))return waitUser('login_required');` +
+    `if(shown('#J-loginImg,.touclick-wrapper'))return waitUser('captcha_required');` +
     `if(!cfg.unpaidOrderAuthorized)return stop('not_authorized');` +
     `if(!formTrip())return stop('trip_mismatch');` +
     `const checked=verifyModal();if(checked==='wait')return retry('confirm','waiting_modal');if(checked!=='')return stop(checked);` +
-    `const confirm=document.querySelector('#qr_submit_id');if(!visible(confirm))return retry('confirm','waiting_confirm');` +
+    `const confirm=document.querySelector('#qr_submit_id');if(!visible(confirm)||!confirm.classList.contains('btn92s'))return retry('confirm','waiting_confirm');` +
     `if(!marker.finalConfirmed){marker.finalConfirmed=true;confirm.click();}return retry('confirm','confirm_clicked');})()`;
 }
 
 export function parseTrainWebAssistOutcome(raw: string): TrainWebAssistOutcome {
   try {
-    const value = JSON.parse(raw) as Object;
+    const parsed = JSON.parse(raw) as Object | string;
+    const value = typeof parsed === 'string' ? JSON.parse(parsed) as Object : parsed;
     const state = (value as Record<string, string>).state;
     if (state === 'retry' && exactKeys(value, ['state', 'stage', 'progress'])) {
       const stage = (value as Record<string, string>).stage;
@@ -281,6 +293,12 @@ export function parseTrainWebAssistOutcome(raw: string): TrainWebAssistOutcome {
     }
     if (state === 'ready_to_confirm' && exactKeys(value, ['state'])) return { state: 'ready_to_confirm' };
     if (state === 'awaiting_payment' && exactKeys(value, ['state'])) return { state: 'awaiting_payment' };
+    if (state === 'waiting_user' && exactKeys(value, ['state', 'reason'])) {
+      const reason = (value as Record<string, string>).reason;
+      if (reason === 'login_required' || reason === 'captcha_required') {
+        return { state: 'waiting_user', reason: reason };
+      }
+    }
     if (state === 'needs_user' && exactKeys(value, ['state', 'reason'])) {
       const reason = (value as Record<string, string>).reason;
       return { state: 'needs_user', reason: sanitizedReason(typeof reason === 'string' ? reason : '') };

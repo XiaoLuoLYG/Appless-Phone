@@ -157,7 +157,7 @@ function executeGeneratedFormContract(script: string, form: FormDomFixture, subm
   const guarded = hasScriptGuards(script, ['detail.station_train_code!==cfg.trainCode',
     'detail.from_station_name!==cfg.fromName', 'detail.from_station_telecode!==cfg.fromCode',
     'detail.to_station_name!==cfg.toName', 'detail.to_station_telecode!==cfg.toCode',
-    'exactDate(detail.start_train_date)', "if(!formTrip())return stop('trip_mismatch')"]);
+    'exactDate(request.train_date)', "if(!formTrip())return stop('trip_mismatch')"]);
   if (config === undefined || !guarded) return { state: 'needs_user', reason: 'invalid_result', progress: '' };
   if (!formMatches(config, form)) return { state: 'needs_user', reason: 'trip_mismatch', progress: '' };
   submit.click();
@@ -235,7 +235,7 @@ export default function trainPresaleWebAutomationTest() {
       expect(initial.indexOf("detail.from_station_telecode!==cfg.fromCode") >= 0).assertTrue();
       expect(initial.indexOf("detail.to_station_name!==cfg.toName") >= 0).assertTrue();
       expect(initial.indexOf("detail.to_station_telecode!==cfg.toCode") >= 0).assertTrue();
-      expect(initial.indexOf("exactDate(detail.start_train_date)") >= 0).assertTrue();
+      expect(initial.indexOf("exactDate(request.train_date)") >= 0).assertTrue();
       expect(initial.indexOf("return stop('trip_mismatch')") >= 0).assertTrue();
       expect(finalScript.indexOf('formTrip()') >= 0).assertTrue();
       const unsafe = task();
@@ -348,14 +348,20 @@ export default function trainPresaleWebAutomationTest() {
 
     it('uses visible fixed login captcha selectors and no body text heuristic', 0, () => {
       const script = buildTrainPresaleWebAssistScript(task());
-      expect(script.indexOf("shown('#login_user,.login-hd-account,#J-login')") >= 0).assertTrue();
+      expect(script.indexOf("shown('.login-hd-account,#J-login')") >= 0).assertTrue();
+      expect(script.indexOf('#login_user') < 0).assertTrue();
       expect(script.indexOf("shown('#J-loginImg,.touclick-wrapper')") >= 0).assertTrue();
+      expect(script.indexOf("return waitUser('login_required')") >= 0).assertTrue();
+      expect(script.indexOf("return waitUser('captcha_required')") >= 0).assertTrue();
       expect(script.indexOf('#floatTable')).assertEqual(-1);
       expect(script.indexOf('bodyText')).assertEqual(-1);
       const finalScript = buildTrainPresaleFinalConfirmScript(task());
       expect(finalScript.indexOf("hostname.toLowerCase()!=='kyfw.12306.cn'") >= 0).assertTrue();
-      expect(finalScript.indexOf("shown('#login_user,.login-hd-account,#J-login')") >= 0).assertTrue();
+      expect(finalScript.indexOf("shown('.login-hd-account,#J-login')") >= 0).assertTrue();
+      expect(finalScript.indexOf('#login_user') < 0).assertTrue();
       expect(finalScript.indexOf("shown('#J-loginImg,.touclick-wrapper')") >= 0).assertTrue();
+      expect(finalScript.indexOf("return waitUser('login_required')") >= 0).assertTrue();
+      expect(finalScript.indexOf("return waitUser('captcha_required')") >= 0).assertTrue();
       expect(finalScript.indexOf("retry('confirm','waiting_modal')") >= 0).assertTrue();
       expect(finalScript.indexOf("retry('confirm','waiting_confirm')") >= 0).assertTrue();
     });
@@ -389,9 +395,23 @@ export default function trainPresaleWebAutomationTest() {
     it('accepts only exact allowlisted protocol shapes', 0, () => {
       const retry = parseTrainWebAssistOutcome('{"state":"retry","stage":"query","progress":"booking_clicked"}');
       const ready = parseTrainWebAssistOutcome('{"state":"ready_to_confirm"}');
+      const waiting = parseTrainWebAssistOutcome('{"state":"waiting_user","reason":"login_required"}');
+      const wrappedRetry = parseTrainWebAssistOutcome(
+        '"{\\"state\\":\\"retry\\",\\"stage\\":\\"query\\",\\"progress\\":\\"booking_clicked\\"}"');
+      const wrappedWaiting = parseTrainWebAssistOutcome(
+        '"{\\"state\\":\\"waiting_user\\",\\"reason\\":\\"login_required\\"}"');
+      const waitingExtra = parseTrainWebAssistOutcome(
+        '{"state":"waiting_user","reason":"captcha_required","raw":"x"}');
+      const waitingUnknown = parseTrainWebAssistOutcome('{"state":"waiting_user","reason":"secret"}');
       const rawExtra = parseTrainWebAssistOutcome('{"state":"needs_user","reason":"login_required","raw":"x"}');
       const unknown = parseTrainWebAssistOutcome('{"state":"needs_user","reason":"secret"}');
       expect(retry.state).assertEqual('retry'); expect(ready.state).assertEqual('ready_to_confirm');
+      expect(waiting.state).assertEqual('waiting_user');
+      expect(wrappedRetry.state).assertEqual('retry');
+      expect(wrappedWaiting.state).assertEqual('waiting_user');
+      expect(trainWebAssistTargetState(waiting)).assertEqual(undefined);
+      expect(waitingExtra.state === 'needs_user' ? waitingExtra.reason : '').assertEqual('invalid_result');
+      expect(waitingUnknown.state === 'needs_user' ? waitingUnknown.reason : '').assertEqual('invalid_result');
       expect(rawExtra.state === 'needs_user' ? rawExtra.reason : '').assertEqual('invalid_result');
       expect(unknown.state === 'needs_user' ? unknown.reason : '').assertEqual('invalid_result');
       expect(parseTrainWebAssistOutcome('x').state).assertEqual('needs_user');
@@ -406,8 +426,8 @@ export default function trainPresaleWebAutomationTest() {
       const finalWait: TrainWebAssistRetryOutcome = { state: 'retry', stage: 'confirm', progress: 'waiting_modal' };
       expect(trainWebAssistRetryExhausted('initial', query, 19)).assertFalse();
       expect(trainWebAssistRetryExhausted('initial', query, 20)).assertTrue();
-      expect(trainWebAssistRetryExhausted('final', finalWait, 39)).assertFalse();
-      expect(trainWebAssistRetryExhausted('final', finalWait, 40)).assertTrue();
+      expect(trainWebAssistRetryExhausted('final', finalWait, 79)).assertFalse();
+      expect(trainWebAssistRetryExhausted('final', finalWait, 80)).assertTrue();
       const cancelledEpoch = nextTrainWebAssistEpoch(4);
       expect(isCurrentTrainWebAssistTimer(4, cancelledEpoch, false)).assertFalse();
       expect(isCurrentTrainWebAssistTimer(cancelledEpoch, cancelledEpoch, true)).assertFalse();

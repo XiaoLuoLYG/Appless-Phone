@@ -99,8 +99,8 @@ export struct A2uiWebSurfaceView {
   @Prop showLoading: boolean = true;
   @Prop @Watch('onPageScriptValueChange') pageScript: string = '';
   @Prop @Watch('onPageScriptRequest') pageScriptSession: number = 0;
-  @Prop pageScriptTarget: A2uiWebControllerIdentity = 'none';
-  @Prop pageScriptTargetGeneration: number = -1;
+  @Prop @Watch('onPageScriptRequest') pageScriptTarget: A2uiWebControllerIdentity = 'none';
+  @Prop @Watch('onPageScriptRequest') pageScriptTargetGeneration: number = -1;
   @Prop @Watch('onPageScriptCancel') pageScriptCancelToken: number = 0;
   onMessage: (message: A2uiWebMessage) => void = (_message: A2uiWebMessage): void => {};
   onUrlIntercept: (url: string, isMainFrame: boolean) => boolean =

@@ -101,12 +101,29 @@ function queryCase(changes = {}) {
   };
 }
 
+function nearDepartureWarningCase(text = '您选择的列车距开车时间很近了，请确保有足够的时间办理安全检查') {
+  const warning = visibleNode();
+  warning.getBoundingClientRect = () => ({ width: 0, height: 0 });
+  const header = visibleNode(text);
+  const proceed = clickNode('确定');
+  const document = {
+    querySelector: (selector) => selector === '#defaultwarningAlert_id' ? warning :
+      (selector === '#content_defaultwarningAlert_hearder' ? header :
+        (selector === '#qd_closeDefaultWarningWindowDialog_id' ? proceed : null)),
+    querySelectorAll: () => []
+  };
+  return {
+    proceed,
+    outcome: run(buildTrainPresaleWebAssistScript(authorized), document,
+      { protocol: 'https:', hostname: 'kyfw.12306.cn', pathname: '/otn/leftTicket/init', search: '' }, {})
+  };
+}
+
 function formDetail(changes = {}) {
   const trip = { travelDate: authorized.travelDate, fromName: authorized.fromName, fromCode: authorized.fromCode,
     toName: authorized.toName, toCode: authorized.toCode, ...changes };
   return {
     station_train_code: authorized.trainCode,
-    start_train_date: trip.travelDate.replace(/-/g, ''),
     from_station_name: trip.fromName,
     from_station_telecode: trip.fromCode,
     to_station_name: trip.toName,
@@ -147,12 +164,14 @@ function passengerCase(changes = {}) {
     submit,
     outcome: run(buildTrainPresaleWebAssistScript(authorized), document,
       { protocol: 'https:', hostname: 'kyfw.12306.cn', pathname: '/otn/confirmPassenger/initDc', search: '' },
-      { ticketInfoForPassengerForm: { queryLeftNewDetailDTO: formDetail(changes) } })
+      { ticketInfoForPassengerForm: { queryLeftNewDetailDTO: formDetail(changes),
+        queryLeftTicketRequestDTO: { train_date: (changes.travelDate ?? authorized.travelDate).replace(/-/g, '') } } })
   };
 }
 
-function finalCase(formChanges = {}, modalChanges = {}) {
+function finalCase(formChanges = {}, modalChanges = {}, confirmReady = true) {
   const confirm = clickNode('确认');
+  confirm.classList = { contains: (value) => confirmReady && value === 'btn92s' };
   const cells = [modalChanges.travelDate ?? authorized.travelDate, authorized.trainCode,
     modalChanges.fromName ?? authorized.fromName, modalChanges.toName ?? authorized.toName].map(visibleNode);
   const rows = authorized.passengerNames.map((name) => {
@@ -162,8 +181,9 @@ function finalCase(formChanges = {}, modalChanges = {}) {
     return row;
   });
   const modal = visibleNode();
+  modal.getBoundingClientRect = () => ({ width: 0, height: 0 });
   modal.querySelectorAll = (selector) => selector === 'td,th,span,strong' ? cells :
-    (selector === '.passenger-info tbody tr,#orderTable tbody tr' ? rows : []);
+    (selector === '#check_ticketInfo_id tr' ? rows : []);
   const document = {
     querySelector: (selector) => selector === '#checkticketinfo_id' ? modal :
       (selector === '#qr_submit_id' ? confirm : null),
@@ -173,7 +193,10 @@ function finalCase(formChanges = {}, modalChanges = {}) {
     confirm,
     outcome: run(buildTrainPresaleFinalConfirmScript(authorized), document,
       { protocol: 'https:', hostname: 'kyfw.12306.cn', pathname: '/otn/confirmPassenger/initDc', search: '' },
-      { ticketInfoForPassengerForm: { queryLeftNewDetailDTO: formDetail(formChanges) } })
+      { ticketInfoForPassengerForm: { queryLeftNewDetailDTO: formDetail(formChanges),
+        queryLeftTicketRequestDTO: {
+          train_date: (formChanges.travelDate ?? authorized.travelDate).replace(/-/g, '')
+        } } })
   };
 }
 
@@ -185,6 +208,11 @@ function assertStopped(result, spy, label) {
 const queryHappy = queryCase();
 assert(queryHappy.outcome.progress === 'booking_clicked' && queryHappy.booking.clickCount === 1,
   'query happy path did not click exactly once');
+const warningHappy = nearDepartureWarningCase();
+assert(warningHappy.outcome.progress === 'departure_warning_confirmed' && warningHappy.proceed.clickCount === 1,
+  'near-departure warning was not confirmed exactly once');
+const unknownWarning = nearDepartureWarningCase('未知提示');
+assertStopped(unknownWarning, unknownWarning.proceed, 'unknown warning');
 for (const [field, value] of [['travelDate', '2026-07-24'], ['fromName', '上海站'], ['fromCode', 'SHH'],
   ['toName', '北京站'], ['toCode', 'BJP']]) {
   const result = queryCase({ [field]: value });
@@ -203,6 +231,9 @@ for (const [field, value] of [['travelDate', '2026-07-24'], ['fromName', '上海
 const finalHappy = finalCase();
 assert(finalHappy.outcome.progress === 'confirm_clicked' && finalHappy.confirm.clickCount === 1,
   'final happy path did not confirm exactly once');
+const finalCountdown = finalCase({}, {}, false);
+assert(finalCountdown.outcome.progress === 'waiting_confirm' && finalCountdown.confirm.clickCount === 0,
+  'final countdown clicked before 12306 enabled confirmation');
 for (const [field, value] of [['travelDate', '2026-07-24'], ['fromName', '上海站'], ['toName', '北京站']]) {
   const result = finalCase({}, { [field]: value });
   assertStopped(result, result.confirm, `final modal ${field}`);

@@ -5248,7 +5248,7 @@ function trainPresaleDebugSelectionFromOfficialPayload(
       continue;
     }
     if (item.fromCode !== fromCode || item.toCode !== toCode || item.from !== fromName || item.to !== toName) {
-      return emptyTrainPresaleDebugSelection('mismatch', '12306 返回的在售高铁与调试路线不匹配。');
+      continue;
     }
     exactHighSpeedFound = true;
     if (trainField(fields, 11) !== 'Y' || !isAvailableTrainSeat(trainSeatForPreference(item, seatPriority))) {

@@ -93,7 +93,6 @@ function validInput(): TrainPresaleConfirmationInput {
     seatPriority: '二等座',
     unpaidOrderAuthorized: true,
     debugEnabled: false,
-    debugConfirmed: false,
     taskId: 'train-1',
     createdAt: '2026-07-22T02:00:00.000Z'
   };
@@ -175,16 +174,12 @@ export default function trainPresaleConfirmationTest() {
       expect(result.error).assertEqual('请明确授权在开售时提交真实未支付订单。');
     });
 
-    it('requires debug availability and a second explicit confirmation', 0, () => {
+    it('requires debug availability while using durable authorization as the only order gate', 0, () => {
       const input = validInput();
       input.source = 'debug';
-      expect(validateTrainPresaleConfirmation(input).task).assertEqual(undefined);
+      expect(validateTrainPresaleConfirmation(input).error).assertEqual('当前版本不允许调试测试。');
 
       input.debugEnabled = true;
-      expect(validateTrainPresaleConfirmation(input).error)
-        .assertEqual('请再次确认将创建真实未支付订单，支付仍需手动完成。');
-
-      input.debugConfirmed = true;
       expect(validateTrainPresaleConfirmation(input).task === undefined).assertFalse();
     });
 

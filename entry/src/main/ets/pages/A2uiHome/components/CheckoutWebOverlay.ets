@@ -26,6 +26,7 @@ import {
   trainWebAssistNavigationTimeoutOutcome,
   trainWebAssistReasonText,
   trainWebAssistRetryExhausted,
+  trainWebAssistRetryLimit,
   trainWebAssistTargetState,
   TrainWebAssistBudget,
   TrainWebAssistExecutionBinding,
@@ -256,7 +257,7 @@ export struct CheckoutWebOverlay {
     }
     if (this.assistStage === 'final' && this.finalClickMayHaveRun) {
       this.assistBudget = trainWebAssistBudgetAfterExecution(this.assistBudget);
-      if (this.assistBudget.attempts >= 40) {
+      if (this.assistBudget.attempts >= trainWebAssistRetryLimit('confirm')) {
         this.handleTerminalAssist({ state: 'needs_user', reason: 'no_navigation' }, this.activeUrl);
       } else {
         this.scheduleTrainAssistRetry();
@@ -276,7 +277,6 @@ export struct CheckoutWebOverlay {
       this.handleTerminalAssist({ state: 'needs_user', reason: request.reason }, this.activeUrl);
       return;
     }
-    this.assistBudget = trainWebAssistBudgetAfterExecution(this.assistBudget);
     this.assistScriptTarget = this.activeController;
     this.assistScriptGeneration = this.activeGeneration;
     this.assistScript = request.script;
@@ -286,13 +286,13 @@ export struct CheckoutWebOverlay {
     this.assistScriptSession = nextSession;
   }
 
-  private scheduleTrainAssistRetry(): void {
+  private scheduleTrainAssistRetry(delayMs: number = 250): void {
     if (this.assistTimer >= 0) clearTimeout(this.assistTimer);
     const epoch = this.assistEpoch;
     this.assistTimer = setTimeout(() => {
       this.assistTimer = -1;
       if (isCurrentTrainWebAssistTimer(epoch, this.assistEpoch, this.assistDisposed)) this.requestTrainAssist();
-    }, 250);
+    }, delayMs);
   }
 
   private scheduleTrainAssistNavigationTimeout(binding: TrainWebAssistExecutionBinding): void {
@@ -364,7 +364,12 @@ export struct CheckoutWebOverlay {
       !isCurrentTrainWebAssistExecution(this.requestBinding, actual)) return;
     this.clearPendingTrainAssist();
     const outcome: TrainWebAssistOutcome = parseTrainWebAssistOutcome(raw);
+    if (outcome.state === 'waiting_user') {
+      this.scheduleTrainAssistRetry(1000);
+      return;
+    }
     if (outcome.state === 'retry') {
+      this.assistBudget = trainWebAssistBudgetAfterExecution(this.assistBudget);
       this.assistBudget = trainWebAssistBudgetForOutcome(this.assistBudget, outcome);
       if (trainWebAssistRetryExhausted(this.assistStage === 'final' ? 'final' : 'initial',
         outcome, this.assistBudget.attempts)) {

@@ -1,6 +1,10 @@
 import { reminderAgentManager } from '@kit.BackgroundTasksKit';
 import { describe, expect, it } from '@ohos/hypium';
-import { buildReminderRequest, SystemOneShotScheduler } from '../main/ets/pages/A2uiHome/train/SystemOneShotScheduler';
+import {
+  buildReminderRequest,
+  ensureReminderNotificationEnabled,
+  SystemOneShotScheduler
+} from '../main/ets/pages/A2uiHome/train/SystemOneShotScheduler';
 import { TrainPresaleTask } from '../main/ets/pages/A2uiHome/train/TrainPresaleTaskStore';
 
 const TASK: TrainPresaleTask = {
@@ -63,10 +67,10 @@ export default function systemOneShotSchedulerTest() {
     });
 
     it('delegates schedule cancel and list through injected platform functions', 0, async () => {
-      let published: reminderAgentManager.ReminderRequestCalendar | undefined;
+      let published: reminderAgentManager.ReminderRequest | undefined;
       let cancelledId: number = 0;
       const scheduler = new SystemOneShotScheduler(
-        async (request: reminderAgentManager.ReminderRequestCalendar): Promise<number> => {
+        async (request: reminderAgentManager.ReminderRequest): Promise<number> => {
           published = request;
           return 73;
         },
@@ -84,6 +88,76 @@ export default function systemOneShotSchedulerTest() {
       await scheduler.cancel(73);
       expect(cancelledId).assertEqual(73);
       expect((await scheduler.list()).length).assertEqual(1);
+    });
+
+    it('uses a countdown reminder for the ten-second debug task', 0, async () => {
+      let published: reminderAgentManager.ReminderRequest | undefined;
+      const scheduler = new SystemOneShotScheduler(
+        async (request: reminderAgentManager.ReminderRequest): Promise<number> => {
+          published = request;
+          return 74;
+        }
+      );
+      const debugTask: TrainPresaleTask = {
+        taskId: 'debug-task-1',
+        source: 'debug',
+        state: 'scheduled',
+        trainCode: TASK.trainCode,
+        travelDate: TASK.travelDate,
+        fromName: TASK.fromName,
+        fromCode: TASK.fromCode,
+        toName: TASK.toName,
+        toCode: TASK.toCode,
+        saleAt: TASK.saleAt,
+        passengerNames: TASK.passengerNames,
+        seatPriority: TASK.seatPriority,
+        unpaidOrderAuthorized: TASK.unpaidOrderAuthorized,
+        bookingUrl: TASK.bookingUrl,
+        reminderId: 0,
+        createdAt: TASK.createdAt,
+        lastError: ''
+      };
+      const fireAt = new Date(Date.now() + 10 * 1000).toISOString();
+
+      await scheduler.schedule(debugTask, fireAt);
+
+      expect(published === undefined).assertFalse();
+      if (published !== undefined) {
+        expect(published.reminderType).assertEqual(reminderAgentManager.ReminderType.REMINDER_TYPE_TIMER);
+        const timer = published as Object as reminderAgentManager.ReminderRequestTimer;
+        expect(timer.triggerTimeInSeconds).assertLarger(0);
+        expect(timer.triggerTimeInSeconds <= 10).assertTrue();
+      }
+    });
+
+    it('requests notification authorization before publishing a reminder', 0, async () => {
+      let enabled = false;
+      let requests = 0;
+
+      await ensureReminderNotificationEnabled(
+        async (): Promise<boolean> => enabled,
+        async (): Promise<void> => {
+          requests++;
+          enabled = true;
+        }
+      );
+
+      expect(requests).assertEqual(1);
+    });
+
+    it('rejects reminder creation when notification authorization is denied', 0, async () => {
+      let error = '';
+
+      try {
+        await ensureReminderNotificationEnabled(
+          async (): Promise<boolean> => false,
+          async (): Promise<void> => {}
+        );
+      } catch (cause) {
+        error = cause instanceof Error ? cause.message : JSON.stringify(cause);
+      }
+
+      expect(error).assertEqual('通知权限未授权，无法创建开售提醒');
     });
   });
 }
