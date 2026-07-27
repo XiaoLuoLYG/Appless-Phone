@@ -141,13 +141,15 @@ export function appendMultiTaskSlot(
     slotIndex++;
     slotId = 'slot_' + slotIndex.toString();
   }
-  board.sections.push({
-    slotId,
-    toolId,
-    title: toolId,
-    status: 'queued',
-    summary: ''
-  });
+  if (board.mode !== 'serial') {
+    board.sections.push({
+      slotId,
+      toolId,
+      title: toolId,
+      status: 'queued',
+      summary: ''
+    });
+  }
   sections[slotId] = {
     slotId,
     toolId,
@@ -163,7 +165,7 @@ export function appendMultiTaskSlot(
   const summary = parsed.summary as
     Record<string, Object | string | number | boolean | null | undefined>;
   summary.text = '串行任务进度 ' + readySectionCount(board).toString() + '/' +
-    board.sections.length.toString();
+    Object.keys(sections).length.toString();
   summary.count = readySectionCount(board);
   parsed.summary = summary as Object;
   return {

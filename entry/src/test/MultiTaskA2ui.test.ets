@@ -725,16 +725,21 @@ export default function multiTaskA2uiTest() {
       { name: 'calendar.event.create', input: '{}' }
     ]);
     composer.emitShell();
+    const shell = JSON.parse(latestSurface!.dataModelJson) as Record<string, Object>;
+    const shellBoard = shell.multiTask as Record<string, Object>;
+    expect((shellBoard.sections as Object[]).length).assertEqual(0);
     composer.markRunning('slot_0');
     composer.ingestSlotObservation('slot_0', '7/23/2026, 3:32:45 PM');
     expect(latestSurface !== null).assertTrue();
     const afterFirst = JSON.parse(latestSurface!.dataModelJson) as Record<string, Object>;
-    const boardAfterFirst = afterFirst.multiTask as Record<string, string>;
+    const boardAfterFirst = afterFirst.multiTask as Record<string, Object | string>;
     expect(boardAfterFirst.activeSectionId).assertEqual('slot_0');
+    expect((boardAfterFirst.sections as Object[]).length).assertEqual(1);
     composer.markRunning('slot_1');
     const whileSecondRunning = JSON.parse(latestSurface!.dataModelJson) as Record<string, Object>;
-    const boardWhileSecond = whileSecondRunning.multiTask as Record<string, string>;
+    const boardWhileSecond = whileSecondRunning.multiTask as Record<string, Object | string>;
     expect(boardWhileSecond.activeSectionId).assertEqual('slot_0');
+    expect((boardWhileSecond.sections as Object[]).length).assertEqual(1);
     composer.ingestSlotObservation('slot_1', genericToolResultsA2ui('surface_calendar', 'calendar.event.create', [{
       sourceTag: 'Composio Google Calendar',
       toolName: 'calendar.event.create',
@@ -745,8 +750,9 @@ export default function multiTaskA2uiTest() {
       rawPreview: ''
     }]));
     const afterSecond = JSON.parse(latestSurface!.dataModelJson) as Record<string, Object>;
-    const boardAfterSecond = afterSecond.multiTask as Record<string, string>;
+    const boardAfterSecond = afterSecond.multiTask as Record<string, Object | string>;
     expect(boardAfterSecond.activeSectionId).assertEqual('slot_0');
+    expect((boardAfterSecond.sections as Object[]).length).assertEqual(2);
   });
 
   it('builds_serial_multi_task_without_completion_reply_banner', 0, () => {
@@ -858,6 +864,11 @@ export default function multiTaskA2uiTest() {
     composer.ingestSurface('slot_1', rideEmbeddedSurface());
 
     let composite = appendMultiTaskSlot(latestSurface!, 'calendar.event.create');
+    const pendingParsed = JSON.parse(composite.dataModelJson) as Record<string, Object>;
+    const pendingBoard = pendingParsed.multiTask as Record<string, Object>;
+    const pendingSections = pendingParsed.sections as Record<string, A2uiMultiTaskSectionValue>;
+    expect((pendingBoard.sections as Object[]).length).assertEqual(2);
+    expect(pendingSections.slot_2.toolId).assertEqual('calendar.event.create');
     composite = mergeSurfaceIntoMultiTaskSurface(
       composite,
       'slot_2',
@@ -866,10 +877,11 @@ export default function multiTaskA2uiTest() {
       false
     );
     const parsed = JSON.parse(composite.dataModelJson) as Record<string, Object>;
-    const board = parsed.multiTask as Record<string, string>;
+    const board = parsed.multiTask as Record<string, Object | string>;
     const sections = parsed.sections as Record<string, A2uiMultiTaskSectionValue>;
 
     expect(board.activeSectionId).assertEqual('slot_0');
+    expect((board.sections as Object[]).length).assertEqual(3);
     expect((sections.slot_2.embeddedSurface as A2uiSurfaceState).surfaceId)
       .assertEqual('surface_ride');
   });

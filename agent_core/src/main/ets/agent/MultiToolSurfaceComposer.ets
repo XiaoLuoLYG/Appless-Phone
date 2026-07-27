@@ -361,6 +361,9 @@ export class MultiToolSurfaceComposer {
     const ordered = this.orderedSlots();
     for (let index = 0; index < ordered.length; index++) {
       const slot = ordered[index];
+      if (this.executionMode === 'serial' && this.completionOrder.indexOf(slot.slotId) < 0) {
+        continue;
+      }
       sections.push({
         slotId: slot.slotId,
         toolId: slot.toolId,
