@@ -26,6 +26,46 @@ interface MailReplyDraftActionArgs {
   contextSummary: string;
 }
 
+export interface MailThreadSummary extends MailThreadResult {
+  requestKey: string;
+}
+
+export interface MailSearchStructuredData {
+  threads: MailThreadSummary[];
+  statuses: MailProviderStatus[];
+  extras: DynamicGenericToolResult[];
+  entityRefs?: string[];
+}
+
+export function mailThreadSummary(thread: MailThreadResult): MailThreadSummary {
+  const identity = thread.provider === 'gmail' ? thread.threadId : thread.messageId;
+  return {
+    provider: thread.provider,
+    accountLabel: thread.accountLabel,
+    threadId: thread.threadId,
+    messageId: thread.messageId,
+    from: thread.from,
+    to: thread.to.slice(),
+    participants: thread.participants.slice(),
+    subject: thread.subject,
+    snippet: thread.snippet,
+    receivedAt: thread.receivedAt,
+    important: thread.important,
+    unread: thread.unread,
+    sourceUrl: thread.sourceUrl,
+    rawProviderRef: thread.rawProviderRef,
+    requestKey: thread.provider + ':' + identity
+  };
+}
+
+export function mailSearchStructuredDataA2ui(
+  surfaceId: string,
+  toolId: string,
+  data: MailSearchStructuredData
+): string {
+  return mailResultsA2ui(surfaceId, toolId, data.threads, data.statuses, data.extras);
+}
+
 function jsonLine(envelope: A2uiEnvelope): string {
   return JSON.stringify(envelope) + '\n';
 }

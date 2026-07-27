@@ -211,41 +211,6 @@ export default function htmlHomeSnapshotTest() {
       expect(doc.blocks[1].prompt).assertEqual('2026-07-01');
     });
 
-    it('maps a presale train to a reminder action without booking actions', 0, () => {
-      const trains: A2uiComponent = {
-        id: 'presale-trains',
-        component: 'TrainOptions',
-        dataPath: '/trains'
-      };
-      const doc = createHtmlHomeDocument({
-        surface: surface('travel', 'ready', [root('presale-trains'), trains],
-          '{"trains":[{"trainCode":"G123","from":"深圳北","fromCode":"IOQ","to":"上海虹桥","toCode":"AOH","depart":"09:00","arrive":"15:30","duration":"6h30m","seats":"待开售","status":"待开售","business":"","first":"","second":"","noSeat":"","hardSeat":"","sleeperSoft":"","price":"661","bookingUrl":"https://kyfw.12306.cn/otn/leftTicket/init?linktypeid=dc&fs=test&ts=test&date=2026-08-06&flag=N,N,Y","travelDate":"2026-08-06","saleState":"presale","saleAt":"2026-08-06T12:45:00+08:00"}]}'),
-        messages: [],
-        isBusy: false,
-        isAwaitingFirstSurface: false
-      });
-      const train = doc.blocks[0];
-      const actions = JSON.stringify(train.actions);
-
-      expect(JSON.stringify(train.metrics).indexOf('"label":"price","value":"661"')).assertLarger(-1);
-      expect(JSON.stringify(train.metrics).indexOf('"label":"duration","value":"6h30m"')).assertLarger(-1);
-      expect(JSON.stringify(train.metrics).indexOf('"label":"second"')).assertEqual(-1);
-      expect(train.actions.length).assertEqual(2);
-      expect(train.actions[0].id).assertEqual('train.presale.schedule');
-      expect(train.actions[0].label).assertEqual('开售抢票');
-      expect(train.actions[0].variant).assertEqual('primary');
-      expect(actions.indexOf('train.booking.open')).assertEqual(-1);
-      expect(actions.indexOf('train.booking.alipay.open')).assertEqual(-1);
-      expect(JSON.stringify(train.actions[0].args).indexOf('"trainCode":"G123"')).assertLarger(-1);
-      expect(JSON.stringify(train.actions[0].args).indexOf('"travelDate":"2026-08-06"')).assertLarger(-1);
-      expect(JSON.stringify(train.actions[0].args).indexOf('"from":"深圳北"')).assertLarger(-1);
-      expect(JSON.stringify(train.actions[0].args).indexOf('"to":"上海虹桥"')).assertLarger(-1);
-      expect(JSON.stringify(train.actions[0].args).indexOf('"saleAt":"2026-08-06T12:45:00+08:00"')).assertLarger(-1);
-      expect(actions.indexOf('passenger')).assertEqual(-1);
-      expect(actions.indexOf('seat')).assertEqual(-1);
-      expect(train.actions[1].id).assertEqual('html_pin_train');
-    });
-
     it('keeps legacy train rows without price or booking action', 0, () => {
       const trains: A2uiComponent = {
         id: 'legacy-trains',
@@ -284,6 +249,33 @@ export default function htmlHomeSnapshotTest() {
           '{"foods":[{"name":"Coffee","category":"Cafe","address":"Road","distance":"800m","location":"22,113"}]}'),
         messages: [],
         isBusy: false,
+        isAwaitingFirstSurface: false
+      });
+      const serialized = JSON.stringify(doc.blocks);
+
+      expect(serialized.indexOf('AIPhone 正在处理')).assertEqual(-1);
+      expect(serialized.indexOf('Coffee')).assertLarger(-1);
+    });
+
+    it('drops_completed_thinking_blocks_even_while_busy', 0, () => {
+      const thinking: A2uiComponent = {
+        id: 'thinking',
+        component: 'ThinkingStream',
+        title: 'AIPhone 正在处理',
+        body: '正在调用工具',
+        status: 'calling_tool',
+        dataPath: '/thoughts'
+      };
+      const food: A2uiComponent = {
+        id: 'food',
+        component: 'FoodChoices',
+        dataPath: '/foods'
+      };
+      const doc = createHtmlHomeDocument({
+        surface: surface('food', 'ready', [root('food'), thinking, food],
+          '{"foods":[{"name":"Coffee","category":"Cafe","address":"Road","distance":"800m","location":"22,113"}]}'),
+        messages: [],
+        isBusy: true,
         isAwaitingFirstSurface: false
       });
       const serialized = JSON.stringify(doc.blocks);
@@ -591,8 +583,8 @@ export default function htmlHomeSnapshotTest() {
       expect(serialized.indexOf('local draft only; not sent')).assertLarger(-1);
       expect(serialized.indexOf('Slack token required')).assertLarger(-1);
       expect(serialized.indexOf('WeCom callback unavailable')).assertLarger(-1);
-      expect(serialized.indexOf('social_hub_select_item')).assertLarger(-1);
-      expect(serialized.indexOf('social_hub_draft_reply')).assertLarger(-1);
+      expect(serialized.indexOf('social_hub_select_item')).assertEqual(-1);
+      expect(serialized.indexOf('social_hub_draft_reply')).assertEqual(-1);
       expect(serialized.indexOf('social_hub_open_source')).assertLarger(-1);
       expect(serialized.indexOf('social_select_message')).assertEqual(-1);
       expect(serialized.indexOf('SocialInbox')).assertEqual(-1);

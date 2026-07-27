@@ -1,9 +1,11 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
   emptySocialHub,
+  emptySocialHubPublication,
   normalizeSocialHubConnection,
   normalizeSocialHubDraft,
-  normalizeSocialHubItem
+  normalizeSocialHubItem,
+  normalizeSocialHubPublication
 } from '@loop/agent-core';
 
 export default function socialHubTypesTest() {
@@ -105,6 +107,24 @@ export default function socialHubTypesTest() {
       expect(draft.text).assertEqual('Will reply later');
       expect(draft.localOnly).assertTrue();
       expect(draft.sent).assertFalse();
+    });
+
+    it('normalizes preview-only public publication state without a provider receipt', 0, () => {
+      const empty = emptySocialHubPublication();
+      const preview = normalizeSocialHubPublication({
+        platform: 'reddit',
+        operation: 'publish',
+        accountId: 'reddit-real',
+        accountName: 'u/real',
+        text: 'Preview only',
+        status: 'preview'
+      });
+
+      expect(empty.status).assertEqual('empty');
+      expect(preview.platform).assertEqual('reddit');
+      expect(preview.operation).assertEqual('publish');
+      expect(preview.status).assertEqual('preview');
+      expect(preview.error).assertEqual('');
     });
 
     it('allows connection auth to remain unresolved', 0, () => {

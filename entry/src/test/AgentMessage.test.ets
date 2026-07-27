@@ -1,9 +1,9 @@
 import { describe, expect, it } from '@ohos/hypium';
 import {
   ActionOffer,
-  ActionPlanDraft,
   AgentMessage,
   AgentMessageType,
+  ConversationRole,
   CreateDataTaskPayload,
   CreateUiTaskPayload,
   DataResult,
@@ -13,6 +13,8 @@ import {
   LeaderDataTask,
   LeaderPlanningContext,
   LeaderUiTask,
+  TurnConversationRole,
+  TurnResultPayload,
   UiRenderResult,
   UserInputPayload
 } from '@loop/agent-core';
@@ -65,48 +67,48 @@ export default function agentMessageTest() {
         AgentMessageType.ACTION_RUN,
         AgentMessageType.ACTION_PROGRESS,
         AgentMessageType.ACTION_RESULT,
-        AgentMessageType.TURN_CANCEL
+        AgentMessageType.TURN_CANCEL,
+        AgentMessageType.ACTION_PLAN_REQUEST,
+        AgentMessageType.TURN_RESULT
       ];
 
-      expect(Object.keys(AgentMessageType).length).assertEqual(13);
-      expect(types.join(',')).assertEqual('INPUT.USER,TASK.CREATE.UI,TASK.CREATE.DATA,TASK.RESULT.UI,TASK.RESULT.DATA,TASK.ERROR,ACTION.PLAN.DRAFT,ACTION.OFFERS.READY,ACTION.PLAN.READY,ACTION.RUN,ACTION.PROGRESS,ACTION.RESULT,TURN.CANCEL');
+      expect(Object.keys(AgentMessageType).length).assertEqual(15);
+      expect(types.join(',')).assertEqual('INPUT.USER,TASK.CREATE.UI,TASK.CREATE.DATA,TASK.RESULT.UI,TASK.RESULT.DATA,TASK.ERROR,ACTION.PLAN.DRAFT,ACTION.OFFERS.READY,ACTION.PLAN.READY,ACTION.RUN,ACTION.PROGRESS,ACTION.RESULT,TURN.CANCEL,ACTION.PLAN.REQUEST,TURN.RESULT');
     });
 
     it('exposes the canonical planning offer and task contracts', 0, () => {
-      const draft: ActionPlanDraft = {
-        planId: 'plan-1',
-        runId: 'run-1',
-        label: '查看详情后导航',
-        steps: []
-      };
+      const role: TurnConversationRole = 'user';
       const planningContext: LeaderPlanningContext = {
         tools: [{
           toolId: 'hotel.search',
+          domain: 'hotel',
           intent: 'hotel.search',
           riskLevel: 'read',
+          registeredBackends: ['mcp_remote'],
           inputSchema: 'hotelSearchRequest',
           outputSchema: 'hotelSearchResults',
           actions: ['hotel.detail', 'hotel.navigate']
         }],
-        skills: [{
-          skillId: 'hotel-search',
-          description: 'Search real hotel inventory.',
-          instructions: 'Use hotel.search and do not claim booking.'
-        }]
+        personas: []
       };
       const ui: CreateUiTaskPayload = {
         taskId: 'ui-1',
-        dataTaskId: 'data-1',
+        dataTaskIds: ['data-1', 'data-2'],
+        personaId: 'travel_companion',
         skillId: 'hotel-search',
         intent: 'hotel.search.results',
         expectedOutputSchema: 'hotelSearchResults'
       };
       const data: CreateDataTaskPayload = {
         taskId: 'data-1',
+        roundId: 'round-1',
         skillId: 'hotel-search',
+        goal: 'Find hotels',
+        allowedToolIds: ['hotel.search'],
         toolId: 'hotel.search',
         outputSchema: 'hotelSearchResults',
-        args: new Object()
+        args: new Object(),
+        required: true
       };
       const leaderUi: LeaderUiTask = {
         taskId: ui.taskId,
@@ -120,10 +122,21 @@ export default function agentMessageTest() {
         args: data.args
       };
       const plan: LeaderPlan = {
+        personaId: 'travel_companion',
         skillId: 'hotel-search',
+        roundAction: 'execute',
         ui: leaderUi,
-        data: leaderData,
-        actionPlan: draft
+        dataTasks: [leaderData, {
+          taskId: 'data-2',
+          toolId: 'hotel.detail',
+          outputSchema: 'hotelDetail',
+          args: new Object()
+        }],
+        reasonCode: 'hotel_search',
+        actionIntent: {
+          goal: 'Find hotels',
+          allowedActionIds: ['hotel.navigate']
+        }
       };
       const offer: ActionOffer = {
         offerId: 'offer-1',
@@ -135,11 +148,45 @@ export default function agentMessageTest() {
       const render: UiRenderResult = { jsonl: '{}' };
 
       expect(planningContext.tools[0].riskLevel).assertEqual('read');
+      expect(role).assertEqual('user');
+      expect(ConversationRole.USER).assertEqual('user');
+      expect(ConversationRole.ASSISTANT).assertEqual('assistant');
       expect(plan.skillId).assertEqual(ui.skillId);
       expect(data.skillId).assertEqual(ui.skillId);
-      expect(plan.actionPlan?.runId).assertEqual('run-1');
+      expect(plan.dataTasks.length).assertEqual(2);
+      expect(ui.dataTaskIds.length).assertEqual(2);
       expect(offer.actionId).assertEqual('hotel.navigate');
       expect(Object.keys(render).join(',')).assertEqual('jsonl');
+    });
+
+    it('carries bounded turn context and turn results', 0, () => {
+      const input: UserInputPayload = {
+        text: '查询天气',
+        recentMessages: [{ role: 'user', content: '我在北京' }],
+        previousPersonaId: 'travel_companion',
+        currentSurfaceSummary: {
+          surfaceId: 'surface-1',
+          kind: 'travel',
+          status: 'ready',
+          entityRefs: [],
+          actionOfferIds: []
+        },
+        recentObservations: []
+      };
+      const turn: TurnResultPayload = {
+        status: 'partial',
+        surfaceId: 'surface-1',
+        roundCount: 2,
+        message: 'one source unavailable',
+        personaId: 'travel_companion',
+        skillId: 'hotel-search'
+      };
+
+      expect(AgentMessageType.TURN_RESULT).assertEqual('TURN.RESULT');
+      expect(AgentMessageType.ACTION_PLAN_REQUEST).assertEqual('ACTION.PLAN.REQUEST');
+      expect(input.recentMessages!.length).assertEqual(1);
+      expect(turn.roundCount).assertEqual(2);
+      expect(turn.personaId).assertEqual('travel_companion');
     });
 
     it('retains each structured data result status', 0, () => {

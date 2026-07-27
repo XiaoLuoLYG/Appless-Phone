@@ -9,6 +9,7 @@ import { ModelScopeTool } from '../modelscope/ModelScopeTool';
 import { SkillReadTool } from '../skill/SkillReadTool';
 import { SkillSnapshot } from '../skill/SkillSnapshot';
 import { AgentTool } from './AgentTool';
+import { AgentToolRunOptions } from './AgentToolRunOptions';
 import { TimeTool } from './TimeTool';
 import { UiTool } from './UiTool';
 
@@ -23,7 +24,7 @@ class NoteTool implements AgentTool {
     return 'Echoes a note back into the loop.';
   }
 
-  async run(input: string): Promise<string> {
+  async run(input: string, _options?: AgentToolRunOptions): Promise<string> {
     const trimmed = input.trim();
     return trimmed.length === 0 ? 'No note provided.' : `Noted: ${trimmed}`;
   }
@@ -31,16 +32,26 @@ class NoteTool implements AgentTool {
 
 export class ToolRegistry {
   private tools: Map<string, AgentTool> = new Map();
+  private parallelSafeTools: Set<string> = new Set();
   private closeHandlers: ToolRegistryCloseHandler[] = [];
   private sealed: boolean = false;
 
-  register(tool: AgentTool): void {
+  register(tool: AgentTool, parallelSafe: boolean = false): void {
     this.ensureMutable();
     this.tools.set(tool.name(), tool);
+    if (parallelSafe) {
+      this.parallelSafeTools.add(tool.name());
+    } else {
+      this.parallelSafeTools.delete(tool.name());
+    }
   }
 
   has(name: string): boolean {
     return this.tools.has(name);
+  }
+
+  isParallelSafe(name: string): boolean {
+    return this.parallelSafeTools.has(name);
   }
 
   registerCloseHandler(handler: ToolRegistryCloseHandler): void {
@@ -60,12 +71,12 @@ export class ToolRegistry {
     return description;
   }
 
-  async run(name: string, input: string): Promise<string> {
+  async run(name: string, input: string, options?: AgentToolRunOptions): Promise<string> {
     const tool = this.tools.get(name);
     if (tool === undefined) {
       return `Unknown tool: ${name}`;
     }
-    return await tool.run(input ?? '');
+    return await tool.run(input ?? '', options);
   }
 
   async close(): Promise<void> {
@@ -109,7 +120,7 @@ export function createLoopToolRegistry(skillSnapshot?: SkillSnapshot | null): To
   registry.register(new TimeTool());
   registry.register(new UiTool());
   if (skillSnapshot !== undefined && skillSnapshot !== null && !skillSnapshot.isEmpty()) {
-    registry.register(new SkillReadTool(skillSnapshot));
+    registry.register(new SkillReadTool(skillSnapshot), true);
   }
   return registry;
 }

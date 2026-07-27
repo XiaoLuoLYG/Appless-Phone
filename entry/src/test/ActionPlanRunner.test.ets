@@ -31,7 +31,10 @@ function json(raw: string): Object {
 }
 
 function plan(raw: string): ActionPlan {
-  return JSON.parse(raw) as ActionPlan;
+  const candidate = JSON.parse(raw) as ActionPlan;
+  candidate.conversationId = 'conversation-1';
+  candidate.taskId = 'task-1';
+  return candidate;
 }
 
 function validPlan(): ActionPlan {
@@ -67,6 +70,7 @@ function definition(toolId: string, actions: string[]): ToolDefinition {
 class PlanLookup implements ToolDefinitionLookup {
   confirmDraft: boolean = false;
   confirmSave: boolean = false;
+  schemaChanged: boolean = false;
 
   find(toolId: string): ToolDefinition | null {
     if (toolId === 'gmail.thread.view') {
@@ -79,6 +83,9 @@ class PlanLookup implements ToolDefinitionLookup {
       if ((toolId === 'gmail.ai.reply.draft' && this.confirmDraft) ||
         (toolId === 'gmail.draft.create' && this.confirmSave)) {
         current.riskLevel = 'confirm_required';
+      }
+      if (this.schemaChanged) {
+        current.inputSchema = current.inputSchema + 'Changed';
       }
       return current;
     }
@@ -274,7 +281,7 @@ class ThrowingExecutor implements ActionStepExecutor {
 
 function context(): ActionPlanRunContext {
   return JSON.parse(
-    '{"conversationId":"conversation-1","turnId":"turn-1","surfaceId":"surface-1",' +
+    '{"conversationId":"conversation-1","turnId":"turn-1","taskId":"task-1","surfaceId":"surface-1",' +
       '"sourceToolId":"gmail.thread.view","planId":"plan-1","runId":"run-1"}'
   ) as ActionPlanRunContext;
 }
@@ -293,6 +300,21 @@ function runner(
     ),
     executor
   );
+}
+
+function freezePlan(candidate: ActionPlan, lookup: PlanLookup): ActionPlan {
+  const frozen = JSON.parse(JSON.stringify(candidate)) as ActionPlan;
+  const actionCatalog = new ActionCatalog(
+    lookup,
+    new ExactPlanSurface(),
+    new NoClientActions(),
+    new PlanArgsValidator()
+  );
+  for (let index = 0; index < frozen.steps.length; index++) {
+    frozen.steps[index].definitionFingerprint =
+      actionCatalog.definitionFingerprint(frozen.steps[index].actionId);
+  }
+  return frozen;
 }
 
 function validationCode(candidate: ActionPlan): string {
@@ -716,6 +738,52 @@ export default function actionPlanRunnerTest() {
       expect(outcome.errorCode).assertEqual('ARGS_CHANGED');
       expect(validator.saveCalls).assertEqual(1);
       expect(executor.actionIds.length).assertEqual(1);
+    });
+
+    it('rejects a definition changed after freeze before any executor call', 0, async () => {
+      const lookup = new PlanLookup();
+      const candidate = freezePlan(validPlan(), lookup);
+      lookup.schemaChanged = true;
+      const executor = new RecordingExecutor([
+        success(json('{"must":"not run"}'))
+      ]);
+
+      const outcome = await runner(executor, new PlanArgsValidator(), lookup).run(
+        candidate,
+        context()
+      );
+
+      expect(outcome.status).assertEqual('error');
+      expect(outcome.errorCode).assertEqual('PLAN_STALE');
+      expect(executor.actionIds.length).assertEqual(0);
+    });
+
+    it('rejects a definition changed while paused before resume execution', 0, async () => {
+      const lookup = new PlanLookup();
+      lookup.confirmSave = true;
+      const candidate = freezePlan(validPlan(), lookup);
+      const executor = new RecordingExecutor([
+        success(json(
+          '{"to":"alice@example.com","subject":"Re: Status","body":"Draft body",' +
+            '"threadId":"thread-real-1"}'
+        )),
+        success(json('{"draftId":"must-not-run"}'))
+      ]);
+      const actionRunner = runner(executor, new PlanArgsValidator(), lookup);
+      const paused = await actionRunner.run(candidate, context()) as ActionPlanPausedOutcome;
+      lookup.schemaChanged = true;
+
+      const outcome = await actionRunner.resume(
+        candidate,
+        context(),
+        paused.nextStepIndex,
+        paused.outputs,
+        paused.failedStepId
+      );
+
+      expect(outcome.status).assertEqual('error');
+      expect(outcome.errorCode).assertEqual('PLAN_STALE');
+      expect(executor.actionIds.join(',')).assertEqual('gmail.ai.reply.draft');
     });
 
     it('uses root-target replacement only when the bound result is an args object', 0, async () => {

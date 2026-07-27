@@ -37,7 +37,7 @@ import {
   HotelAgentRuntimeOptions,
   HotelTurnOutcome
 } from '../main/ets/pages/A2uiHome/agent/HotelAgentRuntime';
-import { SystemUriOpener } from '../main/ets/pages/A2uiHome/agent/HotelRegisteredActionExecutor';
+import { SystemUriOpener } from '../main/ets/pages/A2uiHome/agent/AiphoneRegisteredActionExecutor';
 import { createHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeSnapshot';
 import { HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
 
@@ -622,7 +622,7 @@ export default function hotelAgentRuntimeTest() {
       expect(messagesOf(bus, AgentMessageType.TASK_RESULT_UI).length >= 2).assertTrue();
       const ui = uiTasks[0].payload as Record<string, Object | string | number | boolean | null | undefined>;
       const data = dataTasks[0].payload as Record<string, Object | string | number | boolean | null | undefined>;
-      expect(ui.dataTaskId).assertEqual(data.taskId);
+      expect((ui['dataTaskIds'] as string[])[0]).assertEqual(data['taskId']);
       expect(ui.expectedOutputSchema).assertEqual(data.outputSchema);
       runtime.stop();
     });
@@ -726,7 +726,7 @@ export default function hotelAgentRuntimeTest() {
       expect(uiTasks[1].turnId).assertEqual(dataTasks[1].turnId);
       const ui = uiTasks[1].payload as Record<string, Object | string | number | boolean | null | undefined>;
       const data = dataTasks[1].payload as Record<string, Object | string | number | boolean | null | undefined>;
-      expect(ui.dataTaskId).assertEqual(data.taskId);
+      expect((ui['dataTaskIds'] as string[])[0]).assertEqual(data['taskId']);
       expect(data.toolId).assertEqual('hotel.detail');
       expect(provider.calls.join(',')).assertEqual('hotel.search,hotel.detail');
       let sawDetailRate = false;

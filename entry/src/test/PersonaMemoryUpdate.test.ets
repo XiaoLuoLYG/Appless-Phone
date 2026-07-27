@@ -2,6 +2,7 @@ import { describe, it, expect } from '@ohos/hypium';
 import { actionsOf, labelValues } from '@loop/agent-core';
 import { configureDefaultPersonaStoreForTests } from '../main/ets/model/PersonaStore';
 import {
+  mergePersonaStablePreference,
   memoryUpdateSurface,
   parsePersonaMemoryUpdateInput,
   PersonaMemorySuggestedAction,
@@ -59,6 +60,43 @@ export default function personaMemoryUpdateTest() {
         summary: '偏好',
         memoryText: ''
       }), 'food_companion') === null).assertTrue();
+    });
+
+    it('inserts durable memory only into Stable Preferences and preserves the document', 0, () => {
+      const current = [
+        '---',
+        'owner: food_companion',
+        '---',
+        '# 饮食搭子 Memory',
+        '',
+        '## Stable Preferences',
+        '- 半糖',
+        '',
+        '## Evidence',
+        '- 历史示例必须原样保留。'
+      ].join('\n');
+      const merged: string =
+        mergePersonaStablePreference(current, '用户咖啡偏好：只喝瑞幸咖啡。');
+
+      expect(merged.indexOf('owner: food_companion')).assertLarger(-1);
+      expect(merged.indexOf('- 半糖')).assertLarger(-1);
+      expect(merged.indexOf('- 用户咖啡偏好：只喝瑞幸咖啡。')).assertLarger(-1);
+      expect(merged.indexOf('## Evidence')).assertLarger(-1);
+      expect(merged.indexOf('历史示例必须原样保留。')).assertLarger(-1);
+      expect(merged.indexOf('用户咖啡偏好：只喝瑞幸咖啡。') <
+        merged.indexOf('## Evidence')).assertTrue();
+      expect(mergePersonaStablePreference(merged, '用户咖啡偏好：只喝瑞幸咖啡。'))
+        .assertEqual(merged);
+    });
+
+    it('creates Stable Preferences before Evidence when the section is absent', 0, () => {
+      const current = '# Memory\n\n## Evidence\n- 保留来源证据。';
+      const merged = mergePersonaStablePreference(current, '用户常驻北京。');
+
+      expect(merged.indexOf('## Stable Preferences')).assertLarger(-1);
+      expect(merged.indexOf('- 用户常驻北京。')).assertLarger(-1);
+      expect(merged.indexOf('## Stable Preferences') < merged.indexOf('## Evidence')).assertTrue();
+      expect(merged.indexOf('- 保留来源证据。')).assertLarger(-1);
     });
 
     it('builds a summarized InfoRows surface with rerun and edit actions', 0, () => {

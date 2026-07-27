@@ -2,6 +2,8 @@ import {
   ActionAgent,
   ActionArgsValidator,
   ActionCatalog,
+  ActionExecutionContext,
+  ActionExecutionResult,
   ActionOffer,
   ActionOfferContext,
   ActionOfferResolver,
@@ -36,6 +38,8 @@ import {
   LeaderPlanningContext,
   LinkedMessageBus,
   LocalModel,
+  SingleDataUiTaskRenderer,
+  SingleDataUiTaskRendererAdapter,
   SurfaceActionAuthorizer,
   TaskErrorPayload,
   ToolDefinition,
@@ -46,7 +50,6 @@ import {
   UiRenderResultPayload,
   UiSurfaceWriteLease,
   UiSurfaceWriter,
-  UiTaskRenderer,
   UserInputPayload,
   callStructuredHotelTool,
   hotelActionsFor,
@@ -67,15 +70,20 @@ import { createHtmlHomeDocument } from '../html/HtmlHomeSnapshot';
 import { isHtmlHomeActionAllowed } from '../html/HtmlHomeActionPolicy';
 import { HtmlHomeAction, HtmlHomeDocument } from '../html/HtmlHomeTypes';
 import {
+  AiphoneRegisteredActionExecutor,
   HotelActionIdFactory,
-  HotelRegisteredActionExecutor,
+  RegisteredPageAction,
   SystemUriOpener
-} from './HotelRegisteredActionExecutor';
+} from './AiphoneRegisteredActionExecutor';
 import {
   HotelLeaderPlanner,
   HotelLocalDateProvider,
   HotelPlannerIdFactory
 } from './HotelLeaderPlanner';
+import {
+  registeredPageSourceToolId,
+  resolveRegisteredPageAction
+} from './RegisteredPageActionRoute';
 
 const DEFAULT_SUBMIT_TIMEOUT_MS: number = 30000;
 const DEFAULT_ACTION_TIMEOUT_MS: number = 15000;
@@ -85,8 +93,23 @@ const SURFACE_HISTORY_LIMIT: number = 20;
 
 type HotelValue = Object | string | number | boolean | null | undefined;
 
-export type HotelSurfaceCallback = (surface: A2uiSurfaceState) => void;
+export type HotelSurfaceCallback = (surface: A2uiSurfaceState, generation?: number) => void;
+export type HotelSurfaceApplyCallback = (
+  surface: A2uiSurfaceState,
+  generation: number,
+  turnId: string
+) => boolean;
 export type HotelTurnStatus = 'success' | 'partial' | 'empty' | 'error' | 'canceled' | 'timeout';
+
+const rejectNonHotelPageAction: RegisteredPageAction = async (
+  _actionId: string,
+  _args: Object,
+  _context: ActionExecutionContext
+): Promise<ActionExecutionResult> => ({
+  status: 'error',
+  errorCode: 'ACTION_PAGE_ROUTE_UNAVAILABLE',
+  message: 'Page action is unavailable in the hotel-only runtime.'
+});
 
 export interface HotelTurnOutcome {
   ok: boolean;
@@ -479,10 +502,12 @@ function hotelDataAssessment(data: DataResult, expectedToolId: string): HotelDat
 function uiTaskPayload(message: AgentMessage): CreateUiTaskPayload | null {
   const payload = recordOf(message.payload);
   if (payload === null ||
-    !hasOnlyKeys(payload, 'dataTaskId,expectedOutputSchema,intent,skillId,taskId') ||
+    (!hasOnlyKeys(payload, 'dataTaskIds,expectedOutputSchema,intent,skillId,taskId') &&
+      !hasOnlyKeys(payload, 'dataTaskIds,expectedOutputSchema,intent,personaId,skillId,taskId')) ||
     payload['taskId'] !== message.taskId ||
-    !nonempty(payload['dataTaskId']) ||
-    payload['dataTaskId'] === message.taskId ||
+    !Array.isArray(payload['dataTaskIds']) || payload['dataTaskIds'].length !== 1 ||
+    !nonempty(payload['dataTaskIds'][0]) || payload['dataTaskIds'][0] === message.taskId ||
+    (payload['personaId'] !== undefined && !nonempty(payload['personaId'])) ||
     typeof payload['skillId'] !== 'string' ||
     !nonempty(payload['intent']) ||
     !nonempty(payload['expectedOutputSchema'])) {
@@ -494,12 +519,16 @@ function uiTaskPayload(message: AgentMessage): CreateUiTaskPayload | null {
 function dataTaskPayload(message: AgentMessage): CreateDataTaskPayload | null {
   const payload = recordOf(message.payload);
   if (payload === null ||
-    !hasOnlyKeys(payload, 'args,outputSchema,skillId,taskId,toolId') ||
+    !hasOnlyKeys(payload, 'allowedToolIds,args,goal,outputSchema,required,roundId,skillId,taskId,toolId') ||
     payload['taskId'] !== message.taskId ||
+    !nonempty(payload['roundId']) ||
     typeof payload['skillId'] !== 'string' ||
+    !nonempty(payload['goal']) ||
+    !Array.isArray(payload['allowedToolIds']) || payload['allowedToolIds'].length === 0 ||
     !nonempty(payload['toolId']) ||
     !nonempty(payload['outputSchema']) ||
-    recordOf(payload['args']) === null) {
+    recordOf(payload['args']) === null ||
+    typeof payload['required'] !== 'boolean') {
     return null;
   }
   return message.payload as CreateDataTaskPayload;
@@ -648,7 +677,7 @@ function copyTurn(source: HotelTurnCorrelation, generation: number): HotelTurnCo
   };
 }
 
-class MonotonicHotelIds implements HotelPlannerIdFactory, HotelActionIdFactory {
+export class MonotonicHotelIds implements HotelPlannerIdFactory, HotelActionIdFactory {
   private next: number = 0;
 
   nextId(prefix: string): string {
@@ -657,7 +686,7 @@ class MonotonicHotelIds implements HotelPlannerIdFactory, HotelActionIdFactory {
   }
 }
 
-class PreparedHotelFollowUpIds implements HotelActionIdFactory {
+export class PreparedHotelFollowUpIds implements HotelActionIdFactory {
   private readonly ids: MonotonicHotelIds;
   private preparedDataTaskId: string = '';
   private preparedUiTaskId: string = '';
@@ -696,31 +725,31 @@ class PreparedHotelFollowUpIds implements HotelActionIdFactory {
   }
 }
 
-class CurrentHotelToolLookup implements ToolDefinitionLookup {
+export class CurrentHotelToolLookup implements ToolDefinitionLookup {
   find(toolId: string): ToolDefinition | null {
     return toolDefinitionForToolId(toolId);
   }
 }
 
-class RejectHotelClientAction implements ClientActionAuthorizer {
+export class RejectHotelClientAction implements ClientActionAuthorizer {
   allows(_actionId: string, _args: Object): boolean {
     return false;
   }
 }
 
-class CurrentHotelArgsValidator implements ActionArgsValidator {
+export class CurrentHotelArgsValidator implements ActionArgsValidator {
   validate(actionId: string, args: Object): ActionValidationResult {
     return validateHotelActionArgs(actionId, args);
   }
 }
 
-class StructuredHotelDataExecutor implements DataTaskExecutor {
+export class StructuredHotelDataExecutor implements DataTaskExecutor {
   async execute(task: CreateDataTaskPayload): Promise<DataResult> {
     return callStructuredHotelTool(task.toolId, task.args);
   }
 }
 
-function authorizeHotelDataTask(task: CreateDataTaskPayload): DataTaskAuthorizationResult {
+export function authorizeHotelDataTask(task: CreateDataTaskPayload): DataTaskAuthorizationResult {
   const definition = toolDefinitionForToolId(task.toolId);
   if (definition === null || definition.riskLevel !== 'read' ||
     definition.outputSchema !== task.outputSchema) {
@@ -760,21 +789,23 @@ function authorizeHotelDataTask(task: CreateDataTaskPayload): DataTaskAuthorizat
   return { ok: true, code: '', message: '' };
 }
 
-function hotelLeaderPlanningContext(): LeaderPlanningContext {
+export function hotelLeaderPlanningContext(): LeaderPlanningContext {
   const definition = toolDefinitionForToolId('hotel.search');
   if (definition === null) {
-    return { tools: [], skills: [] };
+    return { tools: [], personas: [] };
   }
   return {
     tools: [{
       toolId: definition.toolId,
+      domain: definition.domain,
       intent: definition.intent,
       riskLevel: definition.riskLevel,
+      registeredBackends: definition.backendPriority.slice(),
       inputSchema: definition.inputSchema,
       outputSchema: definition.outputSchema,
       actions: definition.actions.slice()
     }],
-    skills: []
+    personas: []
   };
 }
 
@@ -830,13 +861,13 @@ async function resolveHotelActionOffers(
   return offers;
 }
 
-function hotelOfferResolver(catalog: ActionCatalog): ActionOfferResolver {
+export function hotelOfferResolver(catalog: ActionCatalog): ActionOfferResolver {
   return async (data: DataResult, context: ActionOfferContext): Promise<ActionOffer[]> => {
     return resolveHotelActionOffers(catalog, data, context);
   };
 }
 
-class IgnoreHotelSurfaceWriter implements UiSurfaceWriter {
+export class IgnoreHotelSurfaceWriter implements UiSurfaceWriter {
   async write(
     _turnId: string,
     _surfaceId: string,
@@ -846,7 +877,7 @@ class IgnoreHotelSurfaceWriter implements UiSurfaceWriter {
   }
 }
 
-class HotelSurfaceAuthority implements SurfaceActionAuthorizer {
+export class HotelSurfaceAuthority implements SurfaceActionAuthorizer {
   private conversationId: string = '';
   private turnId: string = '';
   private surfaceId: string = '';
@@ -858,7 +889,8 @@ class HotelSurfaceAuthority implements SurfaceActionAuthorizer {
     turnId: string,
     surfaceId: string,
     sourceToolId: string,
-    document: HtmlHomeDocument
+    document: HtmlHomeDocument,
+    exactPageAction?: A2uiAction
   ): void {
     this.clear();
     this.conversationId = conversationId;
@@ -869,6 +901,9 @@ class HotelSurfaceAuthority implements SurfaceActionAuthorizer {
     document.blocks.forEach((block) => {
       this.collect(document, block.actions);
     });
+    if (exactPageAction !== undefined && exactPageAction.args !== undefined) {
+      this.allowed.add(this.actionKey(exactPageAction.id, exactPageAction.args));
+    }
   }
 
   clear(): void {
@@ -907,12 +942,7 @@ class HotelSurfaceAuthority implements SurfaceActionAuthorizer {
 
   private collect(document: HtmlHomeDocument, actions: HtmlHomeAction[]): void {
     actions.forEach((candidate: HtmlHomeAction) => {
-      if (candidate.id !== 'hotel.detail' &&
-        candidate.id !== 'hotel.navigate' &&
-        candidate.id !== 'hotel.booking.open') {
-        return;
-      }
-      const action: A2uiAction = {
+      const clicked: A2uiAction = {
         id: candidate.id,
         label: candidate.label,
         prompt: candidate.prompt,
@@ -920,10 +950,23 @@ class HotelSurfaceAuthority implements SurfaceActionAuthorizer {
         kind: candidate.kind
       };
       if (candidate.args !== undefined) {
-        action.args = candidate.args;
+        clicked.args = candidate.args;
       }
-      if (action.args !== undefined && isHtmlHomeActionAllowed(document, action)) {
-        this.allowed.add(this.actionKey(action.id, action.args));
+      if (clicked.args === undefined || !isHtmlHomeActionAllowed(document, clicked)) {
+        return;
+      }
+      let execution: A2uiAction | null = null;
+      if ((clicked.id === 'hotel.detail' || clicked.id === 'hotel.navigate') &&
+        this.sourceToolId === 'hotel.search') {
+        execution = clicked;
+      } else if (clicked.id === 'hotel.booking.open' && this.sourceToolId === 'hotel.detail') {
+        execution = clicked;
+      } else {
+        const route = resolveRegisteredPageAction(this.sourceToolId, clicked);
+        execution = route === null ? null : route.action;
+      }
+      if (execution !== null && execution.args !== undefined) {
+        this.allowed.add(this.actionKey(execution.id, execution.args));
       }
     });
   }
@@ -933,7 +976,7 @@ class HotelSurfaceAuthority implements SurfaceActionAuthorizer {
   }
 }
 
-class HotelUiRenderer implements UiTaskRenderer {
+export class HotelUiRenderer implements SingleDataUiTaskRenderer {
   private readonly layoutPlanner: UiLayoutPlanner | null;
   private readonly layoutTimeoutMs: number;
 
@@ -1083,7 +1126,7 @@ class HotelUiRenderer implements UiTaskRenderer {
   }
 }
 
-class HotelVisibility {
+export class HotelVisibility {
   private turnId: string = '';
   private generation: number = 0;
   private surfaceId: string = '';
@@ -1138,10 +1181,10 @@ class HotelVisibility {
   }
 }
 
-class HotelRuntimeSurfaceWriter implements UiSurfaceWriter {
+export class HotelRuntimeSurfaceWriter implements UiSurfaceWriter {
   private readonly conversationId: string;
   private readonly downstream: UiSurfaceWriter;
-  private readonly callback: HotelSurfaceCallback | null;
+  private readonly callback: HotelSurfaceApplyCallback | null;
   private readonly authority: HotelSurfaceAuthority;
   private readonly visibility: HotelVisibility;
   private readonly records: Map<string, HotelSurfaceRecord> =
@@ -1149,19 +1192,24 @@ class HotelRuntimeSurfaceWriter implements UiSurfaceWriter {
   private readonly recordOrder: string[] = [];
   private searchRecord: HotelSearchSurfaceSnapshot | null = null;
   private disposed: boolean = false;
+  private readonly autoActivate: boolean;
+  private automaticGeneration: number = 0;
+  private pinnedAutomaticTurnId: string = '';
 
   constructor(
     conversationId: string,
     downstream: UiSurfaceWriter,
-    callback: HotelSurfaceCallback | null,
+    callback: HotelSurfaceApplyCallback | null,
     authority: HotelSurfaceAuthority,
-    visibility: HotelVisibility
+    visibility: HotelVisibility,
+    autoActivate: boolean = false
   ) {
     this.conversationId = conversationId;
     this.downstream = downstream;
     this.callback = callback;
     this.authority = authority;
     this.visibility = visibility;
+    this.autoActivate = autoActivate;
   }
 
   async write(
@@ -1172,6 +1220,11 @@ class HotelRuntimeSurfaceWriter implements UiSurfaceWriter {
   ): Promise<void> {
     if (this.disposed) {
       return;
+    }
+    if (this.autoActivate && this.visibility.generationFor(turnId) === 0 &&
+      (this.pinnedAutomaticTurnId.length === 0 || this.pinnedAutomaticTurnId === turnId)) {
+      this.automaticGeneration++;
+      this.visibility.expect(turnId, this.automaticGeneration);
     }
     const parsed = parseA2uiJsonl(jsonl);
     if (parsed.error.length > 0) {
@@ -1198,6 +1251,20 @@ class HotelRuntimeSurfaceWriter implements UiSurfaceWriter {
     if (record.generation === 0) {
       record.generation = this.visibility.generationFor(turnId);
     }
+    let replacesSurfaceSnapshot: boolean = false;
+    for (let index = 0; index < parsed.envelopes.length; index++) {
+      const createSurface = parsed.envelopes[index].createSurface;
+      if (createSurface !== undefined && createSurface !== null &&
+        createSurface.surfaceId === surfaceId) {
+        replacesSurfaceSnapshot = true;
+        break;
+      }
+    }
+    if (record.revision > 0 && replacesSurfaceSnapshot) {
+      const retainedState: A2uiSurfaceState = record.store.getSurface();
+      retainedState.components = [];
+      record.store.seed(retainedState);
+    }
     parsed.envelopes.forEach((envelope: A2uiEnvelope) => {
       const applied: A2uiApplyResult = (record as HotelSurfaceRecord).store.apply(envelope);
       if (!applied.ok) {
@@ -1213,7 +1280,7 @@ class HotelRuntimeSurfaceWriter implements UiSurfaceWriter {
       isAwaitingFirstSurface: false
     });
     const detected = this.sourceToolId(record.surface);
-    if (detected === 'hotel.search' || detected === 'hotel.detail') {
+    if (detected.length > 0) {
       record.sourceToolId = detected;
     }
     const revision = record.revision;
@@ -1285,11 +1352,11 @@ class HotelRuntimeSurfaceWriter implements UiSurfaceWriter {
       isBusy: false,
       isAwaitingFirstSurface: false
     });
-    this.visibility.restore(record.turnId, generation, record.surfaceId);
     try {
-      if (this.callback !== null) {
-        this.callback(surface);
+      if (this.callback !== null && !this.callback(surface, generation, record.turnId)) {
+        return false;
       }
+      this.visibility.restore(record.turnId, generation, record.surfaceId);
       this.authority.activate(
         this.conversationId,
         record.turnId,
@@ -1299,10 +1366,29 @@ class HotelRuntimeSurfaceWriter implements UiSurfaceWriter {
       );
       return true;
     } catch (_error) {
-      this.visibility.clear();
-      this.authority.clear();
       return false;
     }
+  }
+
+  restoreLatestSearchSurface(): boolean {
+    const record = this.searchRecord;
+    if (record === null) {
+      return false;
+    }
+    this.pinnedAutomaticTurnId = record.turnId;
+    this.automaticGeneration++;
+    return this.restoreSearchSurface(record.turnId, this.automaticGeneration);
+  }
+
+  activateAutomaticTurn(turnId: string): number {
+    if (this.disposed || !this.autoActivate || turnId.trim().length === 0) {
+      return 0;
+    }
+    this.pinnedAutomaticTurnId = turnId;
+    this.automaticGeneration++;
+    this.visibility.expect(turnId, this.automaticGeneration);
+    this.activateTurn(turnId, this.automaticGeneration);
+    return this.automaticGeneration;
   }
 
   activeSurfaceId(): string {
@@ -1323,6 +1409,7 @@ class HotelRuntimeSurfaceWriter implements UiSurfaceWriter {
 
   clearSearchReference(): void {
     this.searchRecord = null;
+    this.pinnedAutomaticTurnId = '';
     this.prune();
   }
 
@@ -1347,11 +1434,12 @@ class HotelRuntimeSurfaceWriter implements UiSurfaceWriter {
       record.downstreamRevision <= record.deliveredRevision) {
       return;
     }
-    if (!this.visibility.setSurface(record.turnId, record.generation, record.surfaceId)) {
+    if (this.callback !== null &&
+      !this.callback(record.surface, record.generation, record.turnId)) {
       return;
     }
-    if (this.callback !== null) {
-      this.callback(record.surface);
+    if (!this.visibility.setSurface(record.turnId, record.generation, record.surfaceId)) {
+      return;
     }
     this.authority.activate(
       this.conversationId,
@@ -1360,6 +1448,17 @@ class HotelRuntimeSurfaceWriter implements UiSurfaceWriter {
       record.sourceToolId,
       record.document
     );
+    if (this.autoActivate && this.sourceToolId(record.surface) === 'hotel.search' &&
+      record.lease !== undefined && record.lease.isActive()) {
+      const snapshotStore = new A2uiSurfaceStore();
+      this.searchRecord = {
+        turnId: record.turnId,
+        surfaceId: record.surfaceId,
+        sourceToolId: record.sourceToolId,
+        surface: snapshotStore.seed(record.surface),
+        lease: record.lease
+      };
+    }
     record.deliveredRevision = record.downstreamRevision;
   }
 
@@ -1394,7 +1493,7 @@ class HotelRuntimeSurfaceWriter implements UiSurfaceWriter {
       if (model.summary.dataLabel === 'actionStatus') {
         return '';
       }
-      return model.summary.toolName.indexOf('hotel.') === 0 ? model.summary.toolName : '';
+      return registeredPageSourceToolId(surface);
     } catch (_error) {
       return '';
     }
@@ -1411,6 +1510,7 @@ export class HotelAgentRuntime {
   private readonly data: DataAgent;
   private readonly ui: UiAgent;
   private readonly action: ActionAgent;
+  private readonly registered: AiphoneRegisteredActionExecutor;
   private readonly catalog: ActionCatalog;
   private readonly authority: HotelSurfaceAuthority;
   private readonly visibility: HotelVisibility;
@@ -1445,7 +1545,14 @@ export class HotelAgentRuntime {
     this.surfaceWriter = new HotelRuntimeSurfaceWriter(
       this.conversationId,
       downstream,
-      options.onSurface === undefined ? null : options.onSurface,
+      options.onSurface === undefined ? null : (
+        surface: A2uiSurfaceState,
+        generation: number,
+        _turnId: string
+      ): boolean => {
+        (options.onSurface as HotelSurfaceCallback)(surface, generation);
+        return true;
+      },
       this.authority,
       this.visibility
     );
@@ -1456,14 +1563,20 @@ export class HotelAgentRuntime {
       options.uiLayoutPlanner === undefined ? null : options.uiLayoutPlanner,
       boundedDeadline(options.uiLayoutTimeoutMs, DEFAULT_LAYOUT_TIMEOUT_MS)
     );
-    const registered = new HotelRegisteredActionExecutor(
+    const registered = new AiphoneRegisteredActionExecutor(
       this.catalog,
       options.opener,
-      this.followUpIds
+      this.followUpIds,
+      rejectNonHotelPageAction
     );
+    this.registered = registered;
     this.leader = new LeaderAgent(this.bus, planner, hotelLeaderPlanningContext());
     this.data = new DataAgent(this.bus, authorizeHotelDataTask, executor);
-    this.ui = new UiAgent(this.bus, renderer, this.surfaceWriter);
+    this.ui = new UiAgent(
+      this.bus,
+      new SingleDataUiTaskRendererAdapter(renderer),
+      this.surfaceWriter
+    );
     this.action = new ActionAgent(
       this.bus,
       this.catalog,
@@ -1629,6 +1742,16 @@ export class HotelAgentRuntime {
       actionId: action.id,
       args: action.args
     };
+    const runMessage: AgentMessage = {
+      type: AgentMessageType.ACTION_RUN,
+      conversationId: context.conversationId,
+      turnId: context.turnId,
+      taskId: taskId,
+      payload: payload
+    };
+    if (!this.action.authorizeDirectSurfaceRun(runMessage)) {
+      return Promise.resolve(false);
+    }
     return new Promise<boolean>((resolve: (ok: boolean) => void) => {
       const pending: PendingAction = {
         conversationId: context.conversationId,
@@ -1660,13 +1783,7 @@ export class HotelAgentRuntime {
         this.timeoutAction(taskId, runId);
       }, this.actionTimeoutMs);
       this.pendingActions.set(taskId, pending);
-      this.bus.publish({
-        type: AgentMessageType.ACTION_RUN,
-        conversationId: context.conversationId,
-        turnId: context.turnId,
-        taskId: taskId,
-        payload: payload
-      });
+      this.bus.publish(runMessage);
     });
   }
 
@@ -1717,6 +1834,7 @@ export class HotelAgentRuntime {
     this.data.stop();
     this.ui.stop();
     this.action.stop();
+    this.registered.dispose();
     this.pendingTurns.forEach((pending: PendingTurn) => {
       if (pending.timerId >= 0) {
         clearTimeout(pending.timerId);
@@ -1802,7 +1920,7 @@ export class HotelAgentRuntime {
       task.intent === 'hotel.search' &&
       task.expectedOutputSchema === 'hotelSearchResults') {
       pending.uiTaskId = message.taskId;
-      pending.dataTaskId = task.dataTaskId;
+      pending.dataTaskId = task.dataTaskIds[0];
       pending.expectedSchema = task.expectedOutputSchema;
       pending.uiCreated = true;
       this.tryPairTurn(pending);
@@ -1812,7 +1930,7 @@ export class HotelAgentRuntime {
       if (action.actionId !== 'hotel.detail' ||
         action.expectedFollowUpUiTaskId !== message.taskId ||
         task.taskId !== action.expectedFollowUpUiTaskId ||
-        task.dataTaskId !== action.expectedFollowUpDataTaskId ||
+        task.dataTaskIds[0] !== action.expectedFollowUpDataTaskId ||
         task.intent !== 'hotel.detail' ||
         task.expectedOutputSchema !== 'hotelRatePlans' ||
         message.turnId === action.turnId ||

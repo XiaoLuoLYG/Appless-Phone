@@ -10,10 +10,11 @@ import {
   calendarMissingArgsResult,
   calendarProviderDateTime,
   calendarSearchQueryText,
-  calendarUpdateArgsFromResultsForTest,
+  calendarUpdateArgsFromResults,
   calendarUpdateNeedsInputResults,
   calendarUpdateBody,
-  normalizedCalendarArgsForPrompt
+  normalizedCalendarArgsForPrompt,
+  remainingReadStructuredDataResult
 } from '@loop/agent-core';
 
 export default function calendarApiClientTest() {
@@ -50,7 +51,7 @@ export default function calendarApiClientTest() {
       const matches = calendarEventResultsFromListPayload(
         '{"items":[{"id":"event-123","summary":"团队同步","start":{"dateTime":"2026-07-18T16:00:00+08:00"},"end":{"dateTime":"2026-07-18T16:30:00+08:00"}}]}'
       );
-      const resolved = calendarUpdateArgsFromResultsForTest({
+      const resolved = calendarUpdateArgsFromResults({
         query: '团队同步',
         timeMin: '2026-07-18T16:00:00+08:00',
         timeMax: '2026-07-18T17:00:00+08:00',
@@ -69,7 +70,7 @@ export default function calendarApiClientTest() {
       const matches = calendarEventResultsFromListPayload(
         '{"items":[{"id":"event-123","summary":"团队同步","start":{"dateTime":"2026-07-18T16:00:00+08:00"},"end":{"dateTime":"2026-07-18T16:30:00+08:00"}}]}'
       );
-      const resolved = calendarUpdateArgsFromResultsForTest({
+      const resolved = calendarUpdateArgsFromResults({
         query: '团队同步',
         timeMin: '2026-07-18T12:00:00+08:00',
         timeMax: '2026-07-18T18:00:00+08:00',
@@ -81,6 +82,28 @@ export default function calendarApiClientTest() {
       expect(resolved.eventId).assertEqual('event-123');
       expect(resolved.start).assertEqual('2026-07-18T09:00:00');
       expect(resolved.end).assertEqual('2026-07-18T09:30:00');
+    });
+
+    it('does not guess an eventId when a Calendar selector is ambiguous', 0, () => {
+      const matches = calendarEventResultsFromListPayload(
+        '{"items":[' +
+        '{"id":"event-real-1","summary":"团队同步","start":{"dateTime":"2026-07-18T16:00:00+08:00"},"end":{"dateTime":"2026-07-18T16:30:00+08:00"}},' +
+        '{"id":"event-real-2","summary":"团队同步","start":{"dateTime":"2026-07-18T17:00:00+08:00"},"end":{"dateTime":"2026-07-18T17:30:00+08:00"}}]}'
+      );
+      const resolved = calendarUpdateArgsFromResults({
+        query: '团队同步',
+        timeMin: '2026-07-18T15:00:00+08:00',
+        timeMax: '2026-07-18T18:00:00+08:00',
+        start: '2026-07-18T19:00:00+08:00',
+        end: '2026-07-18T19:30:00+08:00'
+      }, matches);
+
+      expect(resolved).assertNull();
+      expect(calendarEventRequiredFields('calendar.event.update', {
+        title: '团队同步',
+        start: '2026-07-18T19:00:00+08:00',
+        end: '2026-07-18T19:30:00+08:00'
+      }).indexOf('eventId')).assertLarger(-1);
     });
 
     it('keeps the resolved real event visible while asking for a missing destination time', 0, () => {
@@ -211,6 +234,47 @@ export default function calendarApiClientTest() {
       expect(results[0].rows[1].value).assertEqual('2026-07-31T15:00:00+08:00');
     });
 
+    it('preserves real Calendar event IDs in structured data without rendered envelopes', 0, () => {
+      const observation = '{"data":{"items":[{"id":"event-structured-real-1","summary":"Structured QA",' +
+        '"start":{"dateTime":"2026-07-31T15:00:00+08:00"},' +
+        '"end":{"dateTime":"2026-07-31T15:30:00+08:00"}}]},"error":null}';
+      const provider = calendarResultsFromComposioObservation('calendar.events.search', observation);
+      provider[0].providerPhase = 'execution';
+      const structured = remainingReadStructuredDataResult(
+        'calendar.events.search', 'calendarEvents', provider
+      );
+      const serialized = JSON.stringify(structured.data);
+
+      expect(structured.status).assertEqual('success');
+      expect(serialized.indexOf('event-structured-real-1')).assertLarger(-1);
+      expect(serialized.indexOf('updateComponents')).assertEqual(-1);
+      expect(serialized.indexOf('createSurface')).assertEqual(-1);
+      expect(serialized.indexOf('jsonl')).assertEqual(-1);
+    });
+
+    it('separates Calendar missing auth successful empty and inner provider error', 0, () => {
+      const auth = remainingReadStructuredDataResult('calendar.events.search', 'calendarEvents', [{
+        sourceTag: 'Composio Google Calendar', toolName: 'calendar.events.search', title: 'Composio 未配置',
+        status: 'needs_auth', summary: 'Google Calendar OAuth 未授权。', rows: [], rawPreview: ''
+      }]);
+      const emptyProvider = calendarEventResultsFromListPayload('{"items":[]}');
+      emptyProvider[0].providerPhase = 'execution';
+      const empty = remainingReadStructuredDataResult('calendar.events.search', 'calendarEvents', emptyProvider);
+      const inner = calendarResultsFromComposioObservation(
+        'calendar.events.search', '{"data":null,"error":"calendar backend unavailable"}'
+      );
+      inner[0].providerPhase = 'execution';
+      const error = remainingReadStructuredDataResult('calendar.events.search', 'calendarEvents', inner);
+
+      expect(auth.error?.code).assertEqual('AUTH_REQUIRED');
+      expect(auth.sources.length).assertEqual(0);
+      expect(empty.status).assertEqual('empty');
+      expect(empty.sources.length).assertEqual(1);
+      expect(error.error?.code).assertEqual('PROVIDER_ERROR');
+      expect(error.error?.message.indexOf('calendar backend unavailable')).assertLarger(-1);
+      expect(error.sources.length).assertEqual(1);
+    });
+
     it('maps a Composio Calendar create payload into a visible confirmation event', 0, () => {
       const observation = '{"data":{"id":"event-created-1","summary":"AIPhoneDemo 创建测试","start":{"dateTime":"2026-08-01T15:00:00+08:00"},"end":{"dateTime":"2026-08-01T15:30:00+08:00"},"htmlLink":"https://calendar.google.com/event?eid=2"},"error":null}';
       const results = calendarResultsFromComposioObservation('calendar.event.create', observation);
@@ -231,6 +295,42 @@ export default function calendarApiClientTest() {
       expect(results[0].rows[0].value).assertEqual('event-created-real');
       expect(results[0].rows[1].value).assertEqual('2026-08-01T15:00:00+08:00');
       expect(results[0].status).assertEqual('success');
+    });
+
+    it('fails Calendar writes closed on nested negative provider truth', 0, () => {
+      const create = calendarResultsFromComposioObservation(
+        'calendar.event.create',
+        '{"data":{"successful":false,"response_data":{"id":"event-fake"}},"error":null}'
+      );
+      const update = calendarResultsFromComposioObservation(
+        'calendar.event.update',
+        '{"data":{"response_data":{"success":false,"id":"event-fake"}},"error":null}'
+      );
+      const remove = calendarResultsFromComposioObservation(
+        'calendar.event.delete',
+        '{"data":{"response_data":{"status":"delete_failed"}},"error":null}',
+        { eventId: 'event-request-only', calendarId: 'primary' }
+      );
+
+      expect(create[0].status).assertEqual('error');
+      expect(update[0].status).assertEqual('error');
+      expect(remove[0].status).assertEqual('error');
+      expect(JSON.stringify(remove[0].rows).indexOf('event-request-only')).assertEqual(-1);
+    });
+
+    it('requires positive provider evidence before returning Calendar delete success', 0, () => {
+      const missing = calendarResultsFromComposioObservation(
+        'calendar.event.delete', '{"data":{},"error":null}',
+        { eventId: 'event-request-only', calendarId: 'primary' }
+      );
+      const positive = calendarResultsFromComposioObservation(
+        'calendar.event.delete', '{"data":{"successful":true},"error":null}',
+        { eventId: 'event-provider-confirmed', calendarId: 'primary' }
+      );
+
+      expect(missing[0].status).assertEqual('error');
+      expect(positive[0].status).assertEqual('success');
+      expect(positive[0].rows[0].value).assertEqual('event-provider-confirmed');
     });
 
     it('normalizes current week search prompts before calling Calendar', 0, () => {
@@ -259,19 +359,79 @@ export default function calendarApiClientTest() {
       expect(args.timeMax).assertEqual('2026-08-01T00:00:00+08:00');
     });
 
-    it('does not rewrite model-owned Calendar write parameters from prompt text', 0, () => {
-      const args: CalendarEventArgs = normalizedCalendarArgsForPrompt('calendar.event.create', '帮我在明天下午创建一个一对一会议的日程，4:30开始持续半个小时', {
-        title: '一对一会议',
-        start: '2023-10-05T16:30:00+08:00',
-        end: '2023-10-05T17:00:00+08:00',
-        timezone: 'Asia/Shanghai',
-        calendarId: 'primary'
-      }, new Date('2026-07-01T09:00:00+08:00'));
+    it('parses the documented Calendar create prompt through the shared normalizer', 0, () => {
+      const args: CalendarEventArgs = normalizedCalendarArgsForPrompt(
+        'calendar.event.create',
+        '帮我在 2026年7月30日下午3点创建一个title为AIPhoneDemo的30分钟日程',
+        {},
+        new Date('2026-07-22T09:00:00+08:00'),
+        true
+      );
 
-      expect(args.title).assertEqual('一对一会议');
-      expect(args.start).assertEqual('2023-10-05T16:30:00+08:00');
-      expect(args.end).assertEqual('2023-10-05T17:00:00+08:00');
+      expect(args.title).assertEqual('AIPhoneDemo');
+      expect(args.start).assertEqual('2026-07-30T15:00:00+08:00');
+      expect(args.end).assertEqual('2026-07-30T15:30:00+08:00');
       expect(args.timezone).assertEqual('Asia/Shanghai');
+      expect(args.calendarId).assertEqual('primary');
+    });
+
+    it('parses an unlabeled relative create prompt but rejects a missing explicit time', 0, () => {
+      const exact = normalizedCalendarArgsForPrompt(
+        'calendar.event.create',
+        '明天下午3点帮我创建一个30分钟的产品评审日程',
+        {},
+        new Date('2026-07-22T09:00:00+08:00'),
+        true
+      );
+      const vague = normalizedCalendarArgsForPrompt(
+        'calendar.event.create',
+        '明天下午帮我创建标题为产品评审的日程',
+        {},
+        new Date('2026-07-22T09:00:00+08:00'),
+        true
+      );
+
+      expect(exact.title).assertEqual('产品评审');
+      expect(exact.start).assertEqual('2026-07-23T15:00:00+08:00');
+      expect(exact.end).assertEqual('2026-07-23T15:30:00+08:00');
+      expect(calendarEventRequiredFields('calendar.event.create', vague).join(','))
+        .assertEqual('start,end');
+    });
+
+    it('parses documented and common Calendar updates without accepting an eventId', 0, () => {
+      const documented = normalizedCalendarArgsForPrompt(
+        'calendar.event.update',
+        '把 2026年7月30日 的 Appless QA run-1 日程改到下午4点',
+        { eventId: 'user-forged' },
+        new Date('2026-07-22T09:00:00+08:00'),
+        true
+      );
+      const renamed = normalizedCalendarArgsForPrompt(
+        'calendar.event.update',
+        '把明天下午的产品评审日程改名为产品终审并改到上午9点',
+        {},
+        new Date('2026-07-22T09:00:00+08:00'),
+        true
+      );
+      const vague = normalizedCalendarArgsForPrompt(
+        'calendar.event.update',
+        '把明天下午的产品评审日程移到上午',
+        {},
+        new Date('2026-07-22T09:00:00+08:00'),
+        true
+      );
+
+      expect(documented.eventId).assertEqual('');
+      expect(documented.query).assertEqual('Appless QA run-1');
+      expect(documented.timeMin).assertEqual('2026-07-30T00:00:00+08:00');
+      expect(documented.timeMax).assertEqual('2026-07-31T00:00:00+08:00');
+      expect(documented.start).assertEqual('2026-07-30T16:00:00+08:00');
+      expect(documented.end).assertEqual('');
+      expect(renamed.query).assertEqual('产品评审');
+      expect(renamed.title).assertEqual('产品终审');
+      expect(renamed.start).assertEqual('2026-07-23T09:00:00+08:00');
+      expect(vague.query).assertEqual('产品评审');
+      expect(vague.start).assertEqual('');
     });
   });
 }

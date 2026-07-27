@@ -29,6 +29,9 @@ export function socialHubPlatformLabel(platform: SocialHubPlatform | string): st
   if (platform === 'instagram') {
     return 'Instagram';
   }
+  if (platform === 'reddit') {
+    return 'Reddit';
+  }
   return '未知';
 }
 
@@ -160,7 +163,7 @@ export function socialHubComposioToolkitCandidates(platform: SocialHubPlatform |
     return ['x', 'twitter'];
   }
   if (platform === 'slack' || platform === 'discord' || platform === 'linkedin' ||
-    platform === 'whatsapp' || platform === 'instagram') {
+    platform === 'whatsapp' || platform === 'instagram' || platform === 'reddit') {
     return [platform];
   }
   return [];

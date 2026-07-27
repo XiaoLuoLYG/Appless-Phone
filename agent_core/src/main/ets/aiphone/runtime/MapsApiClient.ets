@@ -42,6 +42,33 @@ interface MapsOpeningHours {
   openNow?: boolean;
 }
 
+export type MapsPlaceProviderStatus = 'success' | 'empty' | 'error';
+
+export interface MapsPlaceRecord {
+  placeId: string;
+  title: string;
+  address: string;
+  rating: string;
+  mapLocation: string;
+  openNow: string;
+  mapsUrl: string;
+}
+
+export interface MapsPlaceProviderResult {
+  toolId: string;
+  status: MapsPlaceProviderStatus;
+  places: MapsPlaceRecord[];
+  query: string;
+  message: string;
+  attempted: boolean;
+}
+
+export interface MapsStructuredData {
+  places: MapsPlaceRecord[];
+  query: string;
+  entityRefs: string[];
+}
+
 export interface MapsRouteArgs {
   origin?: string;
   destination?: string;
@@ -94,13 +121,111 @@ function routeTravelMode(value: string | undefined): string {
   return ['driving', 'walking', 'bicycling', 'transit', 'two-wheeler'].indexOf(mode) >= 0 ? mode : 'driving';
 }
 
-export function googleMapsDirectionsUrl(value: Object | null): string {
+export function normalizeMapsRouteInput(value: Object | null): MapsRouteArgs | null {
   const args = routeArgs(value);
   const origin = textOf(args.origin).trim();
   const destination = textOf(args.destination).trim();
   if (origin.length === 0 || destination.length === 0) {
+    return null;
+  }
+  return {
+    origin,
+    destination,
+    travelMode: routeTravelMode(args.travelMode),
+    navigate: args.navigate === true
+  };
+}
+
+function trimRoutePrefix(value: string): string {
+  const prefixes: string[] = [
+    '请帮我用 Google Maps 查询',
+    '帮我用 Google Maps 查询',
+    '请帮我打开',
+    '帮我打开',
+    '请打开',
+    '打开',
+    '请帮我查看',
+    '帮我查看',
+    '请查看',
+    '查看'
+  ];
+  let current = value.trim();
+  for (let index = 0; index < prefixes.length; index++) {
+    if (current.startsWith(prefixes[index])) {
+      current = current.substring(prefixes[index].length).trim();
+      break;
+    }
+  }
+  if (current.startsWith('从')) {
+    current = current.substring(1).trim();
+  }
+  return current;
+}
+
+function trimRouteSuffix(value: string): string {
+  const suffixes: string[] = [
+    '并发起导航',
+    '并开始导航',
+    '的驾车路线',
+    '的步行路线',
+    '的骑行路线',
+    '的公交路线',
+    '的路线',
+    '路线',
+    '并导航',
+    '导航'
+  ];
+  let current = value.trim();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let index = 0; index < suffixes.length; index++) {
+      if (current.endsWith(suffixes[index])) {
+        current = current.substring(0, current.length - suffixes[index].length).trim();
+        changed = true;
+        break;
+      }
+    }
+  }
+  return current;
+}
+
+export function mapsRouteInputFromPrompt(prompt: string): MapsRouteArgs | null {
+  const source = trimRoutePrefix(prompt);
+  const separator = source.indexOf('到');
+  if (separator <= 0 || separator !== source.lastIndexOf('到')) {
+    return null;
+  }
+  const origin = source.substring(0, separator).trim();
+  const destination = trimRouteSuffix(source.substring(separator + 1));
+  if (origin.length < 2 || destination.length < 2 ||
+    origin.indexOf('路线') >= 0 || destination.indexOf('路线') >= 0) {
+    return null;
+  }
+  let travelMode = 'driving';
+  if (prompt.indexOf('步行') >= 0) {
+    travelMode = 'walking';
+  } else if (prompt.indexOf('骑行') >= 0 || prompt.indexOf('骑车') >= 0) {
+    travelMode = 'bicycling';
+  } else if (prompt.indexOf('公交') >= 0 || prompt.indexOf('公共交通') >= 0) {
+    travelMode = 'transit';
+  }
+  const candidate: MapsRouteArgs = {
+    origin,
+    destination,
+    travelMode,
+    navigate: prompt.indexOf('导航') >= 0
+  };
+  return normalizeMapsRouteInput(candidate as Object);
+}
+
+export function googleMapsDirectionsUrl(value: Object | null): string {
+  const args = normalizeMapsRouteInput(value);
+  if (args === null) {
     return '';
   }
+  const origin = args.origin as string;
+  const destination = args.destination as string;
   let url = 'https://www.google.com/maps/dir/?api=1&origin=' + encodeParam(origin) +
     '&destination=' + encodeParam(destination) + '&travelmode=' + routeTravelMode(args.travelMode);
   if (args.navigate === true) {
@@ -162,25 +287,6 @@ function placeTitle(place: MapsPlacePayload): string {
   return title.length > 0 ? title : textOf(place.id);
 }
 
-function placeRows(place: MapsPlacePayload): A2uiLabelValueData[] {
-  const rows: A2uiLabelValueData[] = [
-    { label: 'Place ID', value: textOf(place.id) },
-    { label: 'Address', value: textOf(place.formattedAddress) },
-    { label: 'Rating', value: textOf(place.rating) }
-  ];
-  const mapLocation = placeMapLocation(place);
-  if (mapLocation.length > 0) {
-    rows.push({ label: 'Map Location', value: mapLocation });
-  }
-  if (place.currentOpeningHours !== undefined) {
-    rows.push({ label: 'Open now', value: textOf(place.currentOpeningHours.openNow) });
-  }
-  if (textOf(place.googleMapsUri).length > 0) {
-    rows.push({ label: 'Maps URL', value: textOf(place.googleMapsUri) });
-  }
-  return rows;
-}
-
 function placeMapLocation(place: MapsPlacePayload): string {
   if (place.location === undefined) {
     return '';
@@ -191,6 +297,138 @@ function placeMapLocation(place: MapsPlacePayload): string {
     return '';
   }
   return latitude.toString() + ',' + longitude.toString();
+}
+
+function mapsPlaceRecord(place: MapsPlacePayload): MapsPlaceRecord {
+  return {
+    placeId: textOf(place.id),
+    title: placeTitle(place),
+    address: textOf(place.formattedAddress),
+    rating: textOf(place.rating),
+    mapLocation: placeMapLocation(place),
+    openNow: place.currentOpeningHours === undefined ? '' : textOf(place.currentOpeningHours.openNow),
+    mapsUrl: textOf(place.googleMapsUri)
+  };
+}
+
+function mapsPlaceRecordHasData(place: MapsPlaceRecord): boolean {
+  return place.placeId.length > 0 || place.title.length > 0 || place.address.length > 0;
+}
+
+function mapsPlaceProviderResult(
+  toolId: string,
+  places: MapsPlaceRecord[],
+  query: string,
+  message: string,
+  attempted: boolean = true
+): MapsPlaceProviderResult {
+  return {
+    toolId: toolId,
+    status: places.length > 0 ? 'success' : 'empty',
+    places: places,
+    query: query,
+    message: message,
+    attempted: attempted
+  };
+}
+
+export function mapsPlaceProviderFailure(
+  toolId: string,
+  message: string,
+  attempted: boolean = true,
+  query: string = ''
+): MapsPlaceProviderResult {
+  return {
+    toolId: toolId,
+    status: 'error',
+    places: [],
+    query: query,
+    message: message,
+    attempted: attempted
+  };
+}
+
+export function mapsPlaceSearchProviderResultFromPayload(rawJson: string, query: string): MapsPlaceProviderResult {
+  const payload = JSON.parse(rawJson) as MapsTextSearchPayload;
+  const places: MapsPlaceRecord[] = [];
+  const rawPlaces = Array.isArray(payload.places) ? payload.places : [];
+  rawPlaces.forEach((place: MapsPlacePayload) => {
+    const record = mapsPlaceRecord(place);
+    if (mapsPlaceRecordHasData(record)) {
+      places.push(record);
+    }
+  });
+  return mapsPlaceProviderResult(
+    'maps.place.search',
+    places,
+    query,
+    places.length > 0 ? 'Google Places result for: ' + query : 'Google Places API 查询成功，但没有返回可展示地点。'
+  );
+}
+
+export function mapsPlaceDetailsProviderResultFromPayload(rawJson: string): MapsPlaceProviderResult {
+  const record = mapsPlaceRecord(JSON.parse(rawJson) as MapsPlacePayload);
+  return mapsPlaceProviderResult(
+    'maps.place.details',
+    mapsPlaceRecordHasData(record) ? [record] : [],
+    '',
+    mapsPlaceRecordHasData(record) ? 'Google Places details returned by the real API.' : 'Google Places API 查询成功，但没有返回可展示地点详情。'
+  );
+}
+
+function placeRowsFromRecord(place: MapsPlaceRecord): A2uiLabelValueData[] {
+  const rows: A2uiLabelValueData[] = [
+    { label: 'Place ID', value: place.placeId },
+    { label: 'Address', value: place.address },
+    { label: 'Rating', value: place.rating }
+  ];
+  if (place.mapLocation.length > 0) {
+    rows.push({ label: 'Map Location', value: place.mapLocation });
+  }
+  if (place.openNow.length > 0) {
+    rows.push({ label: 'Open now', value: place.openNow });
+  }
+  if (place.mapsUrl.length > 0) {
+    rows.push({ label: 'Maps URL', value: place.mapsUrl });
+  }
+  return rows;
+}
+
+function placeResultFromRecord(toolId: string, place: MapsPlaceRecord, summary: string): DynamicGenericToolResult {
+  return {
+    sourceTag: 'Google Places API',
+    toolName: toolId,
+    title: place.title,
+    status: 'success',
+    summary: summary,
+    rows: placeRowsFromRecord(place),
+    rawPreview: 'placeId=' + place.placeId
+  };
+}
+
+export function mapsPlaceProviderResultsForA2ui(result: MapsPlaceProviderResult): DynamicGenericToolResult[] {
+  if (result.status === 'error') {
+    const title = result.message.indexOf('GOOGLE_MAPS_API_KEY') >= 0 ? '未配置 Google Maps API' :
+      (result.message.indexOf('placeId') >= 0 ? '缺少 Place ID' : 'Google Places API 调用失败');
+    return [errorResult(result.toolId, title, result.message)];
+  }
+  if (result.places.length === 0) {
+    const emptyResult: DynamicGenericToolResult = {
+      sourceTag: 'Google Places API',
+      toolName: result.toolId,
+      title: result.toolId === 'maps.place.details' ? '没有找到地点详情' : '没有找到地点',
+      status: 'success',
+      summary: result.message,
+      rows: [],
+      rawPreview: 'empty places'
+    };
+    if (result.toolId === 'maps.place.search' && result.query.length > 0) {
+      emptyResult.rows.push({ label: 'Query', value: result.query });
+    }
+    return [emptyResult];
+  }
+  return result.places.map((place: MapsPlaceRecord): DynamicGenericToolResult =>
+    placeResultFromRecord(result.toolId, place, result.message));
 }
 
 function resultRowValue(result: DynamicGenericToolResult, label: string): string {
@@ -224,19 +462,6 @@ export function mapsFoodRecordFromResult(result: DynamicGenericToolResult): A2ui
     distance: '',
     location: foodLocationFromMapLocation(resultRowValue(result, 'Map Location')),
     sourceTags: ['Google Maps']
-  };
-}
-
-function placeResult(toolId: string, place: MapsPlacePayload, summary: string): DynamicGenericToolResult {
-  const id = textOf(place.id);
-  return {
-    sourceTag: 'Google Places API',
-    toolName: toolId,
-    title: placeTitle(place),
-    status: 'success',
-    summary: summary,
-    rows: placeRows(place),
-    rawPreview: 'placeId=' + id
   };
 }
 
@@ -277,24 +502,7 @@ export function mapsMissingPlaceIdResult(): DynamicGenericToolResult {
 }
 
 export function mapsTextSearchResultsFromPayload(rawJson: string, query: string): DynamicGenericToolResult[] {
-  const payload = JSON.parse(rawJson) as MapsTextSearchPayload;
-  const places = Array.isArray(payload.places) ? payload.places : [];
-  const results: DynamicGenericToolResult[] = [];
-  for (let index = 0; index < places.length; index++) {
-    results.push(placeResult('maps.place.search', places[index], 'Google Places result for: ' + query));
-  }
-  if (results.length === 0) {
-    return [{
-      sourceTag: 'Google Places API',
-      toolName: 'maps.place.search',
-      title: '没有找到地点',
-      status: 'success',
-      summary: 'Google Places API 查询成功，但没有返回可展示地点。',
-      rows: [{ label: 'Query', value: query }],
-      rawPreview: 'empty places'
-    }];
-  }
-  return results;
+  return mapsPlaceProviderResultsForA2ui(mapsPlaceSearchProviderResultFromPayload(rawJson, query));
 }
 
 async function requestJson(
@@ -343,28 +551,38 @@ async function requestJson(
 }
 
 export async function callMapsPlaceSearch(query: string, apiKey: string): Promise<DynamicGenericToolResult[]> {
+  return mapsPlaceProviderResultsForA2ui(await callMapsPlaceSearchProvider(query, apiKey));
+}
+
+export async function callMapsPlaceSearchProvider(query: string, apiKey: string): Promise<MapsPlaceProviderResult> {
   if (apiKey.trim().length === 0) {
-    return [mapsMissingApiKeyResult('maps.place.search')];
+    return mapsPlaceProviderFailure('maps.place.search', mapsMissingApiKeyResult('maps.place.search').summary, false, query);
   }
   try {
     const payload = await requestJson(http.RequestMethod.POST, PLACES_SEARCH_URL, apiKey.trim(), PLACES_FIELD_MASK, mapsTextSearchBody(query));
-    return mapsTextSearchResultsFromPayload(JSON.stringify(payload), query);
+    return mapsPlaceSearchProviderResultFromPayload(JSON.stringify(payload), query);
   } catch (error) {
-    return [errorResult('maps.place.search', 'Google Places API 调用失败', error instanceof Error ? error.message : JSON.stringify(error))];
+    return mapsPlaceProviderFailure(
+      'maps.place.search', error instanceof Error ? error.message : JSON.stringify(error), true, query
+    );
   }
 }
 
 export async function callMapsPlaceDetails(placeId: string, apiKey: string): Promise<DynamicGenericToolResult[]> {
+  return mapsPlaceProviderResultsForA2ui(await callMapsPlaceDetailsProvider(placeId, apiKey));
+}
+
+export async function callMapsPlaceDetailsProvider(placeId: string, apiKey: string): Promise<MapsPlaceProviderResult> {
   if (apiKey.trim().length === 0) {
-    return [mapsMissingApiKeyResult('maps.place.details')];
+    return mapsPlaceProviderFailure('maps.place.details', mapsMissingApiKeyResult('maps.place.details').summary, false);
   }
   if (placeId.trim().length === 0) {
-    return [mapsMissingPlaceIdResult()];
+    return mapsPlaceProviderFailure('maps.place.details', mapsMissingPlaceIdResult().summary, false);
   }
   try {
     const payload = await requestJson(http.RequestMethod.GET, PLACES_BASE_URL + encodeParam(placeId.trim()), apiKey.trim(), PLACE_DETAIL_FIELD_MASK, null) as MapsPlacePayload;
-    return [placeResult('maps.place.details', payload, 'Google Places details returned by the real API.')];
+    return mapsPlaceDetailsProviderResultFromPayload(JSON.stringify(payload));
   } catch (error) {
-    return [errorResult('maps.place.details', 'Google Places API 调用失败', error instanceof Error ? error.message : JSON.stringify(error))];
+    return mapsPlaceProviderFailure('maps.place.details', error instanceof Error ? error.message : JSON.stringify(error));
   }
 }

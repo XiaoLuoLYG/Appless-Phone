@@ -1,3 +1,5 @@
+import { ActionOffer } from './ActionOfferTypes';
+
 export type JsonValue = Object | string | number | boolean | null;
 
 export interface ActionInputBinding {
@@ -13,6 +15,10 @@ export interface ActionPlanStep {
   inputFrom?: ActionInputBinding[];
 }
 
+export interface FrozenActionPlanStep extends ActionPlanStep {
+  definitionFingerprint: string;
+}
+
 export interface ActionPlanDraft {
   planId: string;
   runId: string;
@@ -20,21 +26,36 @@ export interface ActionPlanDraft {
   steps: ActionPlanStep[];
 }
 
+export interface ActionPlanCompiler {
+  compile(
+    goal: string,
+    offers: ActionOffer[],
+    allowedActionIds: string[]
+  ): Promise<ActionPlanDraft>;
+}
+
 export interface ActionPlan {
+  conversationId: string;
+  taskId: string;
   planId: string;
   turnId: string;
   surfaceId: string;
   label: string;
-  steps: ActionPlanStep[];
+  steps: FrozenActionPlanStep[];
 }
 
 export interface ActionPlanRunContext {
   conversationId: string;
   turnId: string;
+  taskId: string;
   surfaceId: string;
   sourceToolId: string;
   planId: string;
   runId: string;
+  /** Internal authority for a page action resolved from the rendered snapshot. */
+  pageActionId?: string;
+  /** Internal authority for a zero-Data actionIntent resolved by the runtime. */
+  virtualAction?: boolean;
 }
 
 export interface ActionExecutionContext {
@@ -47,6 +68,10 @@ export interface ActionExecutionContext {
   stepId: string;
   /** True when this is the first action placed directly on the current surface. */
   isSurfaceEntry?: boolean;
+  /** Original immutable page operation, distinct from an adapted registered target. */
+  pageActionId?: string;
+  /** True only for an internally resolved zero-Data actionIntent. */
+  virtualAction?: boolean;
 }
 
 export interface ActionStepSuccessResult {

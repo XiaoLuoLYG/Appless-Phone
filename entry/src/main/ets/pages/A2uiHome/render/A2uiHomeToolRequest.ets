@@ -238,7 +238,7 @@ function forcedGmailToolIdForPrompt(prompt: string): string {
     return '';
   }
   if (containsAny(prompt, ['直接发送', '立刻发送', '马上发送', '不用确认', '不确认直接发', '直接发'])) {
-    return 'gmail.message.send';
+    return 'gmail.draft.create';
   }
   if (containsAny(prompt, ['打开', '网页版', '网页'])) {
     return 'gmail.open.web';
@@ -885,6 +885,9 @@ export function resolveA2uiHomeToolRequest(
       actionId = 'client_intent_fallback';
     }
     toolId = forcedGmailToolId;
+  } else if (request.toolId === 'gmail.message.send') {
+    toolId = 'gmail.draft.create';
+    actionId = 'client_gmail_safety_reroute';
   } else if (forcedStripeReceivingToolId.length > 0 && request.toolId !== forcedStripeReceivingToolId) {
     actionId = request.toolId.length > 0 ? 'client_stripe_receiving_reroute' : 'client_intent_fallback';
     toolId = forcedStripeReceivingToolId;

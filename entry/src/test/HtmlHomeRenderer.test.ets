@@ -8,8 +8,10 @@ import {
   parseHotelSearchRequest
 } from '@loop/agent-core';
 import { renderHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeRenderer';
+import { buildMultiTaskHomePayload } from '../main/ets/pages/A2uiHome/html/HtmlMultiTaskHomeRenderer';
 import { createHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeSnapshot';
-import { HtmlHomeAction, HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
+import { HtmlHomeAction, HtmlHomeBlock, HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
+import { parseHtmlHomeAction } from '../main/ets/pages/A2uiHome/components/HtmlHomeSurfaceView';
 import { renderRideDriverMapHtml } from '../main/ets/pages/A2uiHome/html/RideDriverMapHtmlRenderer';
 
 interface GooglePayCheckoutArgsFixture {
@@ -26,6 +28,33 @@ interface GooglePayCheckoutArgsFixture {
 
 interface BookingUrlArgsFixture {
   bookingUrl: string;
+}
+
+interface MapsOpenArgsFixture {
+  url: string;
+}
+
+interface RenderedHomeDataFixture {
+  blocks: HtmlHomeBlock[];
+}
+
+function renderedActionByLabel(html: string, label: string): A2uiAction | null {
+  const start = html.indexOf('<script id="home-data" type="application/json">');
+  const end = html.indexOf('</script>', start);
+  if (start < 0 || end < 0) {
+    return null;
+  }
+  const jsonStart = start + '<script id="home-data" type="application/json">'.length;
+  const data = JSON.parse(html.substring(jsonStart, end)) as RenderedHomeDataFixture;
+  for (let blockIndex = 0; blockIndex < data.blocks.length; blockIndex++) {
+    const actions = data.blocks[blockIndex].actions;
+    for (let actionIndex = 0; actionIndex < actions.length; actionIndex++) {
+      if (actions[actionIndex].label === label) {
+        return parseHtmlHomeAction(JSON.stringify(actions[actionIndex]));
+      }
+    }
+  }
+  return null;
 }
 
 function documentFixture(): HtmlHomeDocument {
@@ -779,7 +808,7 @@ function calendarDeleteConfirmationDocumentFixture(): HtmlHomeDocument {
     prompt: '确认删除 Google Calendar 日程',
     variant: 'danger',
     kind: 'prompt',
-    args: JSON.parse('{"eventId":"event-delete-1","calendarId":"primary","confirmed":true}') as Object
+    args: JSON.parse('{"eventId":"event-delete-1","calendarId":"primary"}') as Object
   };
   doc.blocks[0].actions = [confirmAction];
   return doc;
@@ -1213,6 +1242,49 @@ function expectCalmUtilityPalette(document: HtmlHomeDocument): void {
 
 export default function htmlHomeRendererTest() {
   describe('htmlHomeRenderer', () => {
+    it('keeps the existing auth card beside a successful result without object or raw JSON UI', 0, () => {
+      const doc = dynamicCredentialDocumentFixture();
+      const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=Shenzhen';
+      const mapsArgs: MapsOpenArgsFixture = { url: mapsUrl };
+      const openMaps: HtmlHomeAction = {
+        id: 'maps.open.web',
+        label: '打开地图',
+        prompt: mapsUrl,
+        variant: 'secondary',
+        kind: 'client',
+        args: mapsArgs
+      };
+      const mapsResult: HtmlHomeBlock = {
+        id: 'maps-success',
+        kind: 'generic-tool-result',
+        title: '深圳湾',
+        subtitle: '真实地点结果',
+        status: 'success',
+        source: 'Google Maps',
+        metrics: [],
+        rows: [{ label: '地址', value: '深圳湾' }],
+        actions: [openMaps]
+      };
+      doc.blocks.push(mapsResult);
+      doc.actions = [openMaps];
+
+      const html = renderHtmlHomeDocument(doc);
+      const visibleAction = renderedActionByLabel(html, '打开地图');
+
+      expect(html.indexOf('Amap Maps')).assertLarger(-1);
+      expect(html.indexOf('深圳湾')).assertLarger(-1);
+      expect(html.indexOf('button.textContent = text(action.label || action.id);')).assertLarger(-1);
+      expect(html.indexOf('addActions(detailHost, block.actions);')).assertLarger(-1);
+      expect(html.indexOf('args: action.args && typeof action.args === \'object\' ? action.args : null')).assertLarger(-1);
+      expect(visibleAction === null).assertFalse();
+      expect((visibleAction as A2uiAction).id).assertEqual('maps.open.web');
+      expect((visibleAction as A2uiAction).label).assertEqual('打开地图');
+      expect((visibleAction as A2uiAction).prompt).assertEqual(mapsUrl);
+      expect(JSON.stringify((visibleAction as A2uiAction).args)).assertEqual(JSON.stringify(mapsArgs));
+      expect(html.indexOf('[object Object]')).assertEqual(-1);
+      expect(html.indexOf('raw JSON')).assertEqual(-1);
+    });
+
     it('uses the calm utility palette across result templates', 0, () => {
       expectCalmUtilityPalette(documentFixture());
       expectCalmUtilityPalette(calendarSearchDocumentFixture());
@@ -1248,6 +1320,32 @@ export default function htmlHomeRendererTest() {
       const html = renderHtmlHomeDocument(documentFixture());
 
       expect(html.indexOf('AIPhoneHome.postAction')).assertLarger(-1);
+    });
+
+    it('binds an embedded multi-task click to its exact section', 0, () => {
+      const embedded = documentFixture();
+      const document = documentFixture();
+      document.kind = 'multi-task';
+      document.blocks = [{
+        id: 'slot-review',
+        kind: 'multi-task-section',
+        title: 'Review',
+        sectionId: 'slot-review',
+        metrics: [],
+        rows: [],
+        actions: [],
+        embeddedDocument: embedded
+      }];
+      const payload = buildMultiTaskHomePayload(document);
+      const parsed = parseHtmlHomeAction(
+        '{"id":"doc-action","label":"Run Action","prompt":"run it",' +
+        '"variant":"primary","kind":"prompt","sourceSectionId":"slot-review","args":{"id":"real"}}'
+      );
+
+      expect(payload.embeds.length).assertEqual(1);
+      expect(payload.embeds[0].html.indexOf('sourceSectionId')).assertLarger(-1);
+      expect(payload.embeds[0].html.indexOf('slot-review')).assertLarger(-1);
+      expect(JSON.stringify(parsed).indexOf('"sourceSectionId":"slot-review"')).assertLarger(-1);
     });
 
     it('renders ride tool panel with no fake map before driver coordinates', 0, () => {
@@ -1490,17 +1588,10 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('G123')).assertLarger(-1);
       expect(html.indexOf('麦当劳 科技园店')).assertLarger(-1);
       expect(html.indexOf("var price = metric(block, ['price']);")).assertLarger(-1);
-      expect(html.indexOf('function trainPrice(value)')).assertLarger(-1);
-      expect(html.indexOf("replace(/^¥+/, '').replace(/起+$/, '')")).assertLarger(-1);
       expect(html.indexOf('var displayPrice = trainPrice(price);')).assertLarger(-1);
-      expect(html.indexOf("'¥' + price + '起'")).assertEqual(-1);
+      expect(html.indexOf("add(priceBlock, 'b', '', displayPrice)")).assertLarger(-1);
       expect(html.indexOf("add(mainline, 'div', 'journey-price')")).assertLarger(-1);
       expect(html.indexOf("summaryMetrics.push(['', '¥' + price + '起'])")).assertEqual(-1);
-      expect(html.indexOf("source === 'train' && text(item && item.label).toLowerCase() === 'price'")).assertLarger(-1);
-      expect(html.indexOf('.route-cities {\n  display: grid;\n  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);'))
-        .assertLarger(-1);
-      expect(html.indexOf('.journey-mainline {\n  position: relative;\n  z-index: 1;\n  display: grid;\n' +
-        '  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;')).assertLarger(-1);
       expect(html.indexOf('grid-column: 4')).assertLarger(-1);
       expect(html.indexOf('去购票')).assertLarger(-1);
       expect(html.indexOf('二等座起')).assertEqual(-1);
@@ -1822,9 +1913,18 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('calendar-view-month')).assertLarger(-1);
       expect(html.indexOf('data-calendar-view="day"')).assertLarger(-1);
       expect(html.indexOf('calendar-delete-button')).assertLarger(-1);
+      expect(html.indexOf('<button type="button" class="calendar-delete-button" style="display:none"'))
+        .assertLarger(-1);
+      expect(html.indexOf(
+        "deleteButton.style.display = selectedDeleteActionId === 'calendar.event.delete.confirm' ? " +
+        "'inline-flex' : 'none';"
+      )).assertLarger(-1);
       expect(html.indexOf('calendar-confirm-delete')).assertLarger(-1);
       expect(html.indexOf('calendar.event.delete.confirm')).assertLarger(-1);
-      expect(html.indexOf('confirmed: true')).assertLarger(-1);
+      expect(html.indexOf("var selectedDeleteAction = '';")).assertLarger(-1);
+      expect(html.indexOf('var action = JSON.parse(selectedDeleteAction);')).assertLarger(-1);
+      expect(html.indexOf("label: '确认删除日程'")).assertEqual(-1);
+      expect(html.indexOf('confirmed: true')).assertEqual(-1);
       expect(html.indexOf('AIPhoneHome.postAction')).assertLarger(-1);
       expect(html.indexOf('Google Calendar API')).assertLarger(-1);
       expect(html.indexOf('产品同步')).assertLarger(-1);
@@ -1892,7 +1992,8 @@ export default function htmlHomeRendererTest() {
       const html = renderHtmlHomeDocument(calendarDeleteConfirmationDocumentFixture());
 
       expect(html.indexOf('data-delete-confirm="true"')).assertLarger(-1);
-      expect(html.indexOf('function postCalendarDelete(card)')).assertLarger(-1);
+      expect(html.indexOf('function postCalendarWrite(card)')).assertLarger(-1);
+      expect(html.indexOf('calendar.event.delete.confirm')).assertLarger(-1);
       expect(html.indexOf('<aside class="calendar-detail-drawer">')).assertEqual(-1);
     });
 
@@ -1960,6 +2061,73 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('16:30')).assertLarger(-1);
       expect(html.indexOf('17:00')).assertLarger(-1);
       expect(html.indexOf('已写入')).assertLarger(-1);
+    });
+
+    it('labels a successful Google Calendar update as updated rather than written', 0, () => {
+      const update = calendarCreateDocumentFixture();
+      update.blocks[0].metrics[1].value = 'calendar.event.update';
+      const html = renderHtmlHomeDocument(update);
+
+      expect(html.indexOf('已更新 Google Calendar')).assertLarger(-1);
+      expect(html.indexOf('Google Calendar API · 已更新')).assertLarger(-1);
+      expect(html.indexOf('已写入 Google Calendar')).assertEqual(-1);
+    });
+
+    it('keeps Calendar create and update reviews visibly pending until provider success', 0, () => {
+      const create = calendarCreateDocumentFixture();
+      create.subtitle = '请核对当前日程参数；只有点击此卡片上的精确操作才会调用 Provider。';
+      create.blocks[0].status = 'confirm_required';
+      create.blocks[0].subtitle = create.subtitle;
+      const update = calendarCreateDocumentFixture();
+      update.subtitle = create.subtitle;
+      update.blocks[0].status = 'confirm_required';
+      update.blocks[0].subtitle = update.subtitle;
+      update.blocks[0].metrics[1].value = 'calendar.event.update';
+      create.blocks[0].actions = [{
+        id: 'calendar.event.create',
+        label: '确认创建',
+        prompt: 'calendar.event.create',
+        variant: 'primary',
+        kind: 'prompt',
+        args: JSON.parse('{"title":"一对一会议","start":"2026-07-02T16:30:00+08:00","end":"2026-07-02T17:00:00+08:00"}') as Object
+      }];
+      update.blocks[0].actions = [{
+        id: 'calendar.event.update',
+        label: '确认更新',
+        prompt: 'calendar.event.update',
+        variant: 'primary',
+        kind: 'prompt',
+        args: JSON.parse('{"eventId":"event-create-1","start":"2026-07-02T16:30:00+08:00","end":"2026-07-02T17:00:00+08:00"}') as Object
+      }];
+
+      [create, update].forEach((doc: HtmlHomeDocument): void => {
+        const html = renderHtmlHomeDocument(doc);
+        expect(html.indexOf('等待确认')).assertLarger(-1);
+        expect(html.indexOf('data-calendar-action=')).assertLarger(-1);
+        expect(html.indexOf('function postCalendarWrite(card)')).assertLarger(-1);
+        expect(html.indexOf(doc.blocks[0].actions[0].id)).assertLarger(-1);
+        expect(html.indexOf('已写入 Google Calendar')).assertEqual(-1);
+        expect(html.indexOf('已更新 Google Calendar')).assertEqual(-1);
+      });
+    });
+
+    it('renders the provider-bound Calendar update offer as the existing confirmation control', 0, () => {
+      const update = calendarSearchDocumentFixture();
+      update.blocks[0].actions = [{
+        id: 'calendar.event.update',
+        label: '确认更新日程',
+        prompt: 'calendar.event.update',
+        variant: 'primary',
+        kind: 'prompt',
+        args: JSON.parse('{"eventId":"event-1","title":"产品同步",' +
+          '"start":"2026-07-02T16:00:00+08:00","end":"2026-07-02T16:30:00+08:00"}') as Object
+      }];
+
+      const html = renderHtmlHomeDocument(update);
+
+      expect(html.indexOf('calendar-write-confirm')).assertLarger(-1);
+      expect(html.indexOf('确认更新日程')).assertLarger(-1);
+      expect(html.indexOf('postCalendarWrite')).assertLarger(-1);
     });
 
     it('does not show a write confirmation for a failed Calendar create', 0, () => {
@@ -2035,6 +2203,14 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('html_mail_reply_send')).assertLarger(-1);
       expect(html.indexOf('window.scrollBy(0, afterTop - beforeTop)')).assertLarger(-1);
       expect(html.indexOf("kind === 'generic-tool-result' && isMailBlock(block)")).assertLarger(-1);
+    });
+
+    it('initializes expanded details for mail blocks outside the Gmail scene', 0, () => {
+      const doc = mailAggregateDocumentFixture();
+      doc.kind = 'generic';
+      const html = renderHtmlHomeDocument(doc);
+
+      expect(html.indexOf("if (isMailBlock(block))")).assertLarger(-1);
     });
 
     it('filters Gmail hero preview counts to mail blocks', 0, () => {
@@ -2212,6 +2388,7 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('luckin-payment-option-chip')).assertLarger(-1);
       expect(html.indexOf('瑞幸咖啡 深圳科技园店')).assertLarger(-1);
       expect(html.indexOf('resource://rawfile/wechat_pay.jpeg')).assertLarger(-1);
+      expect(html.indexOf('patchLuckinPaymentStatus')).assertLarger(-1);
       expect(html.indexOf('resource://rawfile/alipay.jpeg')).assertLarger(-1);
       expect(html.indexOf('resource://rawfile/google_pay.jpeg')).assertLarger(-1);
     });

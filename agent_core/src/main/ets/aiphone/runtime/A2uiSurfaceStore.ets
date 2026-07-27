@@ -13,6 +13,8 @@ import {
   A2uiGenericToolResultRowData,
   A2uiLabelValueData,
   A2uiEnvelope,
+  A2uiMultiTaskBoardData,
+  A2uiMultiTaskSectionValue,
   A2uiPersonaData,
   A2uiPersonaMemoryData,
   A2uiRowGroupsData,
@@ -32,6 +34,7 @@ import {
   normalizeSocialHubConnection,
   normalizeSocialHubDraft,
   normalizeSocialHubItem,
+  normalizeSocialHubPublication,
   SocialHubConnectionData,
   SocialHubItemData
 } from './SocialHubTypes';
@@ -496,7 +499,9 @@ function parseDataModel(json: string): A2uiRuntimeDataModel {
       persona: normalizePersona(parsed, fallback.persona),
       personaMemory: normalizePersonaMemory(parsed, fallback.personaMemory),
       stripeReceivingAccount: normalizeStripeReceivingAccount(parsed, fallback.stripeReceivingAccount === undefined ? emptyStripeReceivingAccount() : fallback.stripeReceivingAccount),
-      toolRequests: Array.isArray(parsed.toolRequests) ? parsed.toolRequests : []
+      toolRequests: Array.isArray(parsed.toolRequests) ? parsed.toolRequests : [],
+      multiTask: parsed.multiTask === undefined || parsed.multiTask === null ? undefined : parsed.multiTask as A2uiMultiTaskBoardData,
+      sections: parsed.sections === undefined || parsed.sections === null ? undefined : parsed.sections as Record<string, A2uiMultiTaskSectionValue>
     };
   } catch (_error) {
     return fallback;
@@ -620,6 +625,10 @@ function setKnownDataPath(model: A2uiRuntimeDataModel, path: string, value: A2ui
     next.genericToolResults = value as A2uiGenericToolResultData[];
   } else if (path === '/aggregateSearch') {
     next.aggregateSearch = value as AggregateSearchResult;
+  } else if (path === '/multiTask') {
+    next.multiTask = value as A2uiMultiTaskBoardData;
+  } else if (path === '/sections') {
+    next.sections = value as Record<string, A2uiMultiTaskSectionValue>;
   } else if (path === '/persona') {
     next.persona = value as A2uiPersonaData;
   } else if (path === '/personaMemory') {
@@ -640,6 +649,8 @@ function setKnownDataPath(model: A2uiRuntimeDataModel, path: string, value: A2ui
     next.socialHub.selected = normalizeSocialHubItem(value as Object);
   } else if (path === '/socialHub/draft') {
     next.socialHub.draft = normalizeSocialHubDraft(value as Object);
+  } else if (path === '/socialHub/publication') {
+    next.socialHub.publication = normalizeSocialHubPublication(value as Object);
   } else if (path === '/socialHub/connections') {
     const connections: SocialHubConnectionData[] = [];
     if (Array.isArray(value)) {
@@ -698,7 +709,9 @@ export class A2uiSurfaceStore {
       components: cloneComponents(this.surface.components),
       dataModelJson: this.surface.dataModelJson,
       error: this.surface.error,
-      sequence: this.surface.sequence
+      sequence: this.surface.sequence,
+      runtimeOwner: this.surface.runtimeOwner,
+      runtimeGeneration: this.surface.runtimeGeneration
     };
   }
 
@@ -717,7 +730,9 @@ export class A2uiSurfaceStore {
       components: cloneComponents(surface.components),
       dataModelJson: surface.dataModelJson,
       error: surface.error,
-      sequence: surface.sequence
+      sequence: surface.sequence,
+      runtimeOwner: surface.runtimeOwner,
+      runtimeGeneration: surface.runtimeGeneration
     };
     return this.getSurface();
   }
@@ -768,7 +783,9 @@ export class A2uiSurfaceStore {
           components: [],
           dataModelJson: JSON.stringify(nextDataModel),
           error: '',
-          sequence: this.surface.sequence + 1
+          sequence: this.surface.sequence + 1,
+          runtimeOwner: this.surface.runtimeOwner,
+          runtimeGeneration: this.surface.runtimeGeneration
         };
         return { ok: true, error: '' };
       }
@@ -822,7 +839,9 @@ export class A2uiSurfaceStore {
       ],
       dataModelJson: '{}',
       error: detail,
-      sequence: this.surface.sequence + 1
+      sequence: this.surface.sequence + 1,
+      runtimeOwner: this.surface.runtimeOwner,
+      runtimeGeneration: this.surface.runtimeGeneration
     };
     return this.getSurface();
   }

@@ -8,6 +8,7 @@ export interface DataSource {
   operation: string;
   fetchedAt: string;
   accountHint?: string;
+  receipt?: string;
 }
 
 export interface DataResultError {

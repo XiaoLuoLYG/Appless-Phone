@@ -11,7 +11,9 @@ export enum AgentMessageType {
   ACTION_RUN = 'ACTION.RUN',
   ACTION_PROGRESS = 'ACTION.PROGRESS',
   ACTION_RESULT = 'ACTION.RESULT',
-  TURN_CANCEL = 'TURN.CANCEL'
+  TURN_CANCEL = 'TURN.CANCEL',
+  ACTION_PLAN_REQUEST = 'ACTION.PLAN.REQUEST',
+  TURN_RESULT = 'TURN.RESULT'
 }
 
 export interface AgentMessage {
@@ -22,8 +24,48 @@ export interface AgentMessage {
   payload: Object;
 }
 
+export type RuntimeOwner = 'multi_agent' | 'legacy';
+
+export type TurnConversationRole = 'user' | 'assistant';
+
+export interface ConversationTurnMessage {
+  role: TurnConversationRole;
+  content: string;
+}
+
+export interface CurrentSurfaceSummary {
+  surfaceId: string;
+  kind: string;
+  status: string;
+  entityRefs: string[];
+  actionOfferIds: string[];
+}
+
+export interface ObservationDigest {
+  taskId: string;
+  toolId: string;
+  status: string;
+  summary: string;
+  entityRefs: string[];
+}
+
 export interface UserInputPayload {
   text: string;
+  recentMessages?: ConversationTurnMessage[];
+  previousPersonaId?: string;
+  currentSurfaceSummary?: CurrentSurfaceSummary;
+  recentObservations?: ObservationDigest[];
+}
+
+export type TurnResultStatus = 'success' | 'partial' | 'empty' | 'error' | 'canceled';
+
+export interface TurnResultPayload {
+  status: TurnResultStatus;
+  surfaceId?: string;
+  roundCount: number;
+  message: string;
+  personaId?: string;
+  skillId?: string;
 }
 
 export interface UiTaskPayload {

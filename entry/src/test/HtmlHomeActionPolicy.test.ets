@@ -1,7 +1,7 @@
 import { describe, it, expect } from '@ohos/hypium';
 import { A2uiAction } from '@loop/agent-core';
 import { isHtmlHomeActionAllowed } from '../main/ets/pages/A2uiHome/html/HtmlHomeActionPolicy';
-import { HtmlHomeAction, HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
+import { HtmlHomeAction, HtmlHomeBlock, HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
 
 interface ThreadOnlyArgsFixture {
   threadId: string;
@@ -28,9 +28,9 @@ interface PaymentCheckoutArgsFixture {
 
 interface MailReplyArgsFixture {
   requestKey: string;
-  provider: string;
+  provider?: string;
   threadId: string;
-  messageId: string;
+  messageId?: string;
   to: string[];
   subject: string;
   body: string;
@@ -46,7 +46,6 @@ interface MailCalendarArgsFixture {
 interface CalendarDeleteArgsFixture {
   eventId: string;
   calendarId: string;
-  confirmed: boolean;
 }
 
 interface LuckinArgsFixture {
@@ -80,6 +79,14 @@ interface HotelDetailArgsFixture {
   childCount: number;
   childAgeDetails: number[];
   roomCount: number;
+}
+
+interface LuckinShopArgsFixture {
+  deptId: string;
+  deptName: string;
+  address: string;
+  distance: string;
+  status: string;
 }
 
 function action(id: string, prompt: string, kind: string = 'client', args: Object | null = null): A2uiAction {
@@ -224,8 +231,9 @@ export default function htmlHomeActionPolicyTest() {
       expect(isHtmlHomeActionAllowed(doc, forged)).assertFalse();
     });
 
-    it('allows Calendar delete only for a visible real event after confirmation', 0, () => {
+    it('allows Calendar delete only for the exact rendered confirmation action', 0, () => {
       const doc = documentFixture();
+      const allowed: CalendarDeleteArgsFixture = { eventId: 'event-1', calendarId: 'primary' };
       doc.blocks.push({
         id: 'calendar-event-1',
         kind: 'generic-tool-result',
@@ -236,20 +244,20 @@ export default function htmlHomeActionPolicyTest() {
         toolId: 'calendar.events.search',
         metrics: [],
         rows: [{ label: 'Event ID', value: 'event-1' }],
-        actions: []
+        actions: [action('calendar.event.delete.confirm', '删除日程', 'prompt', allowed)]
       });
-      const allowed: CalendarDeleteArgsFixture = { eventId: 'event-1', calendarId: 'primary', confirmed: true };
-      const wrongEvent: CalendarDeleteArgsFixture = { eventId: 'event-2', calendarId: 'primary', confirmed: true };
-      const unconfirmed: CalendarDeleteArgsFixture = { eventId: 'event-1', calendarId: 'primary', confirmed: false };
+      const wrongEvent: CalendarDeleteArgsFixture = { eventId: 'event-2', calendarId: 'primary' };
 
       expect(isHtmlHomeActionAllowed(doc,
         action('calendar.event.delete.confirm', '删除日程', 'prompt', allowed))).assertTrue();
       expect(isHtmlHomeActionAllowed(doc,
         action('calendar.event.delete.confirm', '删除日程', 'prompt', wrongEvent))).assertFalse();
       expect(isHtmlHomeActionAllowed(doc,
-        action('calendar.event.delete.confirm', '删除日程', 'prompt', unconfirmed))).assertFalse();
-      expect(isHtmlHomeActionAllowed(doc,
         action('calendar.event.delete.confirm', '删除日程', 'client', allowed))).assertFalse();
+
+      doc.blocks[doc.blocks.length - 1].actions = [];
+      expect(isHtmlHomeActionAllowed(doc,
+        action('calendar.event.delete.confirm', '删除日程', 'prompt', allowed))).assertFalse();
     });
 
     it('allows dynamic credential save only for the current dynamic block', 0, () => {
@@ -334,11 +342,15 @@ export default function htmlHomeActionPolicyTest() {
 
     it('allows mail reply submissions only for the matching visible mail card', 0, () => {
       const doc = documentFixture();
-      const template: MailReplyArgsFixture = {
-        requestKey: '',
+      const detailIdentity: MailCalendarArgsFixture = {
+        requestKey: 'gmail:thread-123',
         provider: 'gmail',
         threadId: 'thread-123',
-        messageId: 'message-123',
+        messageId: 'message-123'
+      };
+      const template: MailReplyArgsFixture = {
+        requestKey: '',
+        threadId: 'thread-123',
         to: ['alice@example.com'],
         subject: 'Re: Status update',
         body: ''
@@ -357,7 +369,8 @@ export default function htmlHomeActionPolicyTest() {
           label: '加载正文',
           prompt: 'gmail:thread-123',
           variant: 'secondary',
-          kind: 'client'
+          kind: 'client',
+          args: detailIdentity
         }, {
           id: 'gmail.ai.reply.draft',
           label: 'AI 回复草稿',
@@ -385,6 +398,16 @@ export default function htmlHomeActionPolicyTest() {
         subject: 'Re: Status update',
         body: 'Confirmed.'
       };
+      const wrongMessage: MailReplyArgsFixture = JSON.parse(JSON.stringify(allowed)) as MailReplyArgsFixture;
+      wrongMessage.messageId = 'message-stale';
+      const wrongRequest: MailReplyArgsFixture = JSON.parse(JSON.stringify(allowed)) as MailReplyArgsFixture;
+      wrongRequest.requestKey = 'gmail:thread-stale';
+      const wrongProvider: MailReplyArgsFixture = JSON.parse(JSON.stringify(allowed)) as MailReplyArgsFixture;
+      wrongProvider.provider = 'qq';
+      const wrongRecipient: MailReplyArgsFixture = JSON.parse(JSON.stringify(allowed)) as MailReplyArgsFixture;
+      wrongRecipient.to = ['mallory@example.com'];
+      const emptyBody: MailReplyArgsFixture = JSON.parse(JSON.stringify(allowed)) as MailReplyArgsFixture;
+      emptyBody.body = '   ';
 
       expect(isHtmlHomeActionAllowed(doc,
         action('html_mail_reply_save', 'gmail:thread-123', 'client', allowed))).assertTrue();
@@ -394,6 +417,16 @@ export default function htmlHomeActionPolicyTest() {
         action('html_mail_reply_ai_generate', 'gmail:thread-123', 'client', allowed))).assertTrue();
       expect(isHtmlHomeActionAllowed(doc,
         action('html_mail_reply_send', 'gmail:thread-123', 'client', blocked))).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc,
+        action('html_mail_reply_send', 'gmail:thread-123', 'client', wrongMessage))).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc,
+        action('html_mail_reply_send', 'gmail:thread-stale', 'client', wrongRequest))).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc,
+        action('html_mail_reply_send', 'gmail:thread-123', 'client', wrongProvider))).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc,
+        action('html_mail_reply_send', 'gmail:thread-123', 'client', wrongRecipient))).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc,
+        action('html_mail_reply_send', 'gmail:thread-123', 'client', emptyBody))).assertFalse();
       expect(isHtmlHomeActionAllowed(doc,
         action('html_mail_reply_ai_generate', 'gmail:thread-123', 'client', blocked))).assertFalse();
     });
@@ -593,7 +626,7 @@ export default function htmlHomeActionPolicyTest() {
       expect(isHtmlHomeActionAllowed(doc, action('luckin.order.preview', 'evil', 'prompt', invalidOptionArgs))).assertFalse();
     });
 
-    it('allows luckin create after option switch when sku changes', 0, () => {
+    it('rejects a stale Luckin create after the visible option and SKU change', 0, () => {
       const doc = documentFixture();
       doc.kind = 'luckin';
       const createArgs: LuckinArgsFixture = {
@@ -632,7 +665,41 @@ export default function htmlHomeActionPolicyTest() {
       };
       const switchedCreate = action('luckin.order.create', '确认创建瑞幸订单', 'prompt', switchedArgs);
 
-      expect(isHtmlHomeActionAllowed(doc, switchedCreate)).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, switchedCreate)).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc, createAction as A2uiAction)).assertTrue();
+    });
+
+    it('allows only the exact visible ride trace and order actions', 0, () => {
+      const doc = documentFixture();
+      const confirmArgs = JSON.parse(
+        '{"productCategory":"express","estimateTraceId":"trace-real-1",' +
+        '"pickupLocation":"114.0,22.5","destinationLocation":"114.1,22.6"}'
+      ) as Object;
+      const cancelArgs = JSON.parse('{"orderId":"ride-order-real-1"}') as Object;
+      const confirm: HtmlHomeAction = {
+        id: 'ride.order.confirm', label: '确认叫车', prompt: '确认叫车',
+        variant: 'primary', kind: 'prompt', args: confirmArgs
+      };
+      const cancel: HtmlHomeAction = {
+        id: 'ride.order.cancel', label: '取消订单', prompt: '取消订单',
+        variant: 'danger', kind: 'prompt', args: cancelArgs
+      };
+      doc.blocks = [{
+        id: 'ride-current', kind: 'generic-tool-result', title: '滴滴订单', subtitle: '',
+        status: 'success', source: '滴滴', metrics: [], rows: [], actions: [confirm, cancel]
+      }];
+      const staleTrace = JSON.parse(
+        '{"productCategory":"express","estimateTraceId":"trace-stale",' +
+        '"pickupLocation":"114.0,22.5","destinationLocation":"114.1,22.6"}'
+      ) as Object;
+      const wrongOrder = JSON.parse('{"orderId":"ride-order-other"}') as Object;
+
+      expect(isHtmlHomeActionAllowed(doc, confirm as A2uiAction)).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, cancel as A2uiAction)).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc,
+        action('ride.order.confirm', '确认叫车', 'prompt', staleTrace))).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc,
+        action('ride.order.cancel', '取消订单', 'prompt', wrongOrder))).assertFalse();
     });
 
     it('allows luckin relocate refresh preview on luckin pages', 0, () => {
@@ -699,6 +766,56 @@ export default function htmlHomeActionPolicyTest() {
 
       expect(isHtmlHomeActionAllowed(doc, action('stripe.account.open', 'https://connect.stripe.com/setup/s/acct_123', 'client', allowedArgs))).assertTrue();
       expect(isHtmlHomeActionAllowed(doc, action('stripe.account.open', 'https://evil.example/setup', 'client', blockedArgs))).assertFalse();
+    });
+
+    it('allows luckin actions from embedded multi_task sections', 0, () => {
+      const luckinDoc = documentFixture();
+      luckinDoc.kind = 'luckin';
+      const shopArgs: LuckinShopArgsFixture = {
+        deptId: '1001',
+        deptName: '瑞幸咖啡 深圳科技园店',
+        address: '深圳市南山区科技园',
+        distance: '120m',
+        status: '营业中'
+      };
+      const shopBlock: HtmlHomeBlock = {
+        id: 'luckin-shop',
+        kind: 'generic-tool-result',
+        title: '选择瑞幸门店',
+        subtitle: '',
+        status: 'ready',
+        source: '瑞幸',
+        metrics: [],
+        rows: [],
+        actions: [{
+          id: 'luckin.order.preview',
+          label: '科技园店',
+          prompt: '生椰拿铁',
+          variant: 'primary',
+          kind: 'prompt',
+          args: shopArgs
+        }]
+      };
+      luckinDoc.blocks = [shopBlock];
+      const multiTaskDoc = documentFixture();
+      multiTaskDoc.kind = 'multi-task';
+      const multiTaskBlock: HtmlHomeBlock = {
+        id: 'slot_0',
+        kind: 'multi-task-section',
+        title: '瑞幸点单',
+        sectionId: 'slot_0',
+        toolId: 'luckin.order.preview',
+        status: 'ready',
+        metrics: [],
+        rows: [],
+        actions: [],
+        embeddedDocument: luckinDoc
+      };
+      multiTaskDoc.blocks = [multiTaskBlock];
+
+      const shopAction = action('luckin.order.preview', '生椰拿铁', 'prompt', shopArgs);
+      expect(isHtmlHomeActionAllowed(multiTaskDoc, shopAction)).assertTrue();
+      expect(isHtmlHomeActionAllowed(multiTaskDoc, action('luckin.order.preview', 'evil', 'prompt'))).assertFalse();
     });
   });
 }

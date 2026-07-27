@@ -1,5 +1,19 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { parseComposioSocialFeed, parseSocialHubDraftPayload, parseSocialHubFeedPayload, SocialHubClient, SocialHubProviderConfig, socialHubBridgeDraftError, socialHubBridgeHeaders, socialHubBridgeUnavailableFeed, socialHubPrivateItems, socialHubXPostResult, xSearchQuery } from '@loop/agent-core';
+import {
+  createSocialHubPublicationPreview,
+  parseComposioCommunityFeed,
+  parseComposioSocialFeed,
+  parseSocialHubDraftPayload,
+  parseSocialHubFeedPayload,
+  SocialHubClient,
+  SocialHubProviderConfig,
+  socialHubBridgeDraftError,
+  socialHubBridgeHeaders,
+  socialHubBridgeUnavailableFeed,
+  socialHubPrivateItems,
+  socialHubXPostResult,
+  xSearchQuery
+} from '@loop/agent-core';
 
 export default function socialHubClientTest() {
   describe('socialHubClient', () => {
@@ -66,6 +80,55 @@ export default function socialHubClientTest() {
     it('keeps aggregate X public post prompts as keyword searches', 0, () => {
       expect(xSearchQuery('X 公开 post 搜索关键词: openai codex', '')).assertEqual('openai codex');
       expect(xSearchQuery('帮我搜索 X 上 openai 最近的公开 post', '')).assertEqual('from:openai');
+    });
+
+    it('maps real community payloads and preserves provider failures', 0, () => {
+      const reddit = parseComposioCommunityFeed(
+        'reddit',
+        '{"data":{"children":[{"data":{"name":"t3_real","title":"Real Reddit post",' +
+          '"author":"dev_user","selftext":"Real discussion",' +
+          '"subreddit_name_prefixed":"r/OpenAI","permalink":"/r/OpenAI/comments/real"}}]}}'
+      );
+      const failed = parseComposioCommunityFeed(
+        'reddit',
+        '{"data":null,"error":{"message":"Reddit account is not connected"}}'
+      );
+      const unsuccessful = parseComposioCommunityFeed(
+        'reddit',
+        '{"successful":false,"data":null,"error":null}'
+      );
+
+      expect(reddit.items.length).assertEqual(1);
+      expect(reddit.items[0].id).assertEqual('t3_real');
+      expect(reddit.items[0].text).assertContain('Real discussion');
+      expect(failed.items.length).assertEqual(0);
+      expect(failed.connections[0].status).assertEqual('error');
+      expect(failed.connections[0].message).assertEqual('Reddit account is not connected');
+      expect(unsuccessful.items.length).assertEqual(0);
+      expect(unsuccessful.connections[0].status).assertEqual('error');
+      expect(unsuccessful.connections[0].message).assertEqual(
+        'Provider returned an unsuccessful execution status.'
+      );
+    });
+
+    it('creates a preview only for one real provider identity', 0, () => {
+      const preview = createSocialHubPublicationPreview({
+        platform: 'x',
+        operation: 'publish',
+        accountId: 'x-real',
+        accountName: '@real',
+        text: 'Appless preview'
+      }, '2026-07-18T02:00:00.000Z');
+      const missingIdentity = createSocialHubPublicationPreview({
+        platform: 'x',
+        operation: 'publish',
+        text: 'Appless preview'
+      });
+
+      expect(preview.status).assertEqual('preview');
+      expect(preview.accountName).assertEqual('@real');
+      expect(missingIdentity.status).assertEqual('error');
+      expect(missingIdentity.error.indexOf('真实账号 ID')).assertLarger(-1);
     });
 
     it('parses real Composio social message payloads without turning errors into messages', 0, () => {

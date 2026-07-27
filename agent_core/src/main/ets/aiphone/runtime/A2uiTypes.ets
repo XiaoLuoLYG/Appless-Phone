@@ -2,7 +2,8 @@ import {
   SocialHubConnectionData,
   SocialHubData,
   SocialHubDraftData,
-  SocialHubItemData
+  SocialHubItemData,
+  SocialHubPublicationData
 } from './SocialHubTypes';
 import { AggregateSearchResult } from './AggregateSearchTypes';
 
@@ -28,6 +29,7 @@ export const A2UI_COMPONENT_GENERIC_TOOL_RESULTS: string = 'GenericToolResults';
 export const A2UI_COMPONENT_SOCIAL_HUB: string = 'SocialHub';
 export const A2UI_COMPONENT_STRIPE_RECEIVING_ACCOUNT_CARD: string = 'StripeReceivingAccountCard';
 export const A2UI_COMPONENT_AGGREGATE_SEARCH: string = 'AggregateSearch';
+export const A2UI_COMPONENT_MULTI_TASK_BOARD: string = 'MultiTaskBoard';
 
 export interface A2uiAction {
   id: string;
@@ -36,6 +38,7 @@ export interface A2uiAction {
   variant: string;
   kind: string;
   args?: Object;
+  sourceSectionId?: string;
 }
 
 export interface A2uiLabelValueData {
@@ -104,6 +107,36 @@ export interface A2uiFoodData {
   distance: string;
   location?: string;
   sourceTags?: string[];
+}
+
+export interface TravelStructuredData {
+  title: string;
+  body: string;
+  summary: string;
+  options: A2uiTravelOptionData[];
+  rows: A2uiLabelValueData[];
+}
+
+export interface TrainStructuredData {
+  title: string;
+  body: string;
+  summary: string;
+  trains: A2uiTrainData[];
+}
+
+export interface FlightStructuredData {
+  title: string;
+  body: string;
+  summary: string;
+  flights: A2uiFlightData[];
+}
+
+export interface FoodStructuredData {
+  title: string;
+  body: string;
+  summary: string;
+  foods: A2uiFoodData[];
+  rows: A2uiLabelValueData[];
 }
 
 export interface A2uiSummaryData {
@@ -197,6 +230,33 @@ export interface StripeReceivingAccountCardData {
   actions: A2uiAction[];
 }
 
+export interface A2uiMultiTaskSectionMeta {
+  slotId: string;
+  toolId: string;
+  title: string;
+  status: string;
+  summary: string;
+  completionReply?: string;
+}
+
+export interface A2uiMultiTaskBoardData {
+  batchId: string;
+  mode?: string;
+  activeSectionId: string;
+  sections: A2uiMultiTaskSectionMeta[];
+}
+
+export interface A2uiMultiTaskSectionValue {
+  slotId: string;
+  toolId: string;
+  title: string;
+  status: string;
+  summary: string;
+  observationDigest: string;
+  failureKey: string;
+  embeddedSurface: Object | null;
+}
+
 export interface A2uiRuntimeDataModel {
   rows: A2uiLabelValueData[];
   trains: A2uiTrainData[];
@@ -217,6 +277,8 @@ export interface A2uiRuntimeDataModel {
   personaMemory: A2uiPersonaMemoryData;
   stripeReceivingAccount?: StripeReceivingAccountCardData;
   toolRequests?: A2uiToolRequestData[];
+  multiTask?: A2uiMultiTaskBoardData;
+  sections?: Record<string, A2uiMultiTaskSectionValue>;
 }
 
 export type A2uiDataValue =
@@ -242,8 +304,11 @@ export type A2uiDataValue =
   SocialHubItemData[] |
   SocialHubItemData |
   SocialHubDraftData |
+  SocialHubPublicationData |
   SocialHubConnectionData[] |
   A2uiToolRequestData[] |
+  A2uiMultiTaskBoardData |
+  Record<string, A2uiMultiTaskSectionValue> |
   string |
   number |
   boolean |
@@ -311,6 +376,8 @@ export interface A2uiSurfaceState {
   dataModelJson: string;
   error: string;
   sequence: number;
+  runtimeOwner?: 'multi_agent' | 'legacy';
+  runtimeGeneration?: number;
 }
 
 export interface A2uiApplyResult {
@@ -383,7 +450,8 @@ export function defaultA2uiCapabilities(): A2uiClientCapabilities {
       A2UI_COMPONENT_GENERIC_TOOL_RESULTS,
       A2UI_COMPONENT_SOCIAL_HUB,
       A2UI_COMPONENT_STRIPE_RECEIVING_ACCOUNT_CARD,
-      A2UI_COMPONENT_AGGREGATE_SEARCH
+      A2UI_COMPONENT_AGGREGATE_SEARCH,
+      A2UI_COMPONENT_MULTI_TASK_BOARD
     ],
     transport: ['jsonl', 'openai-compatible-sse']
   };

@@ -6,6 +6,7 @@ import {
   GmailCreateDraftArgs,
   GmailGetThreadArgs,
   GmailSearchThreadsArgs,
+  GmailUpdateDraftArgs,
   gmailMcpArgsForPrompt
 } from './GmailOAuthClient';
 import { aiLogError, aiLogInfo } from './AiphoneLogger';
@@ -57,6 +58,7 @@ interface GmailMessage {
   threadId?: string;
   labelIds?: string[];
   snippet?: string;
+  messageText?: string;
   internalDate?: string;
   payload?: GmailMessagePayload;
 }
@@ -392,16 +394,36 @@ function firstHeader(message: GmailMessage, headerName: string): string {
   return '';
 }
 
+function isDraftMessage(message: GmailMessage): boolean {
+  if (!Array.isArray(message.labelIds)) {
+    return false;
+  }
+  for (let index = 0; index < message.labelIds.length; index++) {
+    if (message.labelIds[index].trim().toUpperCase() === 'DRAFT') {
+      return true;
+    }
+  }
+  return false;
+}
+
 function lastMessage(thread: GmailThread): GmailMessage {
   if (Array.isArray(thread.messages) && thread.messages.length > 0) {
-    return thread.messages[thread.messages.length - 1];
+    for (let index = thread.messages.length - 1; index >= 0; index--) {
+      if (!isDraftMessage(thread.messages[index])) {
+        return thread.messages[index];
+      }
+    }
   }
   return {};
 }
 
 function firstMessage(thread: GmailThread): GmailMessage {
   if (Array.isArray(thread.messages) && thread.messages.length > 0) {
-    return thread.messages[0];
+    for (let index = 0; index < thread.messages.length; index++) {
+      if (!isDraftMessage(thread.messages[index])) {
+        return thread.messages[index];
+      }
+    }
   }
   return {};
 }
@@ -414,7 +436,29 @@ function labelsText(message: GmailMessage): string {
 }
 
 function messageCount(thread: GmailThread): number {
-  return Array.isArray(thread.messages) ? thread.messages.length : 0;
+  if (!Array.isArray(thread.messages)) {
+    return 0;
+  }
+  let count = 0;
+  for (let index = 0; index < thread.messages.length; index++) {
+    if (!isDraftMessage(thread.messages[index])) {
+      count++;
+    }
+  }
+  return count;
+}
+
+function draftMessageCount(thread: GmailThread): number {
+  if (!Array.isArray(thread.messages)) {
+    return 0;
+  }
+  let count = 0;
+  for (let index = 0; index < thread.messages.length; index++) {
+    if (isDraftMessage(thread.messages[index])) {
+      count++;
+    }
+  }
+  return count;
 }
 
 function threadResult(thread: GmailThread): DynamicGenericToolResult {
@@ -422,13 +466,22 @@ function threadResult(thread: GmailThread): DynamicGenericToolResult {
   const first = firstMessage(thread);
   const subject = firstHeader(first, 'Subject').length > 0 ? decodeGmailText(firstHeader(first, 'Subject')) : '(no subject)';
   const from = decodeGmailText(firstHeader(newest, 'From'));
+  const to = decodeGmailText(firstHeader(newest, 'To'));
   const date = decodeGmailText(firstHeader(newest, 'Date'));
+  const threadId = textOf(thread.id);
+  const messageId = textOf(newest.id);
+  const unread = Array.isArray(newest.labelIds) && newest.labelIds.indexOf('UNREAD') >= 0;
+  const important = Array.isArray(newest.labelIds) && newest.labelIds.indexOf('IMPORTANT') >= 0;
   const snippet = decodeGmailText(textOf(newest.snippet).length > 0 ? textOf(newest.snippet) : textOf(first.snippet));
   const rows: A2uiLabelValueData[] = [
     { label: 'From', value: from.length > 0 ? from : 'Unknown sender' },
+    { label: 'To', value: to },
     { label: 'Date', value: date.length > 0 ? date : textOf(newest.internalDate) },
     { label: 'Messages', value: messageCount(thread).toString() },
-    { label: 'Thread ID', value: textOf(thread.id) }
+    { label: 'Thread ID', value: threadId },
+    { label: 'Message ID', value: messageId },
+    { label: 'Unread', value: unread ? 'true' : 'false' },
+    { label: 'Important', value: important ? 'true' : 'false' }
   ];
   const labels = labelsText(newest);
   if (labels.length > 0) {
@@ -441,7 +494,21 @@ function threadResult(thread: GmailThread): DynamicGenericToolResult {
     status: 'success',
     summary: snippet.length > 0 ? snippet.substring(0, 240) : 'Gmail thread retrieved.',
     rows: rows,
-    rawPreview: 'threadId=' + textOf(thread.id) + ' subject=' + subject.substring(0, 160)
+    rawPreview: JSON.stringify({
+      provider: 'gmail',
+      accountLabel: '',
+      threadId: threadId,
+      messageId: messageId,
+      from: from,
+      to: to,
+      subject: subject.substring(0, 120),
+      snippet: snippet.length > 0 ? snippet.substring(0, 240) : '',
+      receivedAt: date.length > 0 ? date : textOf(newest.internalDate),
+      unread: unread,
+      important: important,
+      sourceUrl: '',
+      rawProviderRef: JSON.stringify({ threadId: threadId, messageId: messageId, historyId: textOf(thread.historyId) })
+    })
   };
 }
 
@@ -496,6 +563,8 @@ async function getThread(accessToken: string, threadId: string): Promise<GmailTh
     ['format', 'metadata'],
     ['metadataHeaders', 'Subject'],
     ['metadataHeaders', 'From'],
+    ['metadataHeaders', 'To'],
+    ['metadataHeaders', 'Message-ID'],
     ['metadataHeaders', 'Date']
   ]);
   return await requestJson(http.RequestMethod.GET, url, accessToken, null) as GmailThread;
@@ -596,7 +665,9 @@ function gmailDetailFromThread(thread: GmailThread, args: MailDetailRequest): Ma
   const first = firstMessage(thread);
   const body: GmailBodyParts = { plain: '', html: '' };
   collectGmailBody(newest.payload, body);
-  const bodyText = (body.plain.length > 0 ? body.plain : gmailTextFromHtml(body.html)).substring(0, 30000);
+  const directText = textOf(newest.messageText).trim();
+  const bodyText = (directText.length > 0 ? directText :
+    (body.plain.length > 0 ? body.plain : gmailTextFromHtml(body.html))).substring(0, 30000);
   const subject = gmailHeader(first, 'Subject').length > 0 ? gmailHeader(first, 'Subject') : args.subject;
   const detail: MailDetail = {
     requestKey: args.requestKey,
@@ -618,13 +689,44 @@ function gmailDetailFromThread(thread: GmailThread, args: MailDetailRequest): Ma
 export function gmailMailDetailFromPayload(payload: Object, args: MailDetailRequest): MailDetail {
   const thread = findGmailThread(payload, args);
   if (thread === null) {
-    throw new Error('Composio Gmail response did not contain a readable thread payload.');
+    throw new Error('Composio Gmail response did not contain a readable message or thread payload.');
+  }
+  aiLogInfo('[AIPhone][GmailDetailThreadShape] messages=' +
+    (Array.isArray(thread.messages) ? thread.messages.length : 0).toString() +
+    ' drafts=' + draftMessageCount(thread).toString());
+  if (Array.isArray(thread.messages) && thread.messages.length > 0 && messageCount(thread) === 0) {
+    throw new Error('Composio Gmail thread contained only draft messages.');
   }
   const detail = gmailDetailFromThread(thread, args);
   if (detail.bodyText.length === 0 && detail.bodyHtml.length === 0) {
     throw new Error('Composio Gmail response did not include the message body.');
   }
   return detail;
+}
+
+export function gmailMailDetailFromComposioObservation(
+  observation: string,
+  args: MailDetailRequest
+): MailDetail {
+  const raw = observation.trim();
+  if (raw.length === 0) {
+    throw new Error('Composio Gmail detail response was empty.');
+  }
+  let payload: Object;
+  try {
+    payload = JSON.parse(raw) as Object;
+  } catch (_error) {
+    throw new Error('Composio Gmail detail response was not valid JSON.');
+  }
+  if (Array.isArray(payload) || typeof payload !== 'object') {
+    throw new Error('Composio Gmail detail response was not a JSON object.');
+  }
+  const record = payload as Record<string, GmailJsonValue>;
+  aiLogInfo('[AIPhone][GmailDetailComposioShape] topKeys=' + Object.keys(record).slice(0, 12).join(','));
+  if (record.truncated === true) {
+    throw new Error('Composio Gmail detail response was truncated before Gmail parsing.');
+  }
+  return gmailMailDetailFromPayload(payload, args);
 }
 
 async function getThreadFull(accessToken: string, threadId: string): Promise<GmailThread> {
@@ -770,6 +872,60 @@ async function createDraft(accessToken: string, prompt: string, args: Object | n
   }];
 }
 
+async function updateDraft(accessToken: string, prompt: string, args: Object | null = null): Promise<DynamicGenericToolResult[]> {
+  const gmailArgs = gmailMcpArgsForPrompt('gmail.draft.apply', prompt, args) as GmailUpdateDraftArgs;
+  if (gmailArgs.draftId.length === 0) {
+    return [errorResult('users.drafts.update', 'Missing Gmail draft ID.')];
+  }
+  if (gmailArgs.to.length === 0) {
+    return [errorResult('users.drafts.update', 'Missing recipient email address.')];
+  }
+  if (gmailArgs.body.trim().length === 0) {
+    return [errorResult('users.drafts.update', 'Missing email body.')];
+  }
+  const threadId = gmailArgs.threadId.trim();
+  const draftBody: GmailDraftCreateRequest = {
+    message: {
+      raw: bytesToBase64Url(utf8Bytes(rfc2822Message(gmailArgs)))
+    }
+  };
+  if (threadId.length > 0) {
+    draftBody.message.threadId = threadId;
+  }
+  const updated = await requestJson(
+    http.RequestMethod.PUT,
+    GMAIL_API_BASE_URL + '/drafts/' + encodeURIComponent(gmailArgs.draftId),
+    accessToken,
+    draftBody
+  ) as GmailDraftResponse;
+  const returnedDraftId = textOf(updated.id);
+  if (returnedDraftId.length === 0 || returnedDraftId !== gmailArgs.draftId) {
+    return [errorResult('users.drafts.update', 'Gmail returned a mismatched draft ID.')];
+  }
+  const messageId = updated.message === undefined ? '' : textOf(updated.message.id);
+  const resultThreadId = threadId.length > 0 ?
+    threadId : (updated.message === undefined ? '' : textOf(updated.message.threadId));
+  const rows: A2uiLabelValueData[] = [
+    { label: 'To', value: gmailArgs.to.join(', ') },
+    { label: 'Subject', value: gmailArgs.subject },
+    { label: 'Draft ID', value: returnedDraftId },
+    { label: 'Message ID', value: messageId }
+  ];
+  if (resultThreadId.length > 0) {
+    rows.push({ label: 'Thread ID', value: resultThreadId });
+  }
+  return [{
+    sourceTag: 'Gmail API',
+    toolName: 'users.drafts.update',
+    title: 'Gmail 草稿已更新',
+    status: 'success',
+    summary: '已在真实 Gmail 账号中更新原草稿；尚未发送。',
+    rows: rows,
+    rawPreview: 'draftId=' + returnedDraftId + ' messageId=' + messageId +
+      (resultThreadId.length > 0 ? ' threadId=' + resultThreadId : '')
+  }];
+}
+
 export async function searchGmailThreadsForMail(accessToken: string, prompt: string, args: Object | null = null): Promise<DynamicGenericToolResult[]> {
   return await searchThreads(accessToken, prompt, args);
 }
@@ -786,8 +942,11 @@ export async function callGmailApiTool(toolId: string, prompt: string, accessTok
     if (toolId === 'gmail.thread.read') {
       return await readThread(accessToken, prompt, args);
     }
-    if (toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply') {
+    if (toolId === 'gmail.draft.create') {
       return await createDraft(accessToken, prompt, args);
+    }
+    if (toolId === 'gmail.draft.apply') {
+      return await updateDraft(accessToken, prompt, args);
     }
     return [errorResult(toolId, 'Unsupported Gmail API tool.')];
   } catch (error) {

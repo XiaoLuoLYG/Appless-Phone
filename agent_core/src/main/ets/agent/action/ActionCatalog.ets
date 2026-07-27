@@ -8,6 +8,25 @@ import {
 } from './ActionCatalogTypes';
 
 const WORKFLOW_ENTRY_ACTION_ID = 'workflow.run';
+const ACTION_INTENT_IDS: string[] = [
+  'worldcup.open',
+  'maps.route.open',
+  'calendar.event.create',
+  'gmail.draft.create',
+  'gmail.draft.apply',
+  'luckin.order.preview',
+  'social.post.preview',
+  'payment.send',
+  'payment.account.setup',
+  'whatsapp.message.send'
+];
+
+interface ActionDefinitionFingerprintMaterial {
+  actionId: string;
+  backend: string[];
+  riskLevel: string;
+  inputSchema: string;
+}
 
 function denied(code: string, message: string): ActionCatalogResult {
   return {
@@ -31,12 +50,33 @@ function hasObjectArgs(args: Object): boolean {
   return args !== null && typeof args === 'object' && !Array.isArray(args);
 }
 
+function hasExactPaymentPreviewIntentArgs(args: Object): boolean {
+  if (!hasObjectArgs(args)) {
+    return false;
+  }
+  const values = args as Record<string, Object | string | number | boolean | null | undefined>;
+  const keys = Object.keys(values);
+  const originalQuery = values['originalQuery'];
+  return keys.length === 1 &&
+    keys[0] === 'originalQuery' &&
+    typeof originalQuery === 'string' &&
+    originalQuery.trim().length > 0;
+}
+
 function malformedArgs(): ActionCatalogResult {
   return denied('ACTION_ARGS_MALFORMED', 'Action args must be a non-array object.');
 }
 
 function authorityFailed(): ActionCatalogResult {
   return denied('ACTION_AUTHORITY_FAILED', 'Action authority failed.');
+}
+
+function actionDefinitionFingerprintValue(value: string): string {
+  let hash: number = 2166136261;
+  for (let index = 0; index < value.length; index++) {
+    hash = Math.imul(hash ^ value.charCodeAt(index), 16777619) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
 }
 
 export class ActionCatalog {
@@ -55,6 +95,24 @@ export class ActionCatalog {
     this.surfaceAuthorizer = surfaceAuthorizer;
     this.clientAuthorizer = clientAuthorizer;
     this.argsValidator = argsValidator;
+  }
+
+  definitionFingerprint(actionId: string): string {
+    try {
+      const definition = this.lookup.find(actionId);
+      if (definition === null) {
+        return '';
+      }
+      const material: ActionDefinitionFingerprintMaterial = {
+        actionId: definition.toolId,
+        backend: definition.backendPriority,
+        riskLevel: definition.riskLevel,
+        inputSchema: definition.inputSchema
+      };
+      return actionDefinitionFingerprintValue(JSON.stringify(material));
+    } catch (_error) {
+      return '';
+    }
   }
 
   validatePlacement(sourceToolId: string, actionId: string, args: Object): ActionCatalogResult {
@@ -98,6 +156,46 @@ export class ActionCatalog {
     } catch (_error) {
       return authorityFailed();
     }
+  }
+
+  validatePageExecution(
+    conversationId: string,
+    turnId: string,
+    surfaceId: string,
+    actionId: string,
+    args: Object
+  ): ActionCatalogResult {
+    if (!hasObjectArgs(args)) {
+      return malformedArgs();
+    }
+    try {
+      const registered = this.validateRegisteredStep(actionId, args);
+      if (!registered.ok) {
+        return registered;
+      }
+      if (!this.surfaceAuthorizer.allows(conversationId, turnId, surfaceId, actionId, args)) {
+        return denied('ACTION_SURFACE_DENIED', 'Action does not match the current surface.');
+      }
+      return registered;
+    } catch (_error) {
+      return authorityFailed();
+    }
+  }
+
+  validateActionIntentExecution(actionId: string, args: Object): ActionCatalogResult {
+    if (ACTION_INTENT_IDS.indexOf(actionId) < 0) {
+      return denied(
+        'ACTION_INTENT_DENIED',
+        'Only registered no-Data actions with deterministic args may execute from actionIntent.'
+      );
+    }
+    if (actionId === 'payment.send' && !hasExactPaymentPreviewIntentArgs(args)) {
+      return denied(
+        'ACTION_INTENT_ARGS_DENIED',
+        'Virtual payment intent requires the exact resolver-owned preview request.'
+      );
+    }
+    return this.validateRegisteredStep(actionId, args);
   }
 
   validateRegisteredStep(actionId: string, args: Object): ActionCatalogResult {

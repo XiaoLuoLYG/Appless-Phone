@@ -1,11 +1,16 @@
 import {
   A2uiAgentRunner,
+  ActionExecutionResult,
+  ConversationTurnMessage,
+  CurrentSurfaceSummary,
   LlmProvider,
   LocalModelSettings,
   OpenAiA2uiModel,
   OpenAiCompatibleModel,
   PaymentAccount,
+  RuntimeOwner,
   StripeReceivingAccountCardData,
+  UserInputPayload,
   defaultLocalModelSettings
 } from '@loop/agent-core';
 import { isRollingGoHotelBookingUrl } from '@loop/agent-core';
@@ -34,11 +39,17 @@ import {
   A2uiMessage,
   A2uiRuntimeDataModel,
   A2uiSurfaceState,
+  actionsOf,
+  componentById,
+  genericToolResults,
   A2uiTrainData,
   A2uiTravelOptionData
 } from '@loop/agent-core';
 import { stripeReceivingAccount } from '@loop/agent-core';
-import { A2uiStreamMeta, callLocalModel, modelThinkCloseSeen } from '../../model/LocalModelClient';
+import {
+  callDirectModel,
+  DirectModelCallResult
+} from '../../model/LocalModelClient';
 import { GMAIL_MCP_AUTH_SETUP_URL, GMAIL_WEB_URL, GOOGLE_CALENDAR_WEB_URL, GOOGLE_OAUTH_SETUP_URL } from '@loop/agent-core';
 import { A2uiSurfaceStore, createSeedA2uiSurface } from '@loop/agent-core';
 import {
@@ -52,6 +63,7 @@ import {
 import { aiLogError, aiLogInfo } from '@loop/agent-core';
 import {
   callToolGateway,
+  childSurfaceIdForMultiTaskSlot,
   COMPOSIO_USER_ID_PREFIX,
   ComposioAuthConfigItem,
   ComposioAuthProxyClient,
@@ -64,11 +76,14 @@ import {
   currentComposioUserId,
   decideTrainPresaleExecution,
   defaultToolGatewayUrl,
+  isMultiTaskSurface,
   isRegisteredToolId,
+  mergeSlotObservationIntoMultiTaskSurface,
   normalizeComposioUserId,
   prepareGmailOAuthAuthorizationUrl,
   prepareGoogleOAuthAuthorizationUrl,
   recheck12306TrainAvailability,
+  resolveMultiTaskSlotId,
   select12306DebugTrain,
   sendLocalSocialHubReply,
   shortComposioUserId,
@@ -92,17 +107,21 @@ import { buildSystemFoodNavigationUri } from '@loop/agent-core';
 import { officialMediaVideoPlaybackUrl } from '@loop/agent-core';
 import {
   MailDetail,
-  MailDetailRequest,
   MailCalendarSuggestion,
   MailReplyCommand,
   MailReplyOperationResult,
   addHuaweiCalendarEvent,
-  readConfiguredMailDetail,
   saveConfiguredMailDraft,
   sendConfiguredMailReply
 } from '@loop/agent-core';
-import { copyPersonaData } from '../../model/PersonaA2ui';
-import { PersonaMemoryUpdateRequest } from '../../model/PersonaMemoryUpdate';
+import {
+  copyPersonaData,
+  leaderPersonaSurfaceUpdate
+} from '../../model/PersonaA2ui';
+import {
+  mergePersonaStablePreference,
+  PersonaMemoryUpdateRequest
+} from '../../model/PersonaMemoryUpdate';
 import { PreferencesPersonaPackStore } from '../../model/PersonaPreferencesStore';
 import { allPersonaPacks, personaPackForId, resetPersonaPackText, updatePersonaPackText } from '../../model/PersonaStore';
 import { PersonaPack } from '../../model/PersonaTypes';
@@ -132,15 +151,39 @@ import {
 } from './components/CheckoutWebOverlay';
 import { ConfigPage } from './components/ConfigPage';
 import {
-  HotelAgentRuntime,
-  HotelAgentRuntimeOptions,
-  HotelTurnOutcome,
   HotelTurnStatus
-} from './agent/HotelAgentRuntime';
-import { SystemUriOpener } from './agent/HotelRegisteredActionExecutor';
+} from './agent/MultiAgentHotelSupport';
+import {
+  MailDetailInPlaceEvent,
+  MailDetailWriteLease,
+  MultiAgentCanaryOptions,
+  MultiAgentCanaryRuntime
+} from './agent/MultiAgentCanaryRuntime';
+import {
+  MailDetailSuggestionGuard,
+  MailDetailUiEvent,
+  publishMailDetailThenSuggest
+} from './agent/MailDetailInPlaceUpdater';
+import {
+  MultiAgentSettledOutcome,
+  MultiAgentTurnOutcome
+} from './agent/MultiAgentRuntimeTypes';
+import { SystemUriOpener } from './agent/AiphoneRegisteredActionExecutor';
+import {
+  RegisteredPageSnapshot,
+  RegisteredPageSnapshotStore,
+  dispatchRegisteredPageActionCandidate,
+  registeredPageActionUsesPageBusy
+} from './agent/RegisteredPageActionRoute';
+import {
+  RegisteredPageActionHandler,
+  RegisteredPageToolInvocation,
+  RegisteredPageToolInvoker
+} from './agent/RegisteredPageActionHandler';
+import { RegisteredPageActionContext } from './agent/AiphoneRegisteredActionExecutor';
 import { socialHubComposioToolkitCandidates } from './components/SocialHubViewData';
 import { createHtmlHomeDocument } from './html/HtmlHomeSnapshot';
-import { renderHtmlHomeDocument } from './html/HtmlHomeRenderer';
+import { buildMultiTaskHomePayload, renderHtmlHomeDocument } from './html/HtmlHomeRenderer';
 import { isHtmlHomeActionAllowed } from './html/HtmlHomeActionPolicy';
 import { HtmlHomeAction, HtmlHomeBlock, HtmlHomeDocument } from './html/HtmlHomeTypes';
 import {
@@ -172,6 +215,9 @@ import {
   ConnectionPanelState,
   createInitialConnectionPanelState,
   inputTextAfterPromptSubmit,
+  runtimeCallbackIsCurrent,
+  runtimeOwnerAllowsSurfaceAction,
+  runtimeSurfaceIdentityMatches,
   shouldApplySurfaceUpdate,
   shouldShowQueryPendingSurface,
   shouldShowWelcome,
@@ -182,9 +228,7 @@ import {
   A2uiHomeResolvedToolRequest,
   directPaymentToolIdForActionId,
   directRideToolIdForActionId,
-  resolveA2uiHomeToolRequest,
-  surfaceHasSatisfiedToolResult,
-  surfaceHasVisibleToolResult
+  resolveA2uiHomeToolRequest
 } from './render/A2uiHomeToolRequest';
 
 const CONNECTION_TEST_PROMPT: string = '连接检查：请返回 A2UI v0.9.1 setup surface，说明 Local API 已可用。';
@@ -206,49 +250,8 @@ const WRITE_CALENDAR_PERMISSION: Permissions = 'ohos.permission.WRITE_CALENDAR';
 const APPROX_LOCATION_PERMISSION: Permissions = 'ohos.permission.APPROXIMATELY_LOCATION';
 const PRECISE_LOCATION_PERMISSION: Permissions = 'ohos.permission.LOCATION';
 
-export function shouldRouteToHotelAgent(prompt: string): boolean {
-  const value = prompt.trim().toLowerCase();
-  if (value.length === 0 ||
-    /(酒店行业|酒店管理|酒店新闻|酒店股票|酒店股价|酒店研报|翻译|是什么意思|邮件|邮箱|工作场所|办公住宿|住宿政策)/.test(value) ||
-    /\b(hotel industry|hotel management|hotel news|hotel stocks?|hotel shares?|translate|translation|meaning|workplace accommodation|office accommodation|accommodation policy|accommodation email|meeting rooms?|classrooms?|newsrooms?)\b/.test(value) ||
-    /\brooms?\s+(to improve|to maneuver|to manoeuvre|for growth|for improvement|for maneuver|for manoeuvre|layout|design|dimensions?|floor plan|for a meeting)\b/.test(value) ||
-    /\brooms?\s+in\s+(this|the)\s+(paragraph|document|email)\b/.test(value)) {
-    return false;
-  }
-  const hasChineseHotel = /(酒店|住宿|旅馆|宾馆|客房)/.test(value);
-  if (hasChineseHotel &&
-    /(找|查|搜|订|预订|入住|想住|要住|推荐|附近|今晚|明晚|明天|后天|一晚|两晚|几晚)/.test(value)) {
-    return true;
-  }
-  if (/^[\u4e00-\u9fffA-Za-z0-9·]{1,12}(酒店|住宿|旅馆|宾馆|客房)$/.test(value)) {
-    return true;
-  }
-  const hasEnglishHotel =
-    /(^|[^a-z])(hotel|hotels|lodging|accommodation)([^a-z]|$)/.test(value);
-  if (hasEnglishHotel &&
-    /\b(find|search|book|reserve|stay|need|want|available|availability|recommend|looking)\b/.test(value)) {
-    return true;
-  }
-  const hasRoomTerm = /\b(guest\s+)?rooms?\b/.test(value);
-  const hasRoomBooking =
-    /\b(book|reserve)\s+(a|an|one|some)?\s*(guest\s+)?rooms?\b/.test(value);
-  const hasRoomLocation =
-    /\b(guest\s+)?rooms?\s+(in|near|at)\s+(?!this\b)(?!the\s+(paragraph|document|email)\b)[a-z0-9]/.test(value);
-  const hasRoomSearch = /\b(find|search|look|looking)\b/.test(value);
-  const hasLodgingContext =
-    /\b(tonight|tomorrow|nights?|guests?|check-?in|check-?out|january|february|march|april|may|june|july|august|september|october|november|december)\b/.test(value) ||
-    /\b\d{1,2}[/-]\d{1,2}([/-]\d{2,4})?\b/.test(value);
-  if (hasRoomBooking ||
-    hasRoomLocation ||
-    (hasRoomTerm && hasRoomSearch && hasLodgingContext)) {
-    return true;
-  }
-  if (/^[a-z][a-z .'-]{1,32}\s+(hotel|hotels|lodging|accommodation)$/.test(value) ||
-    /^(hotel|hotels|lodging|accommodation)\s+(in|near|at)\s+[a-z]/.test(value) ||
-    /\bstay\s+(in|near|at)\s+[a-z]/.test(value)) {
-    return true;
-  }
-  return false;
+interface RegisteredPageToolObservation {
+  result: A2uiCallResult | null;
 }
 
 function fingerprintPart(value: string): string {
@@ -300,6 +303,33 @@ class PageHotelUriOpener implements SystemUriOpener {
   }
 }
 
+class PageRegisteredToolInvoker implements RegisteredPageToolInvoker {
+  private readonly callback: (
+    toolId: string,
+    prompt: string,
+    pageActionId: string,
+    args: Object
+  ) => Promise<RegisteredPageToolInvocation>;
+
+  constructor(callback: (
+    toolId: string,
+    prompt: string,
+    pageActionId: string,
+    args: Object
+  ) => Promise<RegisteredPageToolInvocation>) {
+    this.callback = callback;
+  }
+
+  invoke(
+    toolId: string,
+    prompt: string,
+    pageActionId: string,
+    args: Object
+  ): Promise<RegisteredPageToolInvocation> {
+    return this.callback(toolId, prompt, pageActionId, args);
+  }
+}
+
 type RideActionArgValue = Object | string | number | boolean | null | undefined;
 
 interface RideCachedProduct {
@@ -321,8 +351,6 @@ interface RideLocalOrderActionArgs {
   estimateTraceId?: RideActionArgValue;
   estimate_trace_id?: RideActionArgValue;
   traceId?: RideActionArgValue;
-  confirmed?: RideActionArgValue;
-  confirmation?: RideActionArgValue;
 }
 
 type HtmlActionValue = Object | string | number | boolean | null | undefined;
@@ -332,15 +360,6 @@ interface HtmlDynamicCredentialPayload {
   credentialValue?: HtmlActionValue;
   toolId?: HtmlActionValue;
   prompt?: HtmlActionValue;
-}
-
-interface MailDetailUiEvent {
-  sequence: number;
-  requestKey: string;
-  status: string;
-  detail?: MailDetail;
-  calendarSuggestion?: MailCalendarSuggestion;
-  error: string;
 }
 
 interface MailCalendarUiEvent {
@@ -493,6 +512,22 @@ interface PaymentFallbackArgs {
 
 interface LuckinOrderStatusArgs {
   orderId: string;
+}
+
+interface LuckinPaymentStatusPatch {
+  kind: 'payment-status';
+  statusText: string;
+  sectionId?: string;
+}
+
+interface InlineLuckinPaymentStatusPlan {
+  mode: 'single' | 'multi-task';
+  slotId: string;
+}
+
+interface MultiTaskToolCallContext {
+  slotId: string;
+  childSurfaceId: string;
 }
 
 interface LocationPermissionResult {
@@ -649,7 +684,16 @@ struct Index {
   private mailCalendarSuggestions: Record<string, MailCalendarSuggestion> = {};
   private htmlHomeCacheKey: string = '';
   private htmlHomeCacheHtml: string = '';
+  private readonly registeredPageSnapshotStore: RegisteredPageSnapshotStore =
+    new RegisteredPageSnapshotStore();
+  private registeredPageRenderGeneration: number = 0;
   @State htmlHomeStableHtml: string = '';
+  @State multiTaskPayloadJson: string = '';
+  @State multiTaskShellHtml: string = '';
+  @State multiTaskPayloadTick: number = 0;
+  private multiTaskActiveSectionId: string = '';
+  private multiTaskUserPinnedSection: boolean = false;
+  private multiTaskLastMergedRawBySlot: Record<string, string> = {};
   private voiceSession: VoiceInputSession | null = null;
   private voiceSessionSeq: number = 0;
   private voiceBaseInputText: string = '';
@@ -657,8 +701,12 @@ struct Index {
   private voiceCompletionHandled: boolean = false;
   private luckinReturnSurface: A2uiSurfaceState | null = null;
   private hotelReturnSurface: A2uiSurfaceState | null = null;
-  private hotelAgentRuntime: HotelAgentRuntime | null = null;
+  private multiAgentRuntime: MultiAgentCanaryRuntime | null = null;
   private hotelAgentRuntimeFingerprint: string = '';
+  private runtimeGeneration: number = 0;
+  private readonly mailDetailSuggestionGuard: MailDetailSuggestionGuard =
+    new MailDetailSuggestionGuard();
+  private activeRuntimeOwner: RuntimeOwner = 'legacy';
   @State luckinInlinePatchJson: string = '';
   @State luckinInlinePatchTick: number = 0;
   private luckinOptionSwitchInFlight: boolean = false;
@@ -703,7 +751,308 @@ struct Index {
     this.htmlHomeCacheHtml = renderHtmlHomeDocument(document, false);
     this.luckinInlinePatchJson = patchJson;
     this.luckinInlinePatchTick = this.luckinInlinePatchTick + 1;
+    this.recordRenderedPageSnapshot(surface, document);
     return true;
+  }
+
+  private parseSurfaceDataModel(surface: A2uiSurfaceState): A2uiRuntimeDataModel | null {
+    try {
+      return JSON.parse(surface.dataModelJson) as A2uiRuntimeDataModel;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  private isLuckinPaymentResult(result: A2uiGenericToolResultData): boolean {
+    const title = this.actionText(result.title).trim();
+    const toolName = this.actionText(result.toolName).trim();
+    return title.indexOf('瑞幸订单已创建') >= 0 || toolName === 'luckin.order.create';
+  }
+
+  private isLuckinStatusResult(result: A2uiGenericToolResultData): boolean {
+    const title = this.actionText(result.title).trim();
+    const toolName = this.actionText(result.toolName).trim();
+    return toolName === 'luckin.order.status' || title.indexOf('瑞幸订单状态') >= 0;
+  }
+
+  private rowValueByLabel(rows: A2uiLabelValueData[], label: string): string {
+    for (let index = 0; index < rows.length; index += 1) {
+      if (rows[index].label === label) {
+        return this.actionText(rows[index].value).trim();
+      }
+    }
+    return '';
+  }
+
+  private upsertRow(rows: A2uiLabelValueData[], label: string, value: string): A2uiLabelValueData[] {
+    const next = rows.slice();
+    for (let index = 0; index < next.length; index += 1) {
+      if (next[index].label === label) {
+        next[index] = { label: label, value: value };
+        return next;
+      }
+    }
+    if (value.length > 0) {
+      next.push({ label: label, value: value });
+    }
+    return next;
+  }
+
+  private luckinOrderStatusTextFromResult(result: A2uiGenericToolResultData): string {
+    const fromRow = this.rowValueByLabel(result.rows, '订单状态');
+    if (fromRow.length > 0) {
+      return fromRow;
+    }
+    const summary = this.actionText(result.summary).trim();
+    if (summary.length > 0 && summary !== '已返回订单状态') {
+      return summary;
+    }
+    return '待支付';
+  }
+
+  private findLuckinToolResult(results: A2uiGenericToolResultData[], matcher: (result: A2uiGenericToolResultData) => boolean):
+    A2uiGenericToolResultData | null {
+    for (let index = 0; index < results.length; index += 1) {
+      if (matcher(results[index])) {
+        return results[index];
+      }
+    }
+    return null;
+  }
+
+  private mergeLuckinPaymentStatusSurface(paymentSurface: A2uiSurfaceState, statusSurface: A2uiSurfaceState): A2uiSurfaceState | null {
+    const paymentModel = this.parseSurfaceDataModel(paymentSurface);
+    const statusModel = this.parseSurfaceDataModel(statusSurface);
+    if (paymentModel === null || statusModel === null) {
+      return null;
+    }
+    const paymentResults = paymentModel.genericToolResults ?? [];
+    const statusResults = statusModel.genericToolResults ?? [];
+    const paymentResult = this.findLuckinToolResult(paymentResults, (result: A2uiGenericToolResultData) => {
+      return this.isLuckinPaymentResult(result);
+    });
+    const statusResult = this.findLuckinToolResult(statusResults, (result: A2uiGenericToolResultData) => {
+      return this.isLuckinStatusResult(result);
+    });
+    if (paymentResult === null || statusResult === null) {
+      return null;
+    }
+    let rows = paymentResult.rows.slice();
+    const statusText = this.luckinOrderStatusTextFromResult(statusResult);
+    rows = this.upsertRow(rows, '订单状态', statusText);
+    const payUrl = this.rowValueByLabel(statusResult.rows, '支付链接');
+    const payQr = this.rowValueByLabel(statusResult.rows, '支付二维码');
+    if (payUrl.length > 0) {
+      rows = this.upsertRow(rows, '支付链接', payUrl);
+    }
+    if (payQr.length > 0) {
+      rows = this.upsertRow(rows, '支付二维码', payQr);
+    }
+    const mergedResult: A2uiGenericToolResultData = {
+      sourceTag: paymentResult.sourceTag,
+      toolName: paymentResult.toolName,
+      title: paymentResult.title,
+      status: paymentResult.status,
+      summary: paymentResult.summary,
+      rows: rows,
+      rawPreview: statusResult.rawPreview.length > 0 ? statusResult.rawPreview : paymentResult.rawPreview
+    };
+    const nextResults: A2uiGenericToolResultData[] = [];
+    paymentResults.forEach((result: A2uiGenericToolResultData) => {
+      nextResults.push(this.isLuckinPaymentResult(result) ? mergedResult : result);
+    });
+    const statusComponent = componentById(statusSurface, 'results');
+    const statusActions = statusComponent === null ? [] : actionsOf(statusComponent);
+    const nextComponents: A2uiComponent[] = [];
+    paymentSurface.components.forEach((component: A2uiComponent) => {
+      if (component.id === 'results' && statusActions.length > 0) {
+        nextComponents.push({
+          id: component.id,
+          component: component.component,
+          child: component.child,
+          children: component.children,
+          title: component.title,
+          body: component.body,
+          status: component.status,
+          dataPath: component.dataPath,
+          actions: statusActions
+        });
+        return;
+      }
+      nextComponents.push(component);
+    });
+    const nextModel = paymentModel;
+    nextModel.genericToolResults = nextResults;
+    const nextSurface = this.surfaceSnapshot(paymentSurface);
+    nextSurface.components = nextComponents;
+    nextSurface.dataModelJson = JSON.stringify(nextModel);
+    nextSurface.sequence = Math.max(paymentSurface.sequence, statusSurface.sequence) + 1;
+    return nextSurface;
+  }
+
+  private luckinPaymentStatusPatchFromSurface(statusSurface: A2uiSurfaceState, sectionId: string = ''): LuckinPaymentStatusPatch | null {
+    const statusResults = genericToolResults(statusSurface);
+    const statusResult = this.findLuckinToolResult(statusResults, (result: A2uiGenericToolResultData) => {
+      return this.isLuckinStatusResult(result);
+    });
+    if (statusResult === null) {
+      return null;
+    }
+    const patch: LuckinPaymentStatusPatch = {
+      kind: 'payment-status',
+      statusText: this.luckinOrderStatusTextFromResult(statusResult)
+    };
+    if (sectionId.length > 0) {
+      patch.sectionId = sectionId;
+    }
+    return patch;
+  }
+
+  private publishLuckinPaymentStatusPatch(patch: LuckinPaymentStatusPatch): void {
+    this.luckinInlinePatchJson = JSON.stringify(patch);
+    this.luckinInlinePatchTick = this.luckinInlinePatchTick + 1;
+    aiLogInfo('[AIPhone][LuckinPaymentStatusPatch] status=' + patch.statusText +
+      ' sectionId=' + (patch.sectionId ?? ''));
+  }
+
+  private applyLuckinInlinePaymentStatusPatch(paymentSurface: A2uiSurfaceState, statusSurface: A2uiSurfaceState): boolean {
+    const mergedSurface = this.mergeLuckinPaymentStatusSurface(paymentSurface, statusSurface);
+    if (mergedSurface === null) {
+      return false;
+    }
+    const patch = this.luckinPaymentStatusPatchFromSurface(statusSurface);
+    if (patch === null) {
+      return false;
+    }
+    this.storeSurfaceSilently(mergedSurface);
+    this.htmlHomeCacheKey = this.currentHtmlHomeCacheKey();
+    this.htmlHomeCacheHtml = renderHtmlHomeDocument(createHtmlHomeDocument({
+      surface: mergedSurface,
+      messages: this.messages,
+      isBusy: false,
+      isAwaitingFirstSurface: false
+    }), false);
+    this.publishLuckinPaymentStatusPatch(patch);
+    return true;
+  }
+
+  private embeddedSurfaceFromMultiTaskSlot(surface: A2uiSurfaceState, slotId: string): A2uiSurfaceState | null {
+    try {
+      const parsed = JSON.parse(surface.dataModelJson) as Record<string, Object | null | undefined>;
+      const sectionsValue = parsed.sections;
+      if (sectionsValue === undefined || sectionsValue === null ||
+        typeof sectionsValue !== 'object' || Array.isArray(sectionsValue)) {
+        return null;
+      }
+      const sections = sectionsValue as Record<string, Record<string, Object | string | number | boolean | null | undefined>>;
+      const section = sections[slotId];
+      if (section === undefined) {
+        return null;
+      }
+      const embedded = section.embeddedSurface;
+      if (embedded === undefined || embedded === null || typeof embedded !== 'object' || Array.isArray(embedded)) {
+        return null;
+      }
+      const record = embedded as Record<string, Object | string | number | boolean | null | undefined>;
+      const surfaceId = this.actionText(record.surfaceId).trim();
+      if (surfaceId.length === 0) {
+        return null;
+      }
+      const embeddedSurface: A2uiSurfaceState = {
+        surfaceId: surfaceId,
+        rootId: this.actionText(record.rootId).trim().length > 0 ? this.actionText(record.rootId).trim() : 'root',
+        title: this.actionText(record.title).trim(),
+        intent: this.actionText(record.intent).trim().length > 0 ? this.actionText(record.intent).trim() : 'general',
+        status: this.actionText(record.status).trim().length > 0 ? this.actionText(record.status).trim() : 'ready',
+        components: Array.isArray(record.components) ? record.components as A2uiComponent[] : [],
+        dataModelJson: this.actionText(record.dataModelJson).trim().length > 0 ? this.actionText(record.dataModelJson).trim() : '{}',
+        error: this.actionText(record.error).trim(),
+        sequence: typeof record.sequence === 'number' ? record.sequence as number : 0
+      };
+      return embeddedSurface;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  private mergeLuckinPaymentStatusIntoMultiTaskSurface(
+    composite: A2uiSurfaceState,
+    slotId: string,
+    statusSurface: A2uiSurfaceState
+  ): A2uiSurfaceState | null {
+    const paymentSurface = this.embeddedSurfaceFromMultiTaskSlot(composite, slotId);
+    if (paymentSurface === null) {
+      return null;
+    }
+    const mergedEmbedded = this.mergeLuckinPaymentStatusSurface(paymentSurface, statusSurface);
+    if (mergedEmbedded === null) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(composite.dataModelJson) as Record<string, Object | null | undefined>;
+      const sectionsValue = parsed.sections;
+      if (sectionsValue === undefined || sectionsValue === null ||
+        typeof sectionsValue !== 'object' || Array.isArray(sectionsValue)) {
+        return null;
+      }
+      const sections = sectionsValue as Record<string, Record<string, Object | string | number | boolean | null | undefined>>;
+      const section = sections[slotId];
+      if (section === undefined) {
+        return null;
+      }
+      section.embeddedSurface = mergedEmbedded as Object;
+      const patch = this.luckinPaymentStatusPatchFromSurface(statusSurface);
+      if (patch !== null) {
+        section.summary = patch.statusText;
+      }
+      sections[slotId] = section;
+      parsed.sections = sections as Object;
+      const nextSurface = this.surfaceSnapshot(composite);
+      nextSurface.dataModelJson = JSON.stringify(parsed);
+      nextSurface.sequence = composite.sequence + 1;
+      return nextSurface;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  private applyLuckinInlineMultiTaskPaymentStatusPatch(
+    composite: A2uiSurfaceState,
+    slotId: string,
+    statusSurface: A2uiSurfaceState
+  ): boolean {
+    const mergedSurface = this.mergeLuckinPaymentStatusIntoMultiTaskSurface(composite, slotId, statusSurface);
+    if (mergedSurface === null) {
+      return false;
+    }
+    const patch = this.luckinPaymentStatusPatchFromSurface(statusSurface, slotId);
+    if (patch === null) {
+      return false;
+    }
+    this.storeSurfaceSilently(mergedSurface);
+    this.htmlHomeCacheKey = this.currentHtmlHomeCacheKey();
+    this.publishLuckinPaymentStatusPatch(patch);
+    return true;
+  }
+
+  private inlineLuckinPaymentStatusPlan(
+    toolId: string,
+    surface: A2uiSurfaceState,
+    multiTaskCtx: MultiTaskToolCallContext | null
+  ): InlineLuckinPaymentStatusPlan | null {
+    if (toolId !== 'luckin.order.status') {
+      return null;
+    }
+    if (multiTaskCtx === null) {
+      if (this.hasLuckinPaymentBlockInSurface(surface)) {
+        return { mode: 'single', slotId: '' };
+      }
+      return null;
+    }
+    if (this.hasLuckinPaymentBlockInMultiTaskSlot(surface, multiTaskCtx.slotId)) {
+      return { mode: 'multi-task', slotId: multiTaskCtx.slotId };
+    }
+    return null;
   }
 
   private finishLuckinOptionSwitch(inFlight: boolean = false): void {
@@ -716,7 +1065,94 @@ struct Index {
       ' sequence=' + surface.sequence.toString());
   }
 
+  private stripMultiTaskEmbedsForShell(document: HtmlHomeDocument): HtmlHomeDocument {
+    const blocks: HtmlHomeBlock[] = [];
+    document.blocks.forEach((block: HtmlHomeBlock) => {
+      if (block.kind !== 'multi-task-section') {
+        blocks.push(block);
+        return;
+      }
+      blocks.push({
+        id: block.id,
+        kind: block.kind,
+        title: block.title,
+        subtitle: block.subtitle,
+        status: block.status,
+        source: block.source,
+        toolId: block.toolId,
+        sectionId: block.sectionId,
+        rawPreview: block.rawPreview,
+        metrics: block.metrics,
+        rows: block.rows,
+        actions: block.actions
+      });
+    });
+    return {
+      version: document.version,
+      source: document.source,
+      kind: document.kind,
+      title: document.title,
+      subtitle: document.subtitle,
+      chips: document.chips,
+      metrics: document.metrics,
+      timeline: document.timeline,
+      blocks: blocks,
+      actions: document.actions,
+      history: document.history,
+      persona: document.persona,
+      personaMemory: document.personaMemory,
+      rawSurfaceRoot: document.rawSurfaceRoot,
+      activeSectionId: '',
+      generatedAt: document.generatedAt
+    };
+  }
+
+  private ensureMultiTaskShellHtml(document: HtmlHomeDocument): void {
+    if (this.multiTaskShellHtml.length > 0) {
+      return;
+    }
+    const shellDocument = this.stripMultiTaskEmbedsForShell(document);
+    this.multiTaskShellHtml = renderHtmlHomeDocument(shellDocument, false);
+  }
+
+  private syncMultiTaskPayloadUpdate(document: HtmlHomeDocument): void {
+    if (document.kind !== 'multi-task') {
+      this.multiTaskPayloadJson = '';
+      return;
+    }
+    const payload = buildMultiTaskHomePayload(document, this.isBusy);
+    this.multiTaskPayloadJson = JSON.stringify(payload);
+    this.multiTaskPayloadTick = this.multiTaskPayloadTick + 1;
+  }
+
+  private scheduleMultiTaskPayloadRefresh(): void {
+    if (!isMultiTaskSurface(this.currentSurface)) {
+      return;
+    }
+    setTimeout((): void => {
+      if (!isMultiTaskSurface(this.currentSurface)) {
+        return;
+      }
+      const document = this.withMultiTaskActiveSection(this.currentHtmlHomeDocument());
+      if (document.kind !== 'multi-task') {
+        return;
+      }
+      this.syncMultiTaskPayloadUpdate(document);
+      aiLogInfo('[AIPhone][MultiTaskPayloadRefresh] tick=' + this.multiTaskPayloadTick.toString() +
+        ' blocks=' + document.blocks.length.toString() +
+        ' active=' + (document.activeSectionId ?? '') +
+        ' busy=' + (this.isBusy ? 'true' : 'false'));
+    }, 0);
+  }
+
   private syncHtmlHomeStableHtml(): void {
+    const document = this.withMultiTaskActiveSection(this.currentHtmlHomeDocument());
+    if (document.kind === 'multi-task') {
+      this.ensureMultiTaskShellHtml(document);
+      this.syncMultiTaskPayloadUpdate(document);
+      return;
+    }
+    this.multiTaskShellHtml = '';
     this.htmlHomeStableHtml = this.currentHtmlHomeHtml();
   }
 
@@ -730,15 +1166,67 @@ struct Index {
     return this.luckinConfirmBlockJson(document).length > 0;
   }
 
+  private hasLuckinPaymentBlockInDocument(document: HtmlHomeDocument): boolean {
+    for (let index = 0; index < document.blocks.length; index += 1) {
+      if (document.blocks[index].title.indexOf('瑞幸订单已创建') >= 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private hasLuckinPaymentBlockInSurface(surface: A2uiSurfaceState = this.currentSurface): boolean {
+    const document = createHtmlHomeDocument({
+      surface: surface,
+      messages: this.messages,
+      isBusy: false,
+      isAwaitingFirstSurface: false
+    });
+    return this.hasLuckinPaymentBlockInDocument(document);
+  }
+
+  private hasLuckinPaymentBlockInMultiTaskSlot(surface: A2uiSurfaceState, slotId: string): boolean {
+    const document = createHtmlHomeDocument({
+      surface: surface,
+      messages: this.messages,
+      isBusy: false,
+      isAwaitingFirstSurface: false
+    });
+    if (document.kind !== 'multi-task') {
+      return false;
+    }
+    for (let index = 0; index < document.blocks.length; index += 1) {
+      const block = document.blocks[index];
+      if (block.kind !== 'multi-task-section' || block.embeddedDocument === undefined) {
+        continue;
+      }
+      const sectionId = (block.sectionId ?? block.id).trim();
+      if (sectionId !== slotId) {
+        continue;
+      }
+      if (this.hasLuckinPaymentBlockInDocument(block.embeddedDocument)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   private shouldKeepLuckinConfirmWebHtmlStable(): boolean {
     return this.hasLuckinConfirmBlockInSurface();
+  }
+
+  private shouldKeepLuckinPaymentWebHtmlStable(): boolean {
+    return this.hasLuckinPaymentBlockInSurface();
   }
 
   private htmlHomeHtmlForView(): string {
     if (this.currentSurface.intent === 'social') {
       return '';
     }
-    if (this.shouldKeepLuckinConfirmWebHtmlStable()) {
+    if (isMultiTaskSurface(this.currentSurface) && this.multiTaskShellHtml.length > 0) {
+      return this.multiTaskShellHtml;
+    }
+    if (this.shouldKeepLuckinConfirmWebHtmlStable() || this.shouldKeepLuckinPaymentWebHtmlStable()) {
       return this.htmlHomeStableHtml.length > 0 ? this.htmlHomeStableHtml : this.currentHtmlHomeHtml();
     }
     return this.currentHtmlHomeHtml();
@@ -1246,7 +1734,11 @@ struct Index {
       aiLogError('[AIPhone][PersonaMemoryUpdate] ok=false reason=unknown_persona personaId=' + update.personaId);
       return;
     }
-    updatePersonaPackText(update.personaId, pack.soul, update.memoryText);
+    updatePersonaPackText(
+      update.personaId,
+      pack.soul,
+      mergePersonaStablePreference(pack.memory, update.memoryText)
+    );
     this.savePersonaOverrides();
     this.refreshPersonaEditor(update.personaId);
     this.personaSaveMessage = '已保存：' + update.summary;
@@ -1288,12 +1780,12 @@ struct Index {
     return now.getFullYear().toString() + '-' + month + '-' + day;
   }
 
-  private hotelRuntime(): HotelAgentRuntime {
+  private canaryRuntime(): MultiAgentCanaryRuntime {
     const settings = this.getSettings();
     const fingerprint = hotelModelSettingsFingerprint(settings);
-    if (this.hotelAgentRuntime !== null &&
+    if (this.multiAgentRuntime !== null &&
       this.hotelAgentRuntimeFingerprint === fingerprint) {
-      return this.hotelAgentRuntime;
+      return this.multiAgentRuntime;
     }
     this.disposeHotelRuntime();
     const provider = new LlmProvider(
@@ -1311,6 +1803,7 @@ struct Index {
       if (!isRollingGoHotelBookingUrl(uri)) {
         return Promise.resolve(false);
       }
+      this.rememberHotelReturnSurface();
       this.checkoutWebKind = 'hotel';
       this.checkoutWebUrl = uri;
       this.trainPresaleCheckoutTaskId = '';
@@ -1318,27 +1811,95 @@ struct Index {
       aiLogInfo('[AIPhone][HotelBookingOpen] host=rollinggo.cn');
       return Promise.resolve(true);
     });
-    const options: HotelAgentRuntimeOptions = {
+    const pageHandler = new RegisteredPageActionHandler(
+      new PageRegisteredToolInvoker((
+        toolId: string,
+        prompt: string,
+        pageActionId: string,
+        args: Object
+      ): Promise<RegisteredPageToolInvocation> =>
+        this.invokeRegisteredPageTool(toolId, prompt, pageActionId, args))
+    );
+    const options: MultiAgentCanaryOptions = {
       model: model,
-      currentLocalDate: (): string => this.currentLocalDate(),
       opener: opener,
-      onSurface: (surface: A2uiSurfaceState): void => {
-        this.isAwaitingFirstSurface = false;
-        this.applySurface(surface);
-      }
+      onSurface: (surface: A2uiSurfaceState, generation: number): boolean => {
+        const accepted = this.applyRuntimeSurface(surface, 'multi_agent', generation);
+        if (accepted) {
+          this.isAwaitingFirstSurface = false;
+        }
+        return accepted;
+      },
+      onMemoryUpdate: (update: PersonaMemoryUpdateRequest, generation: number): void => {
+        if (runtimeCallbackIsCurrent(
+          this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', generation
+        )) {
+          this.applyPersonaMemoryUpdate(update);
+        }
+      },
+      onMailDetail: async (
+        result: MailDetailInPlaceEvent,
+        generation: number,
+        lease: MailDetailWriteLease
+      ): Promise<void> => {
+        const suggestionToken = this.mailDetailSuggestionGuard.beginDetail();
+        const surfaceId = this.currentSurface.surfaceId;
+        const enrichmentIsCurrent = (): boolean =>
+          this.mailDetailSuggestionGuard.isCurrent(suggestionToken) &&
+            this.currentSurface.surfaceId === surfaceId &&
+            runtimeCallbackIsCurrent(
+              this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', generation
+            );
+        await publishMailDetailThenSuggest(result, {
+          initialIsCurrent: (): boolean => lease.isActive() && enrichmentIsCurrent(),
+          enrichmentIsCurrent,
+          writeEvent: (event: MailDetailUiEvent): void => {
+            this.mailDetailEventJson = JSON.stringify(event);
+          },
+          saveSuggestion: (requestKey: string, suggestion: MailCalendarSuggestion): void => {
+            this.mailCalendarSuggestions[requestKey] = suggestion;
+          },
+          suggest: (detail: MailDetail): Promise<MailCalendarSuggestion> =>
+            this.extractMailCalendarSuggestion(detail),
+          onSuggestionError: (message: string): void => {
+            aiLogError('[AIPhone][MailCalendarSuggestionFailed] ' + message.substring(0, 240));
+          }
+        });
+        const bodyChars = result.detail === undefined ? 0 :
+          (result.detail.bodyText.length > 0 ? result.detail.bodyText.length : result.detail.bodyHtml.length);
+        aiLogInfo('[AIPhone][MailDetailInPlace] requestKeyChars=' + result.requestKey.length.toString() +
+          ' provider=' + result.provider +
+          ' identity=' + result.identityDigest +
+          ' status=' + result.status + ' bodyChars=' + bodyChars.toString());
+      },
+      pageAction: (
+        actionId: string,
+        args: Object,
+        context: RegisteredPageActionContext
+      ): Promise<ActionExecutionResult> => actionId === 'gmail.message.send' ?
+        this.executeRegisteredGmailReply(args) : pageHandler.execute(actionId, args, context),
+      currentPageSnapshot: (): RegisteredPageSnapshot | null =>
+        this.registeredPageSnapshotStore.current(),
+      currentHostSurface: (): A2uiSurfaceState | null => this.surfaceSnapshot(this.currentSurface),
+      currentHostGeneration: (): number => this.runtimeGeneration,
+      currentLocalDate: (): string => this.currentLocalDate(),
+      submitTimeoutMs: 45000,
+      actionTimeoutMs: 45000,
+      settingsFingerprint: fingerprint
     };
     if (provider.isConfigured()) {
       options.uiLayoutPlanner = new A2uiAgentRunner(new OpenAiA2uiModel(provider));
     }
-    this.hotelAgentRuntime = new HotelAgentRuntime(options);
+    this.multiAgentRuntime = new MultiAgentCanaryRuntime(options);
     this.hotelAgentRuntimeFingerprint = fingerprint;
-    return this.hotelAgentRuntime;
+    return this.multiAgentRuntime;
   }
 
   private disposeHotelRuntime(): void {
-    if (this.hotelAgentRuntime !== null) {
-      this.hotelAgentRuntime.dispose();
-      this.hotelAgentRuntime = null;
+    this.mailDetailSuggestionGuard.invalidate();
+    if (this.multiAgentRuntime !== null) {
+      this.multiAgentRuntime.dispose();
+      this.multiAgentRuntime = null;
     }
     this.hotelAgentRuntimeFingerprint = '';
   }
@@ -1405,8 +1966,45 @@ struct Index {
       components: this.cloneSurfaceComponents(surface.components),
       dataModelJson: surface.dataModelJson,
       error: surface.error,
-      sequence: surface.sequence
+      sequence: surface.sequence,
+      runtimeOwner: surface.runtimeOwner,
+      runtimeGeneration: surface.runtimeGeneration
     };
+  }
+
+  private beginRuntimeTurn(owner: RuntimeOwner): number {
+    this.mailDetailSuggestionGuard.invalidate();
+    this.runtimeGeneration++;
+    this.activeRuntimeOwner = owner;
+    return this.runtimeGeneration;
+  }
+
+  private ownedSurface(
+    surface: A2uiSurfaceState,
+    owner: RuntimeOwner,
+    generation: number
+  ): A2uiSurfaceState {
+    const next = this.surfaceSnapshot(surface);
+    next.runtimeOwner = owner;
+    next.runtimeGeneration = generation;
+    return next;
+  }
+
+  private applyRuntimeSurface(
+    surface: A2uiSurfaceState,
+    owner: RuntimeOwner,
+    generation: number
+  ): boolean {
+    if (!runtimeCallbackIsCurrent(
+      this.activeRuntimeOwner,
+      this.runtimeGeneration,
+      owner,
+      generation
+    )) {
+      return false;
+    }
+    this.applySurface(this.ownedSurface(surface, owner, generation));
+    return true;
   }
 
   private parsedDataModel(): A2uiRuntimeDataModel | null {
@@ -1435,16 +2033,34 @@ struct Index {
     });
   }
 
+  private withMultiTaskActiveSection(document: HtmlHomeDocument): HtmlHomeDocument {
+    if (document.kind !== 'multi-task') {
+      return document;
+    }
+    const activeSectionId = this.multiTaskActiveSectionId.length > 0 ?
+      this.multiTaskActiveSectionId :
+      (document.activeSectionId ?? '');
+    if (activeSectionId.length === 0) {
+      return document;
+    }
+    document.activeSectionId = activeSectionId;
+    return document;
+  }
+
   private currentHtmlHomeCacheKey(): string {
     const needsInputText = shouldShowQueryPendingSurface(this.isBusy, this.isAwaitingFirstSurface);
     return [
       this.currentSurface.surfaceId,
       this.currentSurface.sequence.toString(),
+      this.currentSurface.runtimeOwner === undefined ? '' : this.currentSurface.runtimeOwner,
+      this.currentSurface.runtimeGeneration === undefined ? '' :
+        this.currentSurface.runtimeGeneration.toString(),
       this.surfaceRenderTick.toString(),
       this.currentSurface.status,
       this.isBusy ? 'busy' : 'idle',
       this.isAwaitingFirstSurface ? 'awaiting' : 'ready',
       this.messages.length.toString(),
+      this.multiTaskActiveSectionId,
       needsInputText ? this.inputText : ''
     ].join('|');
   }
@@ -1454,8 +2070,9 @@ struct Index {
     if (key === this.htmlHomeCacheKey && this.htmlHomeCacheHtml.length > 0) {
       return this.htmlHomeCacheHtml;
     }
-    const document = this.currentHtmlHomeDocument();
+    const document = this.withMultiTaskActiveSection(this.currentHtmlHomeDocument());
     const html = renderHtmlHomeDocument(document, this.isBusy);
+    this.recordRenderedPageSnapshot(this.currentSurface, document);
     if (this.htmlHomeDebugExportEnabled) {
       this.writeHtmlHomeDebugExport(document, 'auto');
     }
@@ -1465,8 +2082,27 @@ struct Index {
       ' kind=' + document.kind +
       ' chars=' + html.length.toString() +
       ' blocks=' + document.blocks.length.toString() +
+      (document.kind === 'multi-task' ?
+        ' activeSectionId=' + (document.activeSectionId ?? 'none') +
+        ' multiTaskBlocks=' + document.blocks.filter((block: HtmlHomeBlock) => block.kind === 'multi-task-section').length.toString() :
+        '') +
       ' renderTick=' + this.surfaceRenderTick.toString());
     return html;
+  }
+
+  private recordRenderedPageSnapshot(
+    surface: A2uiSurfaceState,
+    document: HtmlHomeDocument
+  ): void {
+    if (document.surfaceId === undefined || document.surfaceId !== surface.surfaceId) {
+      return;
+    }
+    this.registeredPageRenderGeneration++;
+    this.registeredPageSnapshotStore.record(
+      this.surfaceSnapshot(surface),
+      document,
+      this.registeredPageRenderGeneration
+    );
   }
 
   private writeHtmlHomeDebugExport(document: HtmlHomeDocument, reason: string): void {
@@ -1505,24 +2141,59 @@ struct Index {
     this.writeHtmlHomeDebugExport(this.currentHtmlHomeDocument(), 'manual');
   }
 
-  private applySurface(surface: A2uiSurfaceState): void {
-    if (!shouldApplySurfaceUpdate(this.currentSurface, surface)) {
-      return;
+  private applySurface(surface: A2uiSurfaceState): boolean {
+    const next = this.surfaceSnapshot(surface);
+    if (next.runtimeOwner === undefined) {
+      next.runtimeOwner = this.activeRuntimeOwner;
     }
-    this.currentSurface = this.surfaceSnapshot(surface);
+    if (next.runtimeGeneration === undefined) {
+      next.runtimeGeneration = this.runtimeGeneration;
+    }
+    if (next.runtimeOwner !== this.activeRuntimeOwner ||
+      next.runtimeGeneration !== this.runtimeGeneration ||
+      !shouldApplySurfaceUpdate(this.currentSurface, next)) {
+      return false;
+    }
+    if (next.intent !== 'multi-task') {
+      this.multiTaskActiveSectionId = '';
+      this.multiTaskUserPinnedSection = false;
+      this.multiTaskLastMergedRawBySlot = {};
+      this.multiTaskPayloadJson = '';
+      this.multiTaskShellHtml = '';
+    } else if (!this.multiTaskUserPinnedSection) {
+      this.multiTaskActiveSectionId = this.readMultiTaskActiveSectionId(next);
+    }
+    this.currentSurface = next;
     this.surfaceRenderTick = this.surfaceRenderTick + 1;
     this.clearLuckinInlinePatchState();
     this.syncHtmlHomeStableHtml();
+    if (surface.intent === 'multi-task') {
+      this.scheduleMultiTaskPayloadRefresh();
+    }
     aiLogInfo('[AIPhone][A2uiHomeSurfaceUpdate] surfaceId=' + surface.surfaceId +
+      ' intent=' + surface.intent +
       ' status=' + surface.status +
       ' components=' + surface.components.length.toString() +
       ' dataChars=' + surface.dataModelJson.length.toString() +
-      ' sequence=' + surface.sequence.toString() +
-      ' renderTick=' + this.surfaceRenderTick.toString());
+      ' sequence=' + next.sequence.toString() +
+      ' renderTick=' + this.surfaceRenderTick.toString() +
+      ' multiTaskTick=' + this.multiTaskPayloadTick.toString());
+    return true;
   }
 
   private forceApplySurface(surface: A2uiSurfaceState, reason: string): void {
-    this.currentSurface = this.surfaceSnapshot(surface);
+    const next = this.surfaceSnapshot(surface);
+    if (next.runtimeOwner === undefined) {
+      next.runtimeOwner = this.activeRuntimeOwner;
+    }
+    if (next.runtimeGeneration === undefined) {
+      next.runtimeGeneration = this.runtimeGeneration;
+    }
+    if (next.runtimeOwner !== this.activeRuntimeOwner ||
+      next.runtimeGeneration !== this.runtimeGeneration) {
+      return;
+    }
+    this.currentSurface = next;
     this.surfaceRenderTick = this.surfaceRenderTick + 1;
     this.clearLuckinInlinePatchState();
     this.syncHtmlHomeStableHtml();
@@ -1634,7 +2305,8 @@ struct Index {
       this.composioSocialHubConnection('discord', 'Discord'),
       this.composioSocialHubConnection('linkedin', 'LinkedIn'),
       this.composioSocialHubConnection('whatsapp', 'WhatsApp'),
-      this.composioSocialHubConnection('instagram', 'Instagram')
+      this.composioSocialHubConnection('instagram', 'Instagram'),
+      this.composioSocialHubConnection('reddit', 'Reddit')
     ];
   }
 
@@ -1916,6 +2588,8 @@ struct Index {
     this.isBusy = false;
     this.isAwaitingFirstSurface = false;
     this.messages = [];
+    this.registeredPageSnapshotStore.clear();
+    this.registeredPageRenderGeneration = 0;
     this.currentSurface = this.surfaceSnapshot(createSeedA2uiSurface());
     this.surfaceRenderTick = this.surfaceRenderTick + 1;
     this.clearLuckinInlinePatchState();
@@ -1941,6 +2615,34 @@ struct Index {
       return this.messages;
     }
     return this.messages.slice(this.messages.length - 8);
+  }
+
+  private multiAgentInput(text: string): UserInputPayload {
+    const recentMessages: ConversationTurnMessage[] = [];
+    const pageMessages = this.recentMessages();
+    for (let index = 0; index < pageMessages.length; index++) {
+      const role = pageMessages[index].role;
+      if (role === 'user' || role === 'assistant') {
+        recentMessages.push({
+          role: role === 'user' ? 'user' : 'assistant',
+          content: pageMessages[index].content
+        });
+      }
+    }
+    const surface: CurrentSurfaceSummary = {
+      surfaceId: this.currentSurface.surfaceId,
+      kind: this.currentSurface.intent,
+      status: this.currentSurface.status,
+      entityRefs: [],
+      actionOfferIds: []
+    };
+    return {
+      text,
+      recentMessages,
+      previousPersonaId: '',
+      currentSurfaceSummary: surface,
+      recentObservations: []
+    };
   }
 
   private appendMessage(role: string, content: string): void {
@@ -2008,11 +2710,16 @@ struct Index {
     }
   }
 
-  private openAnythingDemo(): void {
-    router.pushUrl({ url: ANYTHING_DEMO_ROUTE_URL }, (error) => {
-      if (error) {
-        aiLogError('[AIPhone][AnythingDemoRouteFailed] ' + JSON.stringify(error));
-      }
+  private openAnythingDemo(): Promise<boolean> {
+    return new Promise<boolean>((resolve: (value: boolean) => void): void => {
+      router.pushUrl({ url: ANYTHING_DEMO_ROUTE_URL }, (error) => {
+        if (error) {
+          aiLogError('[AIPhone][AnythingDemoRouteFailed] ' + JSON.stringify(error));
+          resolve(false);
+          return;
+        }
+        resolve(true);
+      });
     });
   }
 
@@ -2034,12 +2741,16 @@ struct Index {
       }));
       return;
     }
+    const turnGeneration: number = this.beginRuntimeTurn('multi_agent');
     this.inputPlaceholder = DEFAULT_INPUT_PLACEHOLDER;
     this.appendMessage('user', visibleText);
     aiLogInfo('[AIPhone][A2uiHomeSubmitPrompt] chars=' + modelPrompt.length.toString() +
       ' model=' + this.selectedModel +
       ' baseUrl=' + this.baseUrl);
     this.inputText = inputTextAfterPromptSubmit(this.inputText);
+    this.multiTaskActiveSectionId = '';
+    this.multiTaskUserPinnedSection = false;
+    this.multiTaskShellHtml = '';
     this.isBusy = true;
     this.isAwaitingFirstSurface = true;
     this.markChecking('正在生成 A2UI...');
@@ -2050,100 +2761,50 @@ struct Index {
         foodPartialThrottleMs: normalizeFoodPartialThrottleMs(this.foodPartialThrottleMs)
       });
       this.markChecking('正在生成 A2UI...');
-      const routeToHotel = actionId.length === 0 && shouldRouteToHotelAgent(trimmed);
-      if (!routeToHotel && this.hotelAgentRuntime !== null) {
-        this.hotelAgentRuntime.cancelActiveTurn('non_hotel_prompt');
-      }
-      if (routeToHotel) {
-        const hotelOutcome: HotelTurnOutcome = await this.hotelRuntime().submit(trimmed);
-        if (!hotelOutcome.ok) {
-          throw new Error(hotelOutcome.message.length > 0 ?
-            hotelOutcome.message : '酒店四 Agent 运行时未能完成当前查询。');
-        }
-        this.isAwaitingFirstSurface = false;
-        const readyMessage = hotelTurnReadyMessage(
-          hotelOutcome.status,
-          this.currentSurface.title
-        );
-        this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
-          ok: true,
-          status: 'ready',
-          message: readyMessage,
-          requestDebug: 'hotel-agent-runtime',
-          assistantDebug: this.currentSurface.title,
-          error: ''
-        }));
-        this.appendMessage('assistant', readyMessage);
+      const outcome: MultiAgentTurnOutcome = await this.canaryRuntime().submit(
+        modelPrompt,
+        this.multiAgentInput(modelPrompt),
+        turnGeneration
+      );
+      if (!runtimeCallbackIsCurrent(
+        this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', turnGeneration
+      )) {
         return;
       }
-      const result: A2uiCallResult = await callLocalModel(
-        this.getSettings(),
-        modelPrompt,
-        this.recentMessages(),
-        (surface: A2uiSurfaceState, raw: string, meta?: A2uiStreamMeta) => {
-          this.isAwaitingFirstSurface = false;
-          this.applySurface(surface);
-          const thinkClosed = meta?.thinkClosed === true || modelThinkCloseSeen(raw);
-          this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
-            ok: true,
-            status: 'checking',
-            message: '模型流式更新：' + surface.title + (thinkClosed ? '，思考流已闭合。' : '。'),
-            requestDebug: this.lastModelRequest,
-            assistantDebug: raw,
-            error: ''
-          }));
-        },
-        null,
-        (update: PersonaMemoryUpdateRequest) => {
-          this.applyPersonaMemoryUpdate(update);
-        },
-        actionArgs
-      );
-      this.isAwaitingFirstSurface = false;
-      this.applySurface(result.surface);
-      aiLogInfo('[AIPhone][A2uiHomeModelResult] ok=' + (result.ok ? 'true' : 'false') +
-        ' errorChars=' + result.error.length.toString() +
-        ' rawChars=' + result.raw.length.toString() +
-        ' assistantChars=' + result.assistantDebug.length.toString());
-      aiLogInfo('[AIPhone][A2uiHomeModelOutput] ' + logSnippet(result.assistantDebug.length > 0 ? result.assistantDebug : result.raw));
-      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
-        ok: result.ok,
-        status: result.ok ? 'ready' : 'error',
-        message: result.ok ? 'A2UI 已更新到主页。' : 'A2UI 生成异常，请到配置页查看详情。',
-        requestDebug: result.requestDebug,
-        assistantDebug: result.assistantDebug.length > 0 ? result.assistantDebug : result.raw,
-        error: result.error
-      }));
-      if (result.ok) {
-        this.appendMessage('assistant', result.assistantDebug.length > 0 ? result.assistantDebug : result.surface.title);
-        if (result.requestDebug.indexOf('@loop/agent-core/LoopBackend') >= 0) {
-          const fallbackRequest: A2uiHomeResolvedToolRequest = resolveA2uiHomeToolRequest(
-            result.surface, modelPrompt, actionId, actionArgs, false);
-          if (fallbackRequest.hasTool && surfaceHasSatisfiedToolResult(result.surface, fallbackRequest.toolId)) {
-            aiLogInfo('[AIPhone][A2uiHomeToolRequest] already_satisfied source=loopy_adapter toolId=' + fallbackRequest.toolId);
-          } else if (fallbackRequest.hasTool && surfaceHasVisibleToolResult(result.surface)) {
-            aiLogInfo('[AIPhone][A2uiHomeToolRequest] already_visible source=loopy_adapter toolId=' + fallbackRequest.toolId);
-          } else if (fallbackRequest.hasTool) {
-            aiLogInfo('[AIPhone][A2uiHomeToolRequestByIntent] toolId=' + fallbackRequest.toolId +
-              ' source=loopy_adapter promptChars=' + fallbackRequest.prompt.length.toString());
-            await this.callToolById(fallbackRequest.toolId, fallbackRequest.prompt, fallbackRequest.actionId, fallbackRequest.args);
-          } else {
-            aiLogInfo('[AIPhone][A2uiHomeToolRequest] none source=loopy_adapter');
-          }
-        } else {
-          await this.callModelRequestedTool(result.surface, modelPrompt, actionId, actionArgs);
-        }
-      } else {
-        const fallbackRequest: A2uiHomeResolvedToolRequest = resolveA2uiHomeToolRequest(result.surface, modelPrompt, actionId, actionArgs);
-        if (fallbackRequest.hasTool) {
-          aiLogInfo('[AIPhone][A2uiHomeToolRequestByIntent] toolId=' + fallbackRequest.toolId +
-            ' reason=model_failed promptChars=' + fallbackRequest.prompt.length.toString());
-          await this.callToolById(fallbackRequest.toolId, fallbackRequest.prompt, fallbackRequest.actionId, fallbackRequest.args);
-        } else {
-          this.appendMessage('assistant', 'A2UI 生成失败：' + result.error);
-        }
+      const result: MultiAgentSettledOutcome = outcome as MultiAgentSettledOutcome;
+      if (!result.ok) {
+        throw new Error(result.message.length > 0 ?
+          result.message : 'Multi-agent runtime failed to complete the turn.');
       }
+      this.isAwaitingFirstSurface = false;
+      if (result.surfaceId.length > 0 &&
+        result.surfaceId === this.currentSurface.surfaceId &&
+        result.personaId.length > 0) {
+        this.applyRuntimeSurface(
+          leaderPersonaSurfaceUpdate(
+            this.currentSurface,
+            result.personaId,
+            result.skillId
+          ),
+          'multi_agent',
+          turnGeneration
+        );
+      }
+      const readyMessage: string = result.message.length > 0 ?
+        result.message : this.currentSurface.title;
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: true,
+        status: 'ready',
+        message: readyMessage,
+        requestDebug: 'multi-agent-runtime',
+        assistantDebug: readyMessage,
+        error: ''
+      }));
+      this.appendMessage('assistant', readyMessage);
     } catch (error) {
+      if (this.runtimeGeneration !== turnGeneration) {
+        return;
+      }
       this.isAwaitingFirstSurface = false;
       const message = error instanceof Error ? error.message : JSON.stringify(error);
       aiLogError('[AIPhone][A2uiHomeModelException] ' + logSnippet(message));
@@ -2156,8 +2817,14 @@ struct Index {
         error: message
       }));
     } finally {
-      this.isAwaitingFirstSurface = false;
-      this.isBusy = false;
+      if (this.runtimeGeneration === turnGeneration) {
+        this.isAwaitingFirstSurface = false;
+        this.isBusy = false;
+        if (isMultiTaskSurface(this.currentSurface)) {
+          this.syncMultiTaskPayloadUpdate(this.withMultiTaskActiveSection(this.currentHtmlHomeDocument()));
+          this.scheduleMultiTaskPayloadRefresh();
+        }
+      }
     }
   }
 
@@ -2683,14 +3350,10 @@ struct Index {
       ' bodyChars=' + detail.bodyText.length.toString() +
       ' promptChars=' + prompt.length.toString());
     try {
-      const result: A2uiCallResult = await callLocalModel(
+      const result: DirectModelCallResult = await callDirectModel(
         this.getSettings(),
         prompt,
-        this.recentMessages(),
-        (_surface: A2uiSurfaceState, _raw: string, _meta?: A2uiStreamMeta) => {},
-        null,
-        null,
-        null
+        this.recentMessages()
       );
       const raw = result.assistantDebug.length > 0 ? result.assistantDebug : result.raw;
       if (!result.ok || raw.trim().length === 0) {
@@ -2731,6 +3394,67 @@ struct Index {
     this.mailReplyEventJson = JSON.stringify(event);
   }
 
+  private mailReplyOperationEvent(
+    requestKey: string,
+    operation: string,
+    status: string,
+    message: string,
+    error: string
+  ): void {
+    const event: MailReplyUiEvent = {
+      sequence: Date.now(),
+      requestKey,
+      operation,
+      status,
+      message,
+      error
+    };
+    this.mailReplyEventJson = JSON.stringify(event);
+  }
+
+  private async executeRegisteredGmailReply(args: Object): Promise<ActionExecutionResult> {
+    const command = args as MailReplyCommand;
+    const requestKey = this.actionText(command.requestKey).trim();
+    if (this.actionText(command.provider).trim().toLowerCase() !== 'gmail') {
+      const message = 'Gmail reply provider does not match the current mail surface.';
+      this.mailReplyOperationEvent(requestKey, 'send', 'error', '', message);
+      return {
+        status: 'error',
+        errorCode: 'GMAIL_REPLY_PROVIDER_MISMATCH',
+        message
+      };
+    }
+    try {
+      const result = await sendConfiguredMailReply(command);
+      if (result.status !== 'success') {
+        this.mailReplyOperationEvent(requestKey, 'send', result.status, '', result.message);
+        return {
+          status: 'error',
+          errorCode: 'GMAIL_REPLY_PROVIDER_ERROR',
+          message: result.message
+        };
+      }
+      this.mailReplyOperationEvent(
+        result.requestKey,
+        result.operation,
+        result.status,
+        result.message,
+        ''
+      );
+      return { status: 'success', output: result as Object };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : JSON.stringify(error);
+      this.mailReplyOperationEvent(requestKey, 'send', 'error', '', message);
+      aiLogError('[AIPhone][MailReplyOperationFailed] provider=gmail operation=send error=' +
+        message.substring(0, 240));
+      return {
+        status: 'error',
+        errorCode: 'GMAIL_REPLY_PROVIDER_ERROR',
+        message
+      };
+    }
+  }
+
   private async generateMailReplyDraft(action: A2uiAction): Promise<void> {
     if (action.args === undefined) {
       this.logHtmlHomeActionError(action, 'missing_mail_reply_ai_args');
@@ -2756,14 +3480,10 @@ struct Index {
       ' contextChars=' + this.actionText(args.contextSummary).length.toString() +
       ' promptChars=' + prompt.length.toString());
     try {
-      const result: A2uiCallResult = await callLocalModel(
+      const result: DirectModelCallResult = await callDirectModel(
         this.getSettings(),
         prompt,
-        this.recentMessages(),
-        (_surface: A2uiSurfaceState, _raw: string, _meta?: A2uiStreamMeta) => {},
-        null,
-        null,
-        action.args
+        this.recentMessages()
       );
       aiLogInfo('[AIPhone][MailReplyAiDraft] ok=' + (result.ok ? 'true' : 'false') +
         ' errorChars=' + result.error.length.toString() +
@@ -3736,9 +4456,7 @@ struct Index {
       estimateCacheJson: estimateCacheJson,
       estimateTraceId: traceId,
       estimate_trace_id: traceId,
-      traceId: traceId,
-      confirmed: true,
-      confirmation: '确认下单'
+      traceId: traceId
     };
     return {
       id: 'ride.order.confirm',
@@ -3831,44 +4549,6 @@ struct Index {
 
   private async handleClientAction(action: A2uiAction): Promise<void> {
     aiLogInfo('[AIPhone][A2uiHomeClientAction] id=' + action.id);
-    if (action.id === 'html_mail_detail_read') {
-      if (action.args === undefined) {
-        this.logHtmlHomeActionError(action, 'missing_mail_detail_args');
-        return;
-      }
-      const request = action.args as MailDetailRequest;
-      const requestKey = this.actionText(request.requestKey).trim();
-      if (requestKey.length === 0 || this.actionText(request.provider).trim().length === 0) {
-        this.logHtmlHomeActionError(action, 'invalid_mail_detail_args');
-        return;
-      }
-      try {
-        const detail = await readConfiguredMailDetail(request);
-        const suggestion = await this.extractMailCalendarSuggestion(detail);
-        this.mailCalendarSuggestions[requestKey] = suggestion;
-        const event: MailDetailUiEvent = {
-          sequence: Date.now(),
-          requestKey: requestKey,
-          status: 'success',
-          detail: detail,
-          calendarSuggestion: suggestion,
-          error: ''
-        };
-        this.mailDetailEventJson = JSON.stringify(event);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : JSON.stringify(error);
-        const event: MailDetailUiEvent = {
-          sequence: Date.now(),
-          requestKey: requestKey,
-          status: 'error',
-          error: message
-        };
-        this.mailDetailEventJson = JSON.stringify(event);
-        aiLogError('[AIPhone][MailDetailReadFailed] provider=' + this.actionText(request.provider) +
-          ' error=' + message.substring(0, 240));
-      }
-      return;
-    }
     if (action.id === 'html_mail_calendar_add') {
       await this.addSuggestedMailCalendarEvent(action);
       return;
@@ -3893,26 +4573,10 @@ struct Index {
         } else {
           result = await sendConfiguredMailReply(command);
         }
-        const event: MailReplyUiEvent = {
-          sequence: Date.now(),
-          requestKey: requestKey,
-          operation: operation,
-          status: result.status,
-          message: result.message,
-          error: ''
-        };
-        this.mailReplyEventJson = JSON.stringify(event);
+        this.mailReplyOperationEvent(requestKey, operation, result.status, result.message, '');
       } catch (error) {
         const message = error instanceof Error ? error.message : JSON.stringify(error);
-        const event: MailReplyUiEvent = {
-          sequence: Date.now(),
-          requestKey: requestKey,
-          operation: operation,
-          status: 'error',
-          message: '',
-          error: message
-        };
-        this.mailReplyEventJson = JSON.stringify(event);
+        this.mailReplyOperationEvent(requestKey, operation, 'error', '', message);
         aiLogError('[AIPhone][MailReplyOperationFailed] provider=' + this.actionText(command.provider) +
           ' operation=' + operation + ' error=' + message.substring(0, 240));
       }
@@ -3940,8 +4604,8 @@ struct Index {
       return;
     }
     if (action.id === 'hotel.search.restore') {
-      if (this.hotelAgentRuntime !== null) {
-        const restored = this.hotelAgentRuntime.restoreSearchSurface();
+      if (this.multiAgentRuntime !== null) {
+        const restored = this.multiAgentRuntime.restoreSearchSurface();
         this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
           ok: restored,
           status: restored ? 'ready' : 'error',
@@ -4013,7 +4677,6 @@ struct Index {
       }
       this.rememberPaymentCheckout(action, checkoutUrl);
       this.checkoutWebKind = 'payment';
-      this.trainPresaleCheckoutTaskId = '';
       this.showCheckoutWeb = true;
       aiLogInfo('[AIPhone][PaymentCheckoutOpen] urlChars=' + checkoutUrl.length.toString());
       return;
@@ -4277,6 +4940,11 @@ struct Index {
   }
 
   private async sendAction(action: A2uiAction): Promise<void> {
+    this.mailDetailSuggestionGuard.invalidateForPageAction(action.id);
+    if (action.id === 'multi_task.section.activate') {
+      this.activateMultiTaskSection(action.prompt);
+      return;
+    }
     if (this.isLuckinPaymentActionId(action.id)) {
       this.logLuckinPaymentAction(action, 'received');
     }
@@ -4299,7 +4967,10 @@ struct Index {
       await this.handleClientAction(action);
       return;
     }
-    if (!isHtmlHomeActionAllowed(this.currentHtmlHomeDocument(), action)) {
+    const renderedSnapshot = this.registeredPageSnapshotStore.current();
+    const document = renderedSnapshot === null ?
+      this.currentHtmlHomeDocument() : renderedSnapshot.document;
+    if (!isHtmlHomeActionAllowed(document, action)) {
       if (this.isLuckinPaymentActionId(action.id)) {
         this.logLuckinPaymentAction(action, 'blocked_not_allowed');
       }
@@ -4309,18 +4980,87 @@ struct Index {
     if (this.isLuckinPaymentActionId(action.id)) {
       this.logLuckinPaymentAction(action, 'dispatch');
     }
-    if (this.hotelAgentRuntime !== null &&
-      (action.id === 'hotel.detail' || action.id === 'hotel.navigate' || action.id === 'hotel.booking.open')) {
-      const runtime = this.hotelAgentRuntime;
+    await dispatchRegisteredPageActionCandidate(
+      action,
+      (clicked: A2uiAction): Promise<boolean> => this.runRegisteredPageAction(clicked),
+      (legacy: A2uiAction): Promise<void> => this.sendLegacyAction(legacy, document)
+    );
+  }
+
+  private async runRegisteredPageAction(action: A2uiAction): Promise<boolean> {
+    const snapshot = this.registeredPageSnapshotStore.current();
+    const actionGeneration = this.runtimeGeneration;
+    if (snapshot === null || !runtimeSurfaceIdentityMatches(
+      this.currentSurface,
+      snapshot.surface,
+      this.activeRuntimeOwner,
+      actionGeneration
+    )) {
+      return false;
+    }
+    const runtime = this.canaryRuntime();
+    const usesPageBusy = registeredPageActionUsesPageBusy(action.id);
+    if (usesPageBusy) {
+      this.isBusy = true;
+    }
+    try {
+      const ok = await runtime.runPageAction(action);
+      if (!runtimeCallbackIsCurrent(
+        this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', actionGeneration
+      )) {
+        return false;
+      }
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok,
+        status: ok ? 'ready' : 'error',
+        message: ok ? '操作已处理。' : '操作已被当前页面权限拒绝。',
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: ok ? '' : 'registered action 与当前已渲染页面快照不匹配'
+      }));
+      return ok;
+    } finally {
+      if (usesPageBusy && runtimeCallbackIsCurrent(
+        this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', actionGeneration
+      )) {
+        this.isBusy = false;
+      }
+    }
+  }
+
+  private async sendLegacyAction(
+    action: A2uiAction,
+    document: HtmlHomeDocument
+  ): Promise<void> {
+    if (this.multiAgentRuntime !== null && this.activeRuntimeOwner === 'multi_agent' &&
+      action.id === 'hotel.detail') {
+      const runtime = this.multiAgentRuntime;
+      const actionGeneration = this.runtimeGeneration;
+      const snapshot = this.registeredPageSnapshotStore.current();
       const context = runtime.currentActionContext();
-      const document = this.currentHtmlHomeDocument();
-      if (context === null || !isHtmlHomeActionAllowed(document, action)) {
+      if (snapshot === null || context === null ||
+        !runtimeSurfaceIdentityMatches(
+          this.currentSurface,
+          snapshot.surface,
+          this.activeRuntimeOwner,
+          actionGeneration
+        ) ||
+        context.surfaceId !== snapshot.surface.surfaceId ||
+        context.sourceToolId !== 'hotel.search' ||
+        document.surfaceId !== snapshot.document.surfaceId ||
+        document.generatedAt !== snapshot.document.generatedAt ||
+        !isHtmlHomeActionAllowed(document, action)) {
         this.logHtmlHomeActionError(action, 'hotel_context_not_current');
         return;
       }
       this.isBusy = true;
       try {
-        const ok = await runtime.runAction(action, context, document);
+        const ok = await runtime.runAction(action, context);
+        if (!runtimeCallbackIsCurrent(
+          this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', actionGeneration
+        )) {
+          return;
+        }
         this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
           ok: ok,
           status: ok ? 'ready' : 'error',
@@ -4330,7 +5070,23 @@ struct Index {
           error: ok ? '' : '酒店 action 与当前 surface/document 不匹配'
         }));
       } finally {
-        this.isBusy = false;
+        if (runtimeCallbackIsCurrent(
+          this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', actionGeneration
+        )) {
+          this.isBusy = false;
+        }
+      }
+      return;
+    }
+    const kind = action.kind.length > 0 ? action.kind : 'prompt';
+    if (this.activeRuntimeOwner === 'multi_agent' ||
+      runtimeOwnerAllowsSurfaceAction(this.currentSurface, 'multi_agent')) {
+      if (kind === 'client') {
+        await this.handleClientAction(action);
+      } else if (kind === 'input') {
+        this.focusEditQuery(action.id);
+      } else {
+        this.logHtmlHomeActionError(action, 'runtime_owner_mismatch');
       }
       return;
     }
@@ -4363,7 +5119,6 @@ struct Index {
       );
       return;
     }
-    const kind = action.kind.length > 0 ? action.kind : 'prompt';
     if (kind === 'client') {
       await this.handleClientAction(action);
       return;
@@ -4380,6 +5135,72 @@ struct Index {
       return 'surface_model';
     }
     return this.currentSurface.surfaceId;
+  }
+
+  private multiTaskToolCallContext(toolId: string): MultiTaskToolCallContext | null {
+    if (!isMultiTaskSurface(this.currentSurface)) {
+      return null;
+    }
+    const slotId = resolveMultiTaskSlotId(this.currentSurface, toolId);
+    if (slotId.length === 0) {
+      return null;
+    }
+    const context: MultiTaskToolCallContext = {
+      slotId: slotId,
+      childSurfaceId: childSurfaceIdForMultiTaskSlot(this.currentSurface.surfaceId, slotId)
+    };
+    return context;
+  }
+
+  private applyMultiTaskSlotObservation(
+    composite: A2uiSurfaceState,
+    slotId: string,
+    toolId: string,
+    observationRaw: string
+  ): A2uiSurfaceState {
+    if (this.multiTaskLastMergedRawBySlot[slotId] === observationRaw) {
+      return composite;
+    }
+    this.multiTaskLastMergedRawBySlot[slotId] = observationRaw;
+    const activateSlot = !this.multiTaskUserPinnedSection;
+    if (activateSlot) {
+      this.multiTaskActiveSectionId = slotId;
+    }
+    const useIncrementalMultiTask = composite.intent === 'multi-task' &&
+      this.multiTaskShellHtml.length > 0;
+    if (!useIncrementalMultiTask) {
+      this.htmlHomeCacheKey = '';
+      this.htmlHomeCacheHtml = '';
+    }
+    const merged = mergeSlotObservationIntoMultiTaskSurface(composite, slotId, toolId, observationRaw, activateSlot);
+    return copyPersonaData(composite, merged);
+  }
+
+  private readMultiTaskActiveSectionId(surface: A2uiSurfaceState): string {
+    try {
+      const parsed = JSON.parse(surface.dataModelJson) as Record<string, Object | null | undefined>;
+      const boardValue = parsed.multiTask;
+      if (boardValue !== undefined && boardValue !== null && typeof boardValue === 'object' && !Array.isArray(boardValue)) {
+        const board = boardValue as Record<string, Object | string | number | boolean | null | undefined>;
+        const activeSectionId = board.activeSectionId;
+        if (typeof activeSectionId === 'string' && activeSectionId.length > 0) {
+          return activeSectionId;
+        }
+      }
+    } catch (_error) {
+    }
+    return '';
+  }
+
+  private activateMultiTaskSection(sectionId: string): void {
+    if (!isMultiTaskSurface(this.currentSurface) || sectionId.length === 0) {
+      return;
+    }
+    if (this.multiTaskUserPinnedSection && this.multiTaskActiveSectionId === sectionId) {
+      return;
+    }
+    this.multiTaskUserPinnedSection = true;
+    this.multiTaskActiveSectionId = sectionId;
   }
 
   private async callModelRequestedTool(
@@ -4399,14 +5220,52 @@ struct Index {
       ' sentPromptChars=' + request.prompt.length.toString());
     await this.callToolById(request.toolId, request.prompt, request.actionId, request.args);
   }
-
   private configureDidiMcpSandboxRuntime(isSandbox: boolean): void {
     this.didiMcpSandboxEnabled = isSandbox;
     configureDidiMcpSandboxForRuntime(isSandbox);
     aiLogInfo('[AIPhone][A2uiHomeDidiMcpSandboxToggle] enabled=' + (isSandbox ? 'true' : 'false'));
   }
 
-  private async callToolById(toolId: string, prompt: string, actionId: string, args: Object | null = null): Promise<boolean> {
+  private async invokeRegisteredPageTool(
+    toolId: string,
+    prompt: string,
+    pageActionId: string,
+    args: Object,
+  ): Promise<RegisteredPageToolInvocation> {
+    const observation: RegisteredPageToolObservation = { result: null };
+    const ok = await this.callToolById(
+      toolId,
+      prompt,
+      pageActionId,
+      args,
+      (result: A2uiCallResult): void => {
+        observation.result = result;
+      },
+      'multi_agent'
+    );
+    const observed = observation.result;
+    return {
+      ok,
+      result: observed,
+      error: observed === null ?
+        (ok ? '' : 'Registered page tool did not complete.') : observed.error
+    };
+  }
+
+  private async callToolById(
+    toolId: string,
+    prompt: string,
+    actionId: string,
+    args: Object | null = null,
+    resultObserver?: (result: A2uiCallResult) => void,
+    runtimeOwner: RuntimeOwner = 'legacy'
+  ): Promise<boolean> {
+    const toolGeneration: number = runtimeOwner === 'legacy' ?
+      (this.activeRuntimeOwner === 'legacy' && this.isBusy ?
+        this.runtimeGeneration : this.beginRuntimeTurn('legacy')) : this.runtimeGeneration;
+    if (runtimeOwner !== this.activeRuntimeOwner) {
+      return false;
+    }
     if (!isRegisteredToolId(toolId)) {
       const message = '模型请求了未注册工具：' + toolId;
       aiLogError('[AIPhone][A2uiHomeToolRequestInvalid] toolId=' + toolId);
@@ -4429,6 +5288,23 @@ struct Index {
       aiLogInfo('[AIPhone][AnythingDemoRouteByTool] actionId=' + actionId +
         ' promptChars=' + prompt.length.toString());
       this.markChecking('正在打开世界杯界面...');
+      const opened = await this.openAnythingDemo();
+      if (!runtimeCallbackIsCurrent(
+        this.activeRuntimeOwner, this.runtimeGeneration, runtimeOwner, toolGeneration
+      )) {
+        return false;
+      }
+      if (!opened) {
+        this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+          ok: false,
+          status: 'error',
+          message: '无法打开世界杯界面。',
+          requestDebug: this.lastModelRequest,
+          assistantDebug: this.lastModelOutput,
+          error: 'Anything demo route could not be opened.'
+        }));
+        return false;
+      }
       this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
         ok: true,
         status: 'ready',
@@ -4438,7 +5314,6 @@ struct Index {
         error: ''
       }));
       this.appendMessage('assistant', '已打开世界杯界面。');
-      this.openAnythingDemo();
       return true;
     }
     configureDidiMcpSandboxForRuntime(this.didiMcpSandboxEnabled);
@@ -4448,7 +5323,11 @@ struct Index {
       foodPartialThrottleMs: normalizeFoodPartialThrottleMs(this.foodPartialThrottleMs)
     });
     const personaSourceSurface = this.currentSurface;
-    const inlineLuckinSwitch = toolId === 'luckin.order.preview' && this.isLuckinOptionSwitchArgs(args);
+    const multiTaskCtx = this.multiTaskToolCallContext(toolId);
+    const inlineLuckinSwitch = toolId === 'luckin.order.preview' && this.isLuckinOptionSwitchArgs(args) &&
+      multiTaskCtx === null;
+    const inlinePaymentStatusPlan = this.inlineLuckinPaymentStatusPlan(toolId, personaSourceSurface, multiTaskCtx);
+    const inlineLuckinPaymentStatus = inlinePaymentStatusPlan !== null;
     if (inlineLuckinSwitch) {
       if (this.luckinOptionSwitchInFlight) {
         aiLogInfo('[AIPhone][A2uiHomeLuckinSwitchIgnored] reason=in_flight');
@@ -4456,22 +5335,50 @@ struct Index {
       }
       this.finishLuckinOptionSwitch(true);
     }
-    if (!inlineLuckinSwitch) {
+    if (!inlineLuckinSwitch && !inlineLuckinPaymentStatus) {
       this.markChecking('正在调用工具：' + toolId);
     }
     const callArgs = await this.argsWithCurrentLocationForTool(toolId, args);
+    if (!runtimeCallbackIsCurrent(
+      this.activeRuntimeOwner, this.runtimeGeneration, runtimeOwner, toolGeneration
+    )) {
+      return false;
+    }
+    const targetSurfaceId = multiTaskCtx !== null ? multiTaskCtx.childSurfaceId : this.toolSurfaceId();
     const result: A2uiCallResult = await callToolGateway(
       TOOL_GATEWAY_URL,
       toolId,
       prompt,
-      this.toolSurfaceId(),
+      targetSurfaceId,
       actionId,
       (surface: A2uiSurfaceState, raw: string) => {
-        if (inlineLuckinSwitch) {
+        if (inlineLuckinSwitch || inlineLuckinPaymentStatus) {
+          return;
+        }
+        if (multiTaskCtx !== null) {
+          const nextSurface = this.applyMultiTaskSlotObservation(
+            this.currentSurface.intent === 'multi-task' &&
+              this.currentSurface.surfaceId === personaSourceSurface.surfaceId ?
+              this.currentSurface : personaSourceSurface,
+            multiTaskCtx.slotId,
+            toolId,
+            raw
+          );
+          this.applySurface(nextSurface);
+          this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+            ok: true,
+            status: 'checking',
+            message: '并行任务更新：' + nextSurface.title,
+            requestDebug: this.lastModelRequest,
+            assistantDebug: raw,
+            error: ''
+          }));
           return;
         }
         const nextSurface = copyPersonaData(personaSourceSurface, surface);
-        this.applySurface(nextSurface);
+        if (!this.applyRuntimeSurface(nextSurface, runtimeOwner, toolGeneration)) {
+          return;
+        }
         this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
           ok: true,
           status: 'checking',
@@ -4484,12 +5391,67 @@ struct Index {
       null,
       callArgs
     );
+    if (runtimeOwner !== this.activeRuntimeOwner || toolGeneration !== this.runtimeGeneration) {
+      if (inlineLuckinSwitch) {
+        this.finishLuckinOptionSwitch(false);
+      }
+      return false;
+    }
 
     aiLogInfo('[AIPhone][A2uiHomeToolResult] ok=' + (result.ok ? 'true' : 'false') +
       ' errorChars=' + result.error.length.toString() +
       ' rawChars=' + result.raw.length.toString());
     aiLogInfo('[AIPhone][A2uiHomeToolOutput] ' + logSnippet(result.raw));
-    const resultSurface = copyPersonaData(personaSourceSurface, result.surface);
+    if (resultObserver !== undefined) {
+      resultObserver(result);
+    }
+    if (multiTaskCtx !== null) {
+      const mergeBase = this.currentSurface.intent === 'multi-task' &&
+        this.currentSurface.surfaceId === personaSourceSurface.surfaceId ?
+        this.currentSurface : personaSourceSurface;
+      if (inlinePaymentStatusPlan !== null && inlinePaymentStatusPlan.mode === 'multi-task') {
+        const statusSurface = this.ownedSurface(
+          copyPersonaData(personaSourceSurface, result.surface), runtimeOwner, toolGeneration
+        );
+        if (result.ok &&
+          this.applyLuckinInlineMultiTaskPaymentStatusPatch(mergeBase, inlinePaymentStatusPlan.slotId, statusSurface)) {
+          this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+            ok: true,
+            status: 'ready',
+            message: '订单状态已更新。',
+            requestDebug: result.requestDebug,
+            assistantDebug: result.raw.length > 0 ? result.raw : this.lastModelOutput,
+            error: ''
+          }));
+          return true;
+        }
+        aiLogInfo('[AIPhone][A2uiHomeLuckinPaymentStatusFallback] mode=multi-task ok=' +
+          (result.ok ? 'true' : 'false'));
+      }
+      const nextSurface = result.ok ?
+        this.applyMultiTaskSlotObservation(mergeBase, multiTaskCtx.slotId, toolId, result.raw) :
+        this.ownedSurface(copyPersonaData(personaSourceSurface, result.surface), runtimeOwner, toolGeneration);
+      this.applySurface(nextSurface);
+      if (toolId === 'payment.account.setup') {
+        await this.saveStripeReceivingProfile(result.surface);
+      }
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: result.ok,
+        status: result.ok ? 'ready' : 'error',
+        message: result.ok ? '并行任务已更新，可在页内切换查看各结果。' : '工具返回异常，请到配置页查看详情。',
+        requestDebug: result.requestDebug,
+        assistantDebug: result.raw.length > 0 ? result.raw : this.lastModelOutput,
+        error: result.error
+      }));
+      if (!result.ok) {
+        this.appendMessage('assistant', '工具返回异常：' + result.error);
+        return false;
+      }
+      return true;
+    }
+    const resultSurface = this.ownedSurface(
+      copyPersonaData(personaSourceSurface, result.surface), runtimeOwner, toolGeneration
+    );
     if (inlineLuckinSwitch) {
       if (result.ok && this.applyLuckinInlineConfirmPatch(resultSurface)) {
         this.finishLuckinOptionSwitch(false);
@@ -4506,9 +5468,30 @@ struct Index {
       this.finishLuckinOptionSwitch(false);
       aiLogInfo('[AIPhone][A2uiHomeLuckinSwitchFallback] ok=' + (result.ok ? 'true' : 'false'));
     }
-    this.applySurface(resultSurface);
+    if (inlineLuckinPaymentStatus) {
+      if (result.ok && this.applyLuckinInlinePaymentStatusPatch(personaSourceSurface, resultSurface)) {
+        this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+          ok: true,
+          status: 'ready',
+          message: '订单状态已更新。',
+          requestDebug: result.requestDebug,
+          assistantDebug: result.raw.length > 0 ? result.raw : this.lastModelOutput,
+          error: ''
+        }));
+        return true;
+      }
+      aiLogInfo('[AIPhone][A2uiHomeLuckinPaymentStatusFallback] ok=' + (result.ok ? 'true' : 'false'));
+    }
+    if (!this.applyRuntimeSurface(resultSurface, runtimeOwner, toolGeneration)) {
+      return false;
+    }
     if (toolId === 'payment.account.setup') {
       await this.saveStripeReceivingProfile(resultSurface);
+      if (!runtimeCallbackIsCurrent(
+        this.activeRuntimeOwner, this.runtimeGeneration, runtimeOwner, toolGeneration
+      )) {
+        return false;
+      }
     }
     this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
       ok: result.ok,
@@ -4522,11 +5505,11 @@ struct Index {
       this.appendMessage('assistant', '工具返回异常：' + result.error);
       return false;
     }
-    if (!inlineLuckinSwitch) {
+    if (!inlineLuckinSwitch && !inlineLuckinPaymentStatus) {
       this.appendMessage('assistant', resultSurface.title + ' 已返回 A2UI 结果。');
     }
     if (toolId === 'gmail.open.web') {
-      await this.openExternalUrl(GMAIL_WEB_URL);
+      return this.openExternalUrl(GMAIL_WEB_URL);
     }
     return true;
   }
@@ -4553,21 +5536,10 @@ struct Index {
     aiLogInfo('[AIPhone][A2uiHomeConnectionTest] model=' + this.selectedModel + ' baseUrl=' + this.baseUrl);
     this.markChecking('正在向模型发起连接检查...');
     try {
-      const result: A2uiCallResult = await callLocalModel(
+      const result: DirectModelCallResult = await callDirectModel(
         this.getSettings(),
         CONNECTION_TEST_PROMPT,
-        this.recentMessages(),
-        (surface: A2uiSurfaceState, raw: string, meta?: A2uiStreamMeta) => {
-          const thinkClosed = meta?.thinkClosed === true || modelThinkCloseSeen(raw);
-          this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
-            ok: true,
-            status: 'checking',
-            message: '已收到模型流式更新：' + surface.title + (thinkClosed ? '，思考流已闭合。' : '。'),
-            requestDebug: this.lastModelRequest,
-            assistantDebug: raw,
-            error: ''
-          }));
-        }
+        this.recentMessages()
       );
       aiLogInfo('[AIPhone][A2uiHomeConnectionResult] ok=' + (result.ok ? 'true' : 'false') +
         ' errorChars=' + result.error.length.toString() +
@@ -4686,6 +5658,8 @@ struct Index {
         messages: this.messages,
         currentSurface: this.currentSurface,
         htmlHomeHtml: this.htmlHomeHtmlForView(),
+        multiTaskPayloadJson: this.multiTaskPayloadJson,
+        multiTaskPayloadTick: this.multiTaskPayloadTick,
         mailDetailEventJson: this.mailDetailEventJson,
         mailReplyEventJson: this.mailReplyEventJson,
         mailCalendarEventJson: this.mailCalendarEventJson,
@@ -4733,12 +5707,16 @@ struct Index {
         },
         onCloseCheckoutWeb: (closingTaskId: string) => {
           const closedTrainBooking = this.checkoutWebKind === 'train';
+          const closedHotelBooking = this.checkoutWebKind === 'hotel';
           if (closedTrainBooking && closingTaskId.length > 0 &&
             closingTaskId !== this.trainPresaleCheckoutTaskId) {
             aiLogInfo('[AIPhone][TrainPresaleCheckoutClose] taskId=' + closingTaskId + ' ignored=stale');
             return;
           }
           this.showCheckoutWeb = false;
+          if (closedHotelBooking) {
+            this.restoreHotelReturnSurface('hotel_booking_closed');
+          }
           if (closedTrainBooking && closingTaskId.length > 0) {
             this.closeExecutingTrainCheckout(closingTaskId);
           } else if (closedTrainBooking) {

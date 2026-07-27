@@ -5,10 +5,12 @@ import {
   emptyA2uiSurface,
   socialHubConnections,
   socialHubItems,
+  socialHubPublication,
   socialHubSelected,
   SocialHubConnectionData,
   SocialHubItemData,
-  SocialHubPlatform
+  SocialHubPlatform,
+  SocialHubPublicationData
 } from '@loop/agent-core';
 import {
   COLOR_CARD,
@@ -59,6 +61,16 @@ export struct SocialHubView {
 
   private messageGroups(): SocialHubMessageGroup[] {
     return socialHubRecentMessageGroups(this.items(), new Date().toISOString(), 5);
+  }
+
+  private communityItems(): SocialHubItemData[] {
+    const items: SocialHubItemData[] = [];
+    this.items().forEach((item: SocialHubItemData) => {
+      if (item.kind === 'post' || item.kind === 'mention') {
+        items.push(item);
+      }
+    });
+    return items;
   }
 
   private isActive(item: SocialHubItemData): boolean {
@@ -147,6 +159,11 @@ export struct SocialHubView {
         .objectFit(ImageFit.Contain)
     } else if (platform === 'instagram') {
       Image($r('app.media.logo_instagram'))
+        .width(size)
+        .height(size)
+        .objectFit(ImageFit.Contain)
+    } else if (platform === 'reddit') {
+      Image($r('app.media.logo_reddit'))
         .width(size)
         .height(size)
         .objectFit(ImageFit.Contain)
@@ -289,6 +306,101 @@ export struct SocialHubView {
   }
 
   @Builder
+  private PublicationPreview(publication: SocialHubPublicationData) {
+    if (publication.status !== 'empty') {
+      Column() {
+        Text('公开帖子预览')
+          .fontSize(13)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(COLOR_MUTED)
+          .width('100%')
+        Text(socialHubPlatformLabel(publication.platform) +
+          (publication.accountName.length > 0 ? ' · ' + publication.accountName : ''))
+          .fontSize(14)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(COLOR_INK)
+          .width('100%')
+          .margin({ top: 8 })
+        Text(publication.error.length > 0 ? publication.error : publication.text)
+          .fontSize(15)
+          .fontColor(publication.status === 'error' ? COLOR_MUTED : COLOR_TEXT)
+          .lineHeight(22)
+          .width('100%')
+          .margin({ top: 8 })
+      }
+      .width('100%')
+      .padding({ left: 14, right: 14, top: 14, bottom: 14 })
+      .margin({ top: 10 })
+      .backgroundColor(COLOR_SOCIAL_CARD)
+      .borderRadius(18)
+      .border({ width: 1, color: COLOR_SOCIAL_LINE })
+    }
+  }
+
+  private communityOpenAction(item: SocialHubItemData): A2uiAction {
+    return {
+      id: 'social_hub_open_source',
+      label: '打开原文',
+      prompt: item.url,
+      variant: 'secondary',
+      kind: 'client'
+    };
+  }
+
+  @Builder
+  private CommunityList(items: SocialHubItemData[]) {
+    if (items.length > 0) {
+      Column() {
+        Text('社区内容')
+          .fontSize(12)
+          .fontColor(COLOR_MUTED)
+          .width('100%')
+          .margin({ top: 12 })
+        ForEach(items, (item: SocialHubItemData) => {
+          Column() {
+            Row() {
+              this.PlatformLogo(item.platform, 22)
+              Text('来源 · ' + socialHubPlatformLabel(item.platform))
+                .fontSize(12)
+                .fontColor(COLOR_MUTED)
+                .margin({ left: 8 })
+                .layoutWeight(1)
+            }
+            Text(socialHubPrimaryText(item))
+              .fontSize(14)
+              .fontColor(COLOR_TEXT)
+              .lineHeight(21)
+              .width('100%')
+              .margin({ top: 8 })
+            if (item.url.length > 0) {
+              A2uiButtonView({
+                label: '打开原文',
+                shape: 'pill',
+                tone: 'secondary',
+                isEnabled: !this.isBusy
+              })
+                .width(96)
+                .margin({ top: 10 })
+                .onClick(() => {
+                  if (!this.isBusy) {
+                    this.onAction(this.communityOpenAction(item));
+                  }
+                })
+            }
+          }
+          .width('100%')
+          .padding(14)
+          .margin({ top: 8 })
+          .backgroundColor(COLOR_CARD_RAISED)
+          .borderRadius(16)
+          .border({ width: 1, color: COLOR_LINE })
+        }, (item: SocialHubItemData) => item.platform + ':' + item.id)
+      }
+      .width('100%')
+    }
+  }
+
+  @Builder
   private MessageList(groups: SocialHubMessageGroup[]) {
     if (groups.length === 0) {
       Column() {
@@ -341,6 +453,10 @@ export struct SocialHubView {
           .width('100%')
 
         this.AuthorizationStatus()
+
+        this.PublicationPreview(socialHubPublication(this.surface))
+
+        this.CommunityList(this.communityItems())
 
         this.MessageList(this.messageGroups())
       }

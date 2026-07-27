@@ -20,6 +20,7 @@ export default function socialHubViewDataTest() {
       expect(socialHubPlatformLabel('linkedin')).assertEqual('LinkedIn');
       expect(socialHubPlatformLabel('whatsapp')).assertEqual('WhatsApp');
       expect(socialHubPlatformLabel('instagram')).assertEqual('Instagram');
+      expect(socialHubPlatformLabel('reddit')).assertEqual('Reddit');
     });
 
     it('labels post kind as public post', 0, () => {
@@ -79,6 +80,7 @@ export default function socialHubViewDataTest() {
       expect(socialHubComposioToolkitCandidates('linkedin').join(',')).assertEqual('linkedin');
       expect(socialHubComposioToolkitCandidates('whatsapp').join(',')).assertEqual('whatsapp');
       expect(socialHubComposioToolkitCandidates('instagram').join(',')).assertEqual('instagram');
+      expect(socialHubComposioToolkitCandidates('reddit').join(',')).assertEqual('reddit');
       expect(socialHubComposioToolkitCandidates('wecom').length).assertEqual(0);
     });
 

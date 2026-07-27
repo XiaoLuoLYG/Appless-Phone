@@ -135,6 +135,60 @@ function markdownSummary(text: string, sectionTitle: string): string {
   return clipped(section.length > 0 ? section : parsed.body);
 }
 
+function durableStatement(text: string): string {
+  return text.replace(/\s+/g, ' ').replace(/^[-*]\s*/, '').trim();
+}
+
+export function mergePersonaStablePreference(memory: string, statement: string): string {
+  const value: string = durableStatement(statement);
+  if (value.length === 0) {
+    return memory;
+  }
+  const normalized: string = memory.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lines: string[] = normalized.split('\n');
+  let stableIndex: number = -1;
+  let nextSectionIndex: number = lines.length;
+  for (let index: number = 0; index < lines.length; index++) {
+    if (lines[index].trim() === '## Stable Preferences') {
+      stableIndex = index;
+      continue;
+    }
+    if (stableIndex >= 0 && lines[index].indexOf('## ') === 0) {
+      nextSectionIndex = index;
+      break;
+    }
+  }
+  const entry: string = '- ' + value;
+  if (stableIndex < 0) {
+    let evidenceIndex: number = -1;
+    for (let index: number = 0; index < lines.length; index++) {
+      if (lines[index].trim() === '## Evidence') {
+        evidenceIndex = index;
+        break;
+      }
+    }
+    if (evidenceIndex >= 0) {
+      while (evidenceIndex > 0 && lines[evidenceIndex - 1].trim().length === 0) {
+        evidenceIndex--;
+      }
+      lines.splice(evidenceIndex, 0, '## Stable Preferences', entry, '');
+      return lines.join('\n');
+    }
+    const separator: string = normalized.trim().length === 0 ? '' : '\n\n';
+    return normalized.trimEnd() + separator + '## Stable Preferences\n' + entry;
+  }
+  for (let index: number = stableIndex + 1; index < nextSectionIndex; index++) {
+    if (lines[index].trim() === entry) {
+      return normalized;
+    }
+  }
+  while (nextSectionIndex > stableIndex + 1 && lines[nextSectionIndex - 1].trim().length === 0) {
+    nextSectionIndex--;
+  }
+  lines.splice(nextSectionIndex, 0, entry, '');
+  return lines.join('\n');
+}
+
 export function memoryUpdateSurface(surfaceId: string, update: PersonaMemoryUpdateRequest): A2uiSurfaceState {
   const pack = personaPackForId(update.personaId);
   const rows: A2uiLabelValueData[] = [

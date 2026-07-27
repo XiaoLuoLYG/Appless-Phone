@@ -33,6 +33,9 @@ interface CalendarComposioData {
   response_data?: CalendarEventPayload;
 }
 
+type CalendarProviderValue = Object | string | number | boolean | null | undefined;
+type CalendarProviderRecord = Record<string, CalendarProviderValue>;
+
 interface CalendarEventBodyTime {
   dateTime: string;
   timeZone: string;
@@ -299,10 +302,205 @@ function normalizedCalendarTimezone(value: string): string {
   return timezone === 'UTC' || /^[A-Za-z_]+\/[A-Za-z0-9_+\/-]+$/.test(timezone) ? timezone : 'Asia/Shanghai';
 }
 
-export function normalizedCalendarArgsForPrompt(toolId: string, prompt: string, args: CalendarEventArgs, now: Date = new Date()): CalendarEventArgs {
+export function calendarDateFromPrompt(prompt: string, now: Date = new Date()): string {
+  const chinese = /(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日/.exec(prompt);
+  const dashed = /(\d{4})[-/](\d{1,2})[-/](\d{1,2})/.exec(prompt);
+  const match = chinese === null ? dashed : chinese;
+  if (match !== null) {
+    const date = new Date(Number.parseInt(match[1], 10), Number.parseInt(match[2], 10) - 1,
+      Number.parseInt(match[3], 10));
+    if (date.getFullYear().toString() === match[1] && date.getMonth() + 1 === Number.parseInt(match[2], 10) &&
+      date.getDate() === Number.parseInt(match[3], 10)) {
+      return localDateString(date);
+    }
+    return '';
+  }
+  const offset = relativeDayOffset(prompt);
+  if (offset >= 0) {
+    return localDateString(localDateAfter(now, offset));
+  }
+  const monthDay = /(\d{1,2})\s*(?:月|-|\/)\s*(\d{1,2})\s*(?:日|号)?/.exec(prompt);
+  if (monthDay === null) {
+    return '';
+  }
+  const date = new Date(now.getFullYear(), Number.parseInt(monthDay[1], 10) - 1,
+    Number.parseInt(monthDay[2], 10));
+  return date.getMonth() + 1 === Number.parseInt(monthDay[1], 10) &&
+    date.getDate() === Number.parseInt(monthDay[2], 10) ? localDateString(date) : '';
+}
+
+function calendarChineseNumber(token: string): number {
+  const raw = token.trim();
+  if (/^\d+$/.test(raw)) {
+    return Number.parseInt(raw, 10);
+  }
+  if (raw === '两') {
+    return 2;
+  }
+  const digits = '零一二三四五六七八九';
+  if (raw.length === 1) {
+    const value = digits.indexOf(raw);
+    return value < 0 ? (raw === '十' ? 10 : -1) : value;
+  }
+  const tens = /^([一二三四五六七八九])?十([一二三四五六七八九])?$/.exec(raw);
+  if (tens === null) {
+    return -1;
+  }
+  const high = tens[1] === undefined ? 1 : calendarChineseNumber(tens[1]);
+  const low = tens[2] === undefined ? 0 : calendarChineseNumber(tens[2]);
+  return high * 10 + low;
+}
+
+export function calendarTimeFromPrompt(prompt: string): string {
+  const colon = /(\d{1,2})\s*[:：]\s*(\d{2})/.exec(prompt);
+  let hour = colon === null ? -1 : Number.parseInt(colon[1], 10);
+  let minute = colon === null ? -1 : Number.parseInt(colon[2], 10);
+  if (colon === null) {
+    const point = /(凌晨|早上|上午|中午|下午|傍晚|晚上|夜间)?\s*([零一二三四五六七八九十两\d]{1,4})\s*点(?:\s*(半)|\s*([零一二三四五六七八九十\d]{1,2})\s*分?)?/.exec(prompt);
+    if (point === null) {
+      return '';
+    }
+    hour = calendarChineseNumber(point[2]);
+    minute = point[3] === undefined ? (point[4] === undefined ? 0 : calendarChineseNumber(point[4])) : 30;
+    const period = point[1] === undefined ? '' : point[1];
+    if ((period === '下午' || period === '晚上' || period === '傍晚') && hour >= 1 && hour <= 11) {
+      hour += 12;
+    } else if ((period === '凌晨' || period === '早上' || period === '上午') && hour === 12) {
+      hour = 0;
+    }
+  }
+  return hour >= 0 && hour < 24 && minute >= 0 && minute < 60 ?
+    pad2Date(hour) + ':' + pad2Date(minute) : '';
+}
+
+function calendarDurationMinutes(prompt: string): number {
+  const minutes = /(\d+)\s*分钟/.exec(prompt);
+  if (minutes !== null) {
+    return Number.parseInt(minutes[1], 10);
+  }
+  if (/半(?:个)?小时/.test(prompt)) {
+    return 30;
+  }
+  const hours = /(\d+)\s*(?:个)?小时/.exec(prompt);
+  return hours === null ? 0 : Number.parseInt(hours[1], 10) * 60;
+}
+
+function calendarEndAfter(start: string, minutes: number): string {
+  const wallStart = Date.parse(calendarProviderDateTime(start) + 'Z');
+  return minutes > 0 && !Number.isNaN(wallStart) ?
+    new Date(wallStart + minutes * 60000).toISOString().substring(0, 19) + '+08:00' : '';
+}
+
+function calendarLabeledValue(input: string, label: string): string {
+  const index = input.indexOf(label);
+  if (index < 0) {
+    return '';
+  }
+  const start = index + label.length;
+  const semicolon = input.indexOf('；', start);
+  const asciiSemicolon = input.indexOf(';', start);
+  let end = semicolon;
+  if (end < 0 || (asciiSemicolon >= 0 && asciiSemicolon < end)) {
+    end = asciiSemicolon;
+  }
+  return input.substring(start, end < 0 ? input.length : end).trim();
+}
+
+function calendarCreateTitle(prompt: string): string {
+  const labeled = calendarLabeledValue(prompt, '标题：');
+  if (labeled.length > 0) {
+    return labeled;
+  }
+  const named = /(?:title|标题)\s*为\s*(.+?)(?:的(?:\d+\s*分钟|半(?:个)?小时|\d+\s*(?:个)?小时)?\s*日程|日程|$)/i.exec(prompt);
+  if (named !== null) {
+    return named[1].trim();
+  }
+  const durationFirst = /(?:\d+\s*分钟|半(?:个)?小时|\d+\s*(?:个)?小时)\s*的\s*(.+?)日程/.exec(prompt);
+  return durationFirst === null ? '' : durationFirst[1].trim();
+}
+
+function calendarUpdateQuery(prompt: string): string {
+  const labeled = calendarLabeledValue(prompt, '原日程：');
+  if (labeled.length > 0) {
+    return labeled;
+  }
+  const match = /把\s*(.+?)\s*日程(?:改到|移到|改名)/.exec(prompt);
+  if (match === null) {
+    return '';
+  }
+  return match[1]
+    .replace(/\d{4}年\s*\d{1,2}月\s*\d{1,2}日/g, '')
+    .replace(/\d{4}-\d{1,2}-\d{1,2}/g, '')
+    .replace(/今天|今日|明天|明日|后天|大后天/g, '')
+    .replace(/凌晨|早上|上午|中午|下午|晚上/g, '')
+    .replace(/^\s*的\s*|\s*的\s*$/g, '').trim();
+}
+
+function calendarUpdateTitle(prompt: string): string {
+  const labeled = calendarLabeledValue(prompt, '新标题：');
+  if (labeled.length > 0) {
+    return labeled;
+  }
+  const match = /改名为\s*(.+?)(?:并|再|且|，|,|。|$)/.exec(prompt);
+  return match === null ? '' : match[1].trim();
+}
+
+function calendarExplicitRange(prompt: string): string[] {
+  const match = /(?:时间|新时间)[：:]\s*(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})\s*(?:至|到)\s*(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/.exec(prompt);
+  return match === null ? [] : [match[1] + 'T' + match[2] + ':00+08:00',
+    match[3] + 'T' + match[4] + ':00+08:00'];
+}
+
+function normalizeCalendarWritePrompt(toolId: string, prompt: string, args: CalendarEventArgs, now: Date): boolean {
+  const create = toolId === 'calendar.event.create' && prompt.indexOf('创建') >= 0 && prompt.indexOf('日程') >= 0;
+  const update = toolId === 'calendar.event.update' &&
+    ((prompt.indexOf('把') >= 0 && prompt.indexOf('日程') >= 0) || prompt.indexOf('原日程：') >= 0);
+  if (!create && !update) {
+    return false;
+  }
+  args.eventId = '';
+  args.title = create ? calendarCreateTitle(prompt) : calendarUpdateTitle(prompt);
+  args.start = '';
+  args.end = '';
+  args.query = update ? calendarUpdateQuery(prompt) : '';
+  args.date = calendarDateFromPrompt(prompt, now);
+  args.calendarId = 'primary';
+  const range = calendarExplicitRange(prompt);
+  if (range.length === 2) {
+    args.start = range[0];
+    args.end = range[1];
+  } else if (textOf(args.date).length > 0) {
+    const destinationIndex = update ? Math.max(prompt.indexOf('改到'), prompt.indexOf('移到')) : -1;
+    const timePrompt = destinationIndex >= 0 ? prompt.substring(destinationIndex + 2) : prompt;
+    const time = calendarTimeFromPrompt(timePrompt);
+    if (time.length > 0) {
+      args.start = textOf(args.date) + 'T' + time + ':00+08:00';
+      args.end = calendarEndAfter(textOf(args.start), calendarDurationMinutes(prompt));
+    }
+  }
+  if (update && textOf(args.date).length > 0) {
+    const day = absoluteDateArg(args);
+    if (day !== null) {
+      args.timeMin = startOfLocalDay(day);
+      args.timeMax = startOfLocalDay(localDateAfter(day, 1));
+    }
+  }
+  return true;
+}
+
+export function normalizedCalendarArgsForPrompt(
+  toolId: string,
+  prompt: string,
+  args: CalendarEventArgs,
+  now: Date = new Date(),
+  parseNaturalWrite: boolean = false
+): CalendarEventArgs {
   const normalized = cloneCalendarArgs(args);
   normalized.timezone = normalizedCalendarTimezone(textOf(normalized.timezone));
   if (toolId === 'calendar.event.create' || toolId === 'calendar.event.update') {
+    if (parseNaturalWrite) {
+      normalizeCalendarWritePrompt(toolId, prompt, normalized, now);
+    }
     return normalized;
   }
   const relativeText = prompt + ' ' + textOf(normalized.timeRange);
@@ -433,6 +631,68 @@ function composioCalendarResults(results: DynamicGenericToolResult[]): DynamicGe
   return results;
 }
 
+function calendarProviderObject(value: CalendarProviderValue): Object | null {
+  return value !== null && value !== undefined && typeof value === 'object' && !Array.isArray(value) ?
+    value as Object : null;
+}
+
+function calendarProviderRecords(payload: CalendarComposioPayload): Object[] {
+  const records: Object[] = [payload as Object];
+  const data = calendarProviderObject(payload.data);
+  if (data !== null) {
+    records.push(data);
+    const response = calendarProviderObject((data as CalendarProviderRecord)['response_data']);
+    if (response !== null) {
+      records.push(response);
+    }
+  }
+  return records;
+}
+
+function negativeCalendarStatus(value: string): boolean {
+  const status = value.trim().toLowerCase();
+  return status.indexOf('fail') >= 0 || status.indexOf('error') >= 0 ||
+    status.indexOf('reject') >= 0 || status.indexOf('denied') >= 0 ||
+    status.indexOf('invalid') >= 0;
+}
+
+function calendarWriteFailure(payload: CalendarComposioPayload): string {
+  const records = calendarProviderRecords(payload);
+  for (let index = 0; index < records.length; index++) {
+    const record = records[index] as CalendarProviderRecord;
+    if (record['success'] === false || record['success'] === 'false' ||
+      record['successful'] === false || record['successful'] === 'false') {
+      return textOf(record['message']).trim().length > 0 ? textOf(record['message']) :
+        'Provider explicitly reported failure.';
+    }
+    if (negativeCalendarStatus(textOf(record['status']))) {
+      return 'Provider returned failure status: ' + textOf(record['status']);
+    }
+    const error = textOf(record['error']).trim();
+    if (error.length > 0 && error !== 'null') {
+      return error;
+    }
+  }
+  return '';
+}
+
+function calendarDeleteConfirmed(payload: CalendarComposioPayload): boolean {
+  const records = calendarProviderRecords(payload);
+  for (let index = 0; index < records.length; index++) {
+    const record = records[index] as CalendarProviderRecord;
+    if (record['success'] === true || record['success'] === 'true' ||
+      record['successful'] === true || record['successful'] === 'true') {
+      return true;
+    }
+    const status = textOf(record['status']).trim().toLowerCase();
+    if (status === 'success' || status === 'succeeded' || status === 'completed' ||
+      status === 'ok' || status === 'deleted') {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function calendarResultsFromComposioObservation(
   toolId: string,
   rawJson: string,
@@ -445,6 +705,10 @@ export function calendarResultsFromComposioObservation(
     }
     if (payload.data === undefined || payload.data === null) {
       return composioCalendarResults([errorResult(toolId, 'Google Calendar 返回无效', 'Provider 未返回 data。')]);
+    }
+    const writeFailure = calendarWriteFailure(payload);
+    if (toolId !== 'calendar.events.search' && writeFailure.length > 0) {
+      return composioCalendarResults([errorResult(toolId, 'Google Calendar 调用失败', writeFailure)]);
     }
     if (toolId === 'calendar.events.search') {
       return composioCalendarResults(calendarEventResultsFromListPayload(JSON.stringify(payload.data), args));
@@ -459,6 +723,11 @@ export function calendarResultsFromComposioObservation(
         '已直接写入真实 Google Calendar。' : '已直接更新真实 Google Calendar。')]);
     }
     if (toolId === 'calendar.event.delete') {
+      if (!calendarDeleteConfirmed(payload)) {
+        return composioCalendarResults([errorResult(
+          toolId, 'Google Calendar 返回无效', 'Provider 未返回明确的删除成功状态。'
+        )]);
+      }
       const eventId = args === null ? '' : textOf(args.eventId).trim();
       return [{
         sourceTag: 'Composio Google Calendar',
@@ -467,7 +736,7 @@ export function calendarResultsFromComposioObservation(
         status: 'success',
         summary: '已从真实 Google Calendar 删除日程。',
         rows: eventId.length > 0 ? [{ label: 'Event ID', value: eventId }] : [],
-        rawPreview: 'deleted eventId=' + eventId
+        rawPreview: rawJson.substring(0, 1200)
       }];
     }
     return composioCalendarResults([errorResult(toolId, '不支持的 Google Calendar 工具', toolId)]);
@@ -485,7 +754,7 @@ function calendarResultRow(result: DynamicGenericToolResult, label: string): str
   return '';
 }
 
-export function calendarDeleteTargetFromResultsForTest(results: DynamicGenericToolResult[]): CalendarEventArgs | null {
+export function calendarDeleteTargetFromResults(results: DynamicGenericToolResult[]): CalendarEventArgs | null {
   if (results.length !== 1 || results[0].status !== 'success') {
     return null;
   }
@@ -501,11 +770,17 @@ export function calendarDeleteTargetFromResultsForTest(results: DynamicGenericTo
   };
 }
 
-export function calendarUpdateArgsFromResultsForTest(
+export function calendarDeleteTargetFromResultsForTest(
+  results: DynamicGenericToolResult[]
+): CalendarEventArgs | null {
+  return calendarDeleteTargetFromResults(results);
+}
+
+export function calendarUpdateArgsFromResults(
   args: CalendarEventArgs,
   results: DynamicGenericToolResult[]
 ): CalendarEventArgs | null {
-  const target = calendarDeleteTargetFromResultsForTest(results);
+  const target = calendarDeleteTargetFromResults(results);
   if (target === null) {
     return null;
   }
@@ -513,6 +788,10 @@ export function calendarUpdateArgsFromResultsForTest(
   updated.eventId = target.eventId;
   if (textOf(updated.title).trim().length === 0) {
     updated.title = target.title;
+  }
+  if (textOf(updated.start).trim().length === 0) {
+    updated.start = target.start;
+    updated.end = target.end;
   }
   if (textOf(updated.end).trim().length === 0 && isCalendarProviderDateTime(textOf(updated.start)) &&
     textOf(target.start).indexOf('T') >= 0 && textOf(target.end).indexOf('T') >= 0) {
