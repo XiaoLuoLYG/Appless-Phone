@@ -61,6 +61,7 @@ import {
 } from '@loop/agent-core';
 import { aiLogError, aiLogInfo } from '@loop/agent-core';
 import {
+  appendMultiTaskSlot,
   callToolGateway,
   childSurfaceIdForMultiTaskSlot,
   COMPOSIO_USER_ID_PREFIX,
@@ -82,7 +83,8 @@ import {
   prepareGoogleOAuthAuthorizationUrl,
   resolveMultiTaskSlotId,
   sendLocalSocialHubReply,
-  shortComposioUserId
+  shortComposioUserId,
+  wrapSurfaceWithMultiTaskAction
 } from '@loop/agent-core';
 import {
   NavigationCardSnapshot,
@@ -1788,8 +1790,13 @@ struct Index {
         actionId: string,
         args: Object,
         context: RegisteredPageActionContext
-      ): Promise<ActionExecutionResult> => actionId === 'gmail.message.send' ?
-        this.executeRegisteredGmailReply(args) : pageHandler.execute(actionId, args, context),
+      ): Promise<ActionExecutionResult> => {
+        if (actionId === 'gmail.message.send') {
+          return this.executeRegisteredGmailReply(args);
+        }
+        this.prepareVirtualMultiTaskAction(actionId, context);
+        return pageHandler.execute(actionId, args, context);
+      },
       currentPageSnapshot: (): RegisteredPageSnapshot | null =>
         this.registeredPageSnapshotStore.current(),
       currentHostSurface: (): A2uiSurfaceState | null => this.surfaceSnapshot(this.currentSurface),
@@ -4657,6 +4664,36 @@ struct Index {
       childSurfaceId: childSurfaceIdForMultiTaskSlot(this.currentSurface.surfaceId, slotId)
     };
     return context;
+  }
+
+  private prepareVirtualMultiTaskAction(
+    actionId: string,
+    context: RegisteredPageActionContext
+  ): void {
+    if (context.virtualAction !== true) {
+      return;
+    }
+    if (isMultiTaskSurface(this.currentSurface)) {
+      if (resolveMultiTaskSlotId(this.currentSurface, actionId).length === 0) {
+        this.applySurface(copyPersonaData(
+          this.currentSurface,
+          appendMultiTaskSlot(this.currentSurface, actionId)
+        ));
+      }
+      return;
+    }
+    const results = genericToolResults(this.currentSurface);
+    if (results.length === 0 || results[0].toolName.trim().length === 0) {
+      return;
+    }
+    this.applySurface(copyPersonaData(
+      this.currentSurface,
+      wrapSurfaceWithMultiTaskAction(
+        this.currentSurface,
+        results[0].toolName.trim(),
+        actionId
+      )
+    ));
   }
 
   private applyMultiTaskSlotObservation(

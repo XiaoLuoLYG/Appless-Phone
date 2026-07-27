@@ -9,6 +9,7 @@ import {
   A2uiSurfaceState
 } from '../aiphone/runtime/A2uiTypes';
 import { ingestToolObservation, serialStepCompletionReply } from './MultiToolSectionAdapters';
+import { summarizeAppliedA2uiSurface } from './A2uiObservationDigest';
 import {
   MultiTaskBoardData,
   MultiToolExecutionMode,
@@ -147,6 +148,24 @@ export class MultiToolSurfaceComposer {
       return;
     }
     const content = ingestToolObservation(slotId, this.toolIdForSlot(slotId), raw);
+    this.applySlotContent(slotId, content, content.status);
+  }
+
+  ingestSurface(slotId: string, surface: A2uiSurfaceState): void {
+    const toolId = this.toolIdForSlot(slotId);
+    const digest = summarizeAppliedA2uiSurface('', surface);
+    const content: MultiToolSectionContent = {
+      slotId,
+      toolId,
+      title: surface.title.trim().length > 0 ? surface.title.trim() : this.titleForSlot(slotId),
+      status: digest.failureKey.indexOf(':error') >= 0 ? 'error' : 'ready',
+      summary: digest.text.split('\n').slice(0, 3).join(' '),
+      completionReply: '',
+      observationDigest: digest.text,
+      failureKey: digest.failureKey,
+      embeddedSurface: surface
+    };
+    content.completionReply = serialStepCompletionReply(toolId, content);
     this.applySlotContent(slotId, content, content.status);
   }
 

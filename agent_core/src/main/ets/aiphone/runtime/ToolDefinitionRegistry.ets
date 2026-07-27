@@ -20,6 +20,18 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     actions: []
   },
   {
+    toolId: 'time',
+    domain: 'system',
+    intent: 'time.now',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['none'],
+    inputSchema: 'emptyObject',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: []
+  },
+  {
     toolId: 'train.search',
     domain: 'travel',
     intent: 'travel.train.search',
@@ -594,6 +606,8 @@ export function toolPlanningDescriptionForToolId(toolId: string): string {
     ' inputSchema=' + definition.inputSchema + ' outputSchema=' + definition.outputSchema;
   if (definition.toolId === 'travel.search') {
     description += '. Use for general train/flight travel options. Do not use for ferry or boat tickets; use dynamic.search for those unsupported transport domains.';
+  } else if (definition.toolId === 'time') {
+    description += '. Use only when the current device date or time is explicitly required. Input must be {}. It reads the device clock and never calls a network provider.';
   } else if (definition.toolId === 'train.search') {
     description += '. Use for railway, high-speed rail, bullet train, station-to-station, 12306, or train schedule requests.';
   } else if (definition.toolId === 'flight.search') {

@@ -1,5 +1,7 @@
 import {
   AgentMessage,
+  calendarEventRequiredFields,
+  calendarMissingArgsResult,
   InputUserPayload,
   LeaderActionIntent,
   LeaderDataTaskInputNormalizer,
@@ -15,6 +17,7 @@ import {
   LeaderUiIntent,
   LocalModel,
   MAX_LEADER_DATA_TASKS_PER_ROUND,
+  normalizedCalendarArgsForPrompt,
   ObservationDigest,
   leaderActionCapabilityIds,
   leaderDataCapabilityIds,
@@ -195,6 +198,11 @@ const DATA_SCOPE_CONTRACT: string =
   'Explicit provider, app, account, source, or independently named source scope belongs in round 1. ' +
   'Put multiple independent sources in the same round. After round 1, every Data task input must contain an ' +
   'exact entity reference from a successful or partial earlier current-turn observation.';
+const EXPLICIT_SERIAL_SEQUENCE_CONTRACT: string =
+  'Explicit sequence contract: when the user explicitly orders distinct capabilities with 之后 followed by 再, ' +
+  'execute exactly the first not-yet-completed capability in this round. Defer every later Data task and Action ' +
+  'to later planning rounds in the same user-declared order. This explicit order is allowed even when the next ' +
+  'capability does not consume an entity ID from the prior result.';
 
 interface JsonContainerFrame {
   object: boolean;
@@ -250,6 +258,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     let rejectedDecision: LeaderDecision | null = null;
     try {
       const decision: LeaderDecision = this.parseDecision(output, context);
+      this.normalizeExplicitSerialDecision(input, decision);
+      this.normalizeIncompleteSerialCalendarCreate(input, decision, currentLocalDate);
       rejectedDecision = decision;
       sameRoundProducerTaskToolIds = leaderSameRoundDependencyProducerTaskToolIds(decision.dataTasks);
       sameRoundConsumerTaskToolIds = leaderSameRoundDependencyConsumerTaskToolIds(decision.dataTasks);
@@ -277,6 +287,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         this.currentTurnCompletedToolIds(message, input, context, round)
       );
       this.rejectUnboundLaterTool(
+        input,
         decision,
         this.currentTurnDependencyObservations(message, input, round),
         round
@@ -300,6 +311,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         );
         try {
           const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
+          this.normalizeExplicitSerialDecision(input, repairedDecision);
           if (rejectedDecision === null ||
             !this.explicitMapsSelectionOnlyRepair(rejectedDecision, repairedDecision)) {
             throw new Error(EXPLICIT_MAPS_SELECTION_ERROR);
@@ -318,6 +330,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
             this.currentTurnCompletedToolIds(message, input, context, round)
           );
           this.rejectUnboundLaterTool(
+            input,
             repairedDecision,
             this.currentTurnDependencyObservations(message, input, round),
             round
@@ -340,6 +353,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
             throw new Error(PREMATURE_CALENDAR_UPDATE_ACTION_ERROR);
           }
           const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
+          this.normalizeExplicitSerialDecision(input, repairedDecision);
           this.rejectSkillCapabilityViolation(repairedDecision, context);
           this.rejectOverlappingVideoTools(repairedDecision);
           this.rejectExplicitMapsSelection(input, repairedDecision);
@@ -354,6 +368,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
             this.currentTurnCompletedToolIds(message, input, context, round)
           );
           this.rejectUnboundLaterTool(
+            input,
             repairedDecision,
             this.currentTurnDependencyObservations(message, input, round),
             round
@@ -376,6 +391,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
             throw new Error(PREMATURE_MAPS_DETAILS_ERROR);
           }
           const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
+          this.normalizeExplicitSerialDecision(input, repairedDecision);
           this.rejectSkillCapabilityViolation(repairedDecision, context);
           this.rejectOverlappingVideoTools(repairedDecision);
           this.rejectExplicitMapsSelection(input, repairedDecision);
@@ -390,6 +406,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
             this.currentTurnCompletedToolIds(message, input, context, round)
           );
           this.rejectUnboundLaterTool(
+            input,
             repairedDecision,
             this.currentTurnDependencyObservations(message, input, round),
             round
@@ -459,6 +476,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
           throw new Error(REPAIR_SCOPE_INVALID_ERROR);
         }
         const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
+        this.normalizeExplicitSerialDecision(input, repairedDecision);
         if (error instanceof Error && error.message === SKILL_CAPABILITY_ERROR &&
           (rejectedDecision === null || !this.skillOnlyRepair(rejectedDecision, repairedDecision))) {
           throw new Error(SKILL_CAPABILITY_ERROR);
@@ -490,6 +508,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
           this.currentTurnCompletedToolIds(message, input, context, round)
         );
         this.rejectUnboundLaterTool(
+          input,
           repairedDecision,
           this.currentTurnDependencyObservations(message, input, round),
           round
@@ -1164,11 +1183,13 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
   }
 
   private rejectUnboundLaterTool(
+    input: InputUserPayload,
     decision: LeaderDecision,
     observations: ObservationDigest[],
     round: number
   ): void {
-    if (round <= 1 || decision.roundAction !== 'execute') {
+    if (round <= 1 || decision.roundAction !== 'execute' ||
+      this.explicitSerialRequest(input.text)) {
       return;
     }
     for (let index = 0; index < decision.dataTasks.length; index++) {
@@ -1180,6 +1201,61 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         throw new Error(UNBOUND_LATER_TOOL_ERROR);
       }
     }
+  }
+
+  private explicitSerialRequest(text: string): boolean {
+    return text.indexOf('之后') >= 0 && text.indexOf('再') >= 0;
+  }
+
+  private normalizeExplicitSerialDecision(
+    input: InputUserPayload,
+    decision: LeaderDecision
+  ): void {
+    if (!this.explicitSerialRequest(input.text) ||
+      decision.roundAction !== 'execute' ||
+      decision.dataTasks.length === 0 ||
+      (decision.dataTasks.length === 1 && decision.actionIntent === undefined)) {
+      return;
+    }
+    const first: LeaderDecisionDataTask = decision.dataTasks[0];
+    decision.dataTasks = [first];
+    decision.requestedCapabilityIds = first.allowedToolIds.slice();
+    if (decision.requestedCapabilityIds.indexOf(first.toolId) < 0) {
+      decision.requestedCapabilityIds.push(first.toolId);
+    }
+    decision.actionIntent = undefined;
+  }
+
+  private normalizeIncompleteSerialCalendarCreate(
+    input: InputUserPayload,
+    decision: LeaderDecision,
+    currentLocalDate: string
+  ): void {
+    if (!this.explicitSerialRequest(input.text) ||
+      decision.roundAction !== 'execute' ||
+      decision.dataTasks.length !== 0 ||
+      decision.actionIntent === undefined ||
+      decision.actionIntent.allowedActionIds.length !== 1 ||
+      decision.actionIntent.allowedActionIds[0] !== 'calendar.event.create') {
+      return;
+    }
+    const missing: string[] = calendarEventRequiredFields(
+      'calendar.event.create',
+      normalizedCalendarArgsForPrompt(
+        'calendar.event.create',
+        input.text,
+        {},
+        new Date(currentLocalDate + 'T00:00:00+08:00'),
+        true
+      )
+    );
+    if (missing.length === 0) {
+      return;
+    }
+    decision.roundAction = 'clarify';
+    decision.actionIntent = undefined;
+    decision.answer = calendarMissingArgsResult('calendar.event.create', missing).summary;
+    decision.reasonCode = 'host_clarify';
   }
 
   private rejectCompletedToolReuse(decision: LeaderDecision, completedToolIds: string[]): void {
@@ -1363,6 +1439,9 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         'Action-owned capability IDs belong in actionIntent.allowedActionIds. A Data-owned ID may also appear in ' +
         'actionIntent only when a source tool explicitly declares that exact ID in actions. Never place an ' +
         'Action-only capability in dataTasks.',
+      'For a mixed request, put Data-owned capabilities only in dataTasks and Action-owned capabilities only in actionIntent. ' +
+        'Every explicit top-level user clause must map to one requested capability, and requestedCapabilityIds must be ' +
+        'the exact union of dataTasks and actionIntent for the current round.',
       'When an Action requires a real provider ID, plan the necessary Data-owned read task first and the ' +
         'Action-owned capability in actionIntent. Use only a real observed ID in a later round; never invent one.',
       'Available Data owner IDs: ' + JSON.stringify(dataOwnerIds),
@@ -1379,6 +1458,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       'Current-turn completed Data tool IDs: ' + JSON.stringify(completedToolIds),
       OBSERVATION_REUSE_CONTRACT,
       DATA_SCOPE_CONTRACT,
+      EXPLICIT_SERIAL_SEQUENCE_CONTRACT,
       'Never emit provider facts, action args, A2UI, credentials, or unregistered tool IDs.',
       hotelSearchPlanningContract(currentLocalDate),
       'Maximum planning rounds: 3.',
@@ -1480,6 +1560,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       throw new Error('Leader decision contains missing or unknown fields.');
     }
     const values = parsed as Record<string, Object | string | number | boolean | null | undefined>;
+    this.normalizeSingleMixedActionTask(values, context);
     const personaId = values['personaId'];
     const skillId = values['skillId'];
     const roundAction = values['roundAction'];
@@ -1549,6 +1630,81 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       decision.actionIntent = actionIntent;
     }
     return decision;
+  }
+
+  private normalizeSingleMixedActionTask(
+    values: Record<string, Object | string | number | boolean | null | undefined>,
+    context: LeaderPlanningContext
+  ): void {
+    const rawTasks = values['dataTasks'];
+    const rawAction = values['actionIntent'];
+    const rawRequested = values['requestedCapabilityIds'];
+    if (!Array.isArray(rawTasks) || rawAction === null || typeof rawAction !== 'object' ||
+      Array.isArray(rawAction) || !Array.isArray(rawRequested)) {
+      return;
+    }
+    const actionValues =
+      rawAction as Record<string, Object | string | number | boolean | null | undefined>;
+    const rawActionIds = actionValues['allowedActionIds'];
+    if (Object.keys(rawAction).sort().join(',') !== ACTION_INTENT_KEYS ||
+      !Array.isArray(rawActionIds)) {
+      return;
+    }
+    let misplacedIndex: number = -1;
+    let misplacedId: string = '';
+    const tasks = rawTasks as Object[];
+    for (let index = 0; index < tasks.length; index++) {
+      const rawTask = tasks[index];
+      if (rawTask === null || typeof rawTask !== 'object' || Array.isArray(rawTask) ||
+        Object.keys(rawTask).sort().join(',') !== DATA_TASK_KEYS) {
+        return;
+      }
+      const task =
+        rawTask as Record<string, Object | string | number | boolean | null | undefined>;
+      const toolId = task['toolId'];
+      const allowedToolIds = task['allowedToolIds'];
+      if (typeof toolId !== 'string' ||
+        leaderIsDataCapability(context, toolId) ||
+        !leaderIsActionCapability(context, toolId)) {
+        continue;
+      }
+      if (misplacedIndex >= 0 || !Array.isArray(allowedToolIds) ||
+        allowedToolIds.length !== 1 || allowedToolIds[0] !== toolId) {
+        return;
+      }
+      misplacedIndex = index;
+      misplacedId = toolId;
+    }
+    if (misplacedIndex < 0 || rawRequested.indexOf(misplacedId) < 0) {
+      return;
+    }
+    const actionIds = rawActionIds as Object[];
+    const requestedIds = rawRequested as Object[];
+    const existingActionIds: string[] = [];
+    for (let index = 0; index < actionIds.length; index++) {
+      const actionId: Object = actionIds[index];
+      if (typeof actionId !== 'string' || actionId === misplacedId ||
+        existingActionIds.indexOf(actionId) >= 0 ||
+        !leaderIsActionCapability(context, actionId)) {
+        return;
+      }
+      existingActionIds.push(actionId);
+    }
+    const orderedActionIds: string[] = [];
+    for (let index = 0; index < requestedIds.length; index++) {
+      const capabilityId: Object = requestedIds[index];
+      if (typeof capabilityId === 'string' &&
+        (capabilityId === misplacedId || existingActionIds.indexOf(capabilityId) >= 0)) {
+        orderedActionIds.push(capabilityId);
+      }
+    }
+    if (orderedActionIds.length !== existingActionIds.length + 1) {
+      return;
+    }
+    values['dataTasks'] = tasks.filter(
+      (_task: Object, index: number): boolean => index !== misplacedIndex
+    );
+    actionValues['allowedActionIds'] = orderedActionIds;
   }
 
   private hostReasonCode(action: LeaderRoundAction): string {
@@ -1775,11 +1931,19 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
           capabilityIndex < decision.requestedCapabilityIds.length;
           capabilityIndex++) {
           if (skill.toolIds.indexOf(decision.requestedCapabilityIds[capabilityIndex]) < 0) {
+            if (context.lockedSkillId === undefined) {
+              decision.skillId = '';
+              return;
+            }
             throw new Error(SKILL_CAPABILITY_ERROR);
           }
         }
         return;
       }
+    }
+    if (context.lockedSkillId === undefined) {
+      decision.skillId = '';
+      return;
     }
     throw new Error(SKILL_CAPABILITY_ERROR);
   }

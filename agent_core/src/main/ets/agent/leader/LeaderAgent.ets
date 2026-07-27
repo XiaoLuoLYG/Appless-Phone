@@ -38,7 +38,8 @@ import { CreateDataTaskPayload } from '../data/DataAgentTypes';
 import { ActionPlanRequestPayload, ActionResultPayload } from '../action/ActionAgentTypes';
 import {
   leaderIsActionCapability,
-  leaderIsDataCapability
+  leaderIsDataCapability,
+  leaderIsExplicitActionOwner
 } from './LeaderCapabilityOwnership';
 
 interface LeaderTurnState {
@@ -78,7 +79,7 @@ interface LeaderPendingDataTask {
   outputSchema: string;
 }
 
-const MAX_POST_OBSERVATION_PLANNING_MS: number = 8000;
+const MAX_POST_OBSERVATION_PLANNING_MS: number = 12000;
 const MAX_POST_OBSERVATION_UI_RESERVE_MS: number = 8000;
 const OBSERVATION_FALLBACK_ANSWER: string = 'Showing the available tool results.';
 
@@ -586,7 +587,8 @@ export class LeaderAgent extends MessageDrivenAgent {
 
   private hasUnboundLaterDataTask(state: LeaderTurnState, decision: LeaderDecision): boolean {
     if (decision.roundAction !== 'execute' || state.turnObservations.length === 0 ||
-      decision.dataTasks.length === 0) {
+      decision.dataTasks.length === 0 ||
+      (state.input.text.indexOf('之后') >= 0 && state.input.text.indexOf('再') >= 0)) {
       return false;
     }
     for (let index = 0; index < decision.dataTasks.length; index++) {
@@ -698,6 +700,11 @@ export class LeaderAgent extends MessageDrivenAgent {
     if (state.pendingDataTools.size > 0) {
       return;
     }
+    if (state.pendingActionDecision !== null &&
+      this.pendingActionUsesVirtualEntries(state.pendingActionDecision)) {
+      this.publishObservedFallback(this.inputMessage(state), state);
+      return;
+    }
     if (state.round >= 3) {
       const inputMessage: AgentMessage = this.inputMessage(state);
       if (this.canRenderObservedFallback(state)) {
@@ -723,6 +730,20 @@ export class LeaderAgent extends MessageDrivenAgent {
     state.uiDone = true;
     state.uiState = payload.state;
     state.uiSurfaceId = payload.surfaceId.trim();
+    if (state.pendingActionDecision !== null &&
+      this.pendingActionUsesVirtualEntries(state.pendingActionDecision)) {
+      const decision = state.pendingActionDecision;
+      state.pendingActionDecision = null;
+      state.virtualActionTaskId = state.uiTaskId;
+      this.publishActionPlanRequest(
+        this.inputMessage(state),
+        decision,
+        state.uiTaskId,
+        [],
+        true
+      );
+      return;
+    }
     if (state.pendingAnswer === null) {
       return;
     }
@@ -1424,7 +1445,8 @@ export class LeaderAgent extends MessageDrivenAgent {
     state: LeaderTurnState
   ): void {
     this.publishAccumulatedUiTask(input, state);
-    if (state.pendingActionDecision !== null) {
+    if (state.pendingActionDecision !== null &&
+      !this.pendingActionUsesVirtualEntries(state.pendingActionDecision)) {
       this.publishActionPlanRequest(
         input,
         state.pendingActionDecision,
@@ -1433,6 +1455,28 @@ export class LeaderAgent extends MessageDrivenAgent {
         false
       );
     }
+  }
+
+  private pendingActionUsesVirtualEntries(decision: LeaderDecision): boolean {
+    if (decision.actionIntent === undefined ||
+      decision.actionIntent.allowedActionIds.length === 0) {
+      return false;
+    }
+    for (let index = 0; index < decision.actionIntent.allowedActionIds.length; index++) {
+      const actionId = decision.actionIntent.allowedActionIds[index];
+      if (!leaderIsExplicitActionOwner(
+        this.planningContext,
+        actionId
+      )) {
+        return false;
+      }
+      for (let toolIndex = 0; toolIndex < this.planningContext.tools.length; toolIndex++) {
+        if (this.planningContext.tools[toolIndex].actions.indexOf(actionId) >= 0) {
+          return false;
+        }
+      }
+    }
+    return true;
   }
 
   private publishActionPlanRequest(
@@ -1480,6 +1524,11 @@ export class LeaderAgent extends MessageDrivenAgent {
     if (result.surfaceId !== virtualRunId || result.planId !== 'direct:' + virtualRunId ||
       result.runId !== virtualRunId) {
       return;
+    }
+    if (state.pendingAnswer !== null) {
+      const answer = state.pendingAnswer;
+      state.pendingAnswer = null;
+      this.publishTurnResult(this.inputMessage(state), state, answer);
     }
     this.finishTurn(state);
   }

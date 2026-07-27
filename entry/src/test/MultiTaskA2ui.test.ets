@@ -7,6 +7,7 @@ import {
   MultiTaskBoardData
 } from '@loop/agent-core';
 import {
+  appendMultiTaskSlot,
   childSurfaceIdForMultiTaskSlot,
   genericToolResultsA2ui,
   mergeSlotObservationIntoMultiTaskSurface,
@@ -95,6 +96,59 @@ function luckinShopEmbeddedSurface(): A2uiSurfaceState {
         title: '选择瑞幸门店',
         status: 'success',
         summary: '请选择要在哪家门店自取，选定后会继续查询商品并核价。',
+        rows: [],
+        rawPreview: ''
+      }]
+    }
+  });
+  return store.getSurface();
+}
+
+function rideEmbeddedSurface(): A2uiSurfaceState {
+  const store = new A2uiSurfaceStore();
+  store.apply({
+    version: 'v0.9.1',
+    createSurface: {
+      surfaceId: 'surface_ride',
+      root: 'root',
+      title: '打车估价',
+      intent: 'ride',
+      status: 'ready',
+      sendDataModel: true
+    }
+  });
+  store.apply({
+    version: 'v0.9.1',
+    updateComponents: {
+      surfaceId: 'surface_ride',
+      components: [{
+        id: 'root',
+        component: 'SurfaceRoot',
+        child: 'results',
+        title: '打车估价',
+        status: 'ready'
+      }, {
+        id: 'results',
+        component: 'GenericToolResults',
+        title: '打车估价',
+        body: '',
+        status: 'ready',
+        dataPath: '/genericToolResults',
+        actions: []
+      }]
+    }
+  });
+  store.apply({
+    version: 'v0.9.1',
+    updateDataModel: {
+      surfaceId: 'surface_ride',
+      path: '/genericToolResults',
+      value: [{
+        sourceTag: '高德地图',
+        toolName: 'ride.estimate',
+        title: '打车估价',
+        status: 'success',
+        summary: '预计 35 元',
         rows: [],
         rawPreview: ''
       }]
@@ -729,6 +783,63 @@ export default function multiTaskA2uiTest() {
     const html = renderMultiTaskHomeDocument(document, false);
     expect(html.indexOf('multi-serial-replies')).assertEqual(-1);
     expect(html.indexOf('multi-tabs-track')).assertLarger(-1);
+  });
+
+  it('preserves the existing Data surface while serial virtual Actions fill later slots', 0, () => {
+    let latestSurface: A2uiSurfaceState | null = null;
+    const composer = new MultiToolSurfaceComposer('surface_mixed', (surface) => {
+      latestSurface = surface;
+    });
+    composer.setExecutionMode('serial');
+    composer.registerSlots([
+      { name: 'ride.estimate', input: '{}' },
+      { name: 'luckin.order.preview', input: '{}' }
+    ]);
+    composer.emitShell();
+    composer.ingestSurface('slot_0', rideEmbeddedSurface());
+    composer.markRunning('slot_1');
+    expect(latestSurface !== null).assertTrue();
+
+    let composite: A2uiSurfaceState = appendMultiTaskSlot(latestSurface!, 'payment.send');
+    composite = mergeSlotObservationIntoMultiTaskSurface(
+      composite,
+      'slot_1',
+      'luckin.order.preview',
+      genericToolResultsA2ui('surface_luckin_slot', 'luckin.order.preview', [{
+        sourceTag: '瑞幸',
+        toolName: 'luckin.order.preview',
+        title: '选择瑞幸门店',
+        status: 'success',
+        summary: '请选择门店，不自动下单。',
+        rows: [],
+        rawPreview: ''
+      }])
+    );
+    composite = mergeSlotObservationIntoMultiTaskSurface(
+      composite,
+      'slot_2',
+      'payment.send',
+      genericToolResultsA2ui('surface_payment', 'payment.send', [{
+        sourceTag: 'PayPal',
+        toolName: 'payment.send',
+        title: '转账确认',
+        status: 'success',
+        summary: '等待用户确认，不自动支付。',
+        rows: [],
+        rawPreview: ''
+      }])
+    );
+
+    expect(resolveMultiTaskSlotId(composite, 'ride.estimate')).assertEqual('slot_0');
+    expect(resolveMultiTaskSlotId(composite, 'luckin.order.preview')).assertEqual('slot_1');
+    expect(resolveMultiTaskSlotId(composite, 'payment.send')).assertEqual('slot_2');
+    expect(composite.status).assertEqual('ready');
+    const parsed = JSON.parse(composite.dataModelJson) as Record<string, Object>;
+    const sections = parsed.sections as Record<string, A2uiMultiTaskSectionValue>;
+    expect((sections.slot_0.embeddedSurface as A2uiSurfaceState).surfaceId)
+      .assertEqual('surface_ride');
+    expect((sections.slot_1.embeddedSurface as A2uiSurfaceState).surfaceId)
+      .assertEqual('surface_luckin_slot');
   });
 });
 }
