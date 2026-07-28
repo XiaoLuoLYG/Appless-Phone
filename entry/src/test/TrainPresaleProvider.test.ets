@@ -60,10 +60,14 @@ export default function trainPresaleProviderTest() {
       }
     });
 
-    it('reads the official origin station sale time', 0, () => {
+    it('derives the sale date from the official presale window', 0, () => {
       const saleTime = parseStationSaleTime(STATION_SALE_FIXTURE, '北京南');
+      const range = parsePresaleRange(PRESALE_FIXTURE);
       expect(saleTime).assertEqual('12:45');
-      expect(presaleSaleAt('2026-08-06', saleTime)).assertEqual('2026-08-06T12:45:00+08:00');
+      expect(range === undefined).assertFalse();
+      if (range !== undefined) {
+        expect(presaleSaleAt('2026-08-06', saleTime, range)).assertEqual('2026-07-23T12:45:00+08:00');
+      }
     });
 
     it('rolls a yearless presale date into the next year', 0, () => {
@@ -138,8 +142,10 @@ export default function trainPresaleProviderTest() {
       expect(parseFutureTrainMetadata('{"data":[{"date":"20269999","from_station":"北京南","station_train_code":"G1","to_station":"上海虹桥","train_no":"24000000G10L"}]}', 'G1')).assertEqual(undefined);
       expect(parseFutureTrainMetadata('{"status":true,"data":{"data":[{"station_name":"北京南","station_train_code":"G1","station_no":"01","start_time":"99:99"},{"station_name":"上海虹桥","station_no":"07","arrive_time":"11:24"}]}}', 'G1')).assertEqual(undefined);
       expect(parseStationSaleTime('{"status":true,"data":[{"name":"北京南","value":"99:99"}]}', '北京南')).assertEqual('');
-      expect(presaleSaleAt('2026-99-99', '12:45')).assertEqual('');
-      expect(presaleSaleAt('2026-08-06', '99:99')).assertEqual('');
+      expect(presaleSaleAt('2026-99-99', '12:45',
+        { today: '2026-07-22', lastSaleDate: '2026-08-05' })).assertEqual('');
+      expect(presaleSaleAt('2026-08-06', '99:99',
+        { today: '2026-07-22', lastSaleDate: '2026-08-05' })).assertEqual('');
     });
   });
 }

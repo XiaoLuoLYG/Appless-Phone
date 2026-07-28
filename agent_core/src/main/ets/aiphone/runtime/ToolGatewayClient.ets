@@ -4656,9 +4656,18 @@ export function parseStationSaleTime(payload: string, stationName: string): stri
   return '';
 }
 
-export function presaleSaleAt(travelDate: string, saleTime: string): string {
+export function presaleSaleAt(travelDate: string, saleTime: string, range: PresaleRange): string {
   const date = normalizeOfficialDate(travelDate);
-  return date.length > 0 && isOfficialTime(saleTime) ? date + 'T' + saleTime + ':00+08:00' : '';
+  const today = normalizeOfficialDate(range.today);
+  const lastSaleDate = normalizeOfficialDate(range.lastSaleDate);
+  if (date.length === 0 || today.length === 0 || lastSaleDate.length === 0 ||
+    !isOfficialTime(saleTime) || today > lastSaleDate || date <= lastSaleDate) {
+    return '';
+  }
+  const saleDate = new Date(Date.parse(today + 'T00:00:00Z') +
+    Date.parse(date + 'T00:00:00Z') - Date.parse(lastSaleDate + 'T00:00:00Z'))
+    .toISOString().substring(0, 10);
+  return saleDate + 'T' + saleTime + ':00+08:00';
 }
 
 export function parseOfficialTrainPriceValue(value: TrainPriceValue): number | undefined {
@@ -4821,7 +4830,8 @@ async function resolveFuturePresaleTrain(
   fromCode: string,
   toName: string,
   toCode: string,
-  cookieHeader: string
+  cookieHeader: string,
+  range: PresaleRange
 ): Promise<A2uiTrainData | undefined> {
   const trainResponse = await requestText(build12306FutureTrainSearchUrl(date, trainCode), userAgentHeaders());
   const searched = trainResponse.code >= 200 && trainResponse.code < 300 ? parseFutureTrainForTravelDate(trainResponse.text, trainCode, date) : undefined;
@@ -4835,7 +4845,7 @@ async function resolveFuturePresaleTrain(
   }
   const saleResponse = await requestText('https://mobile.12306.cn/weixin/wxcore/queryQssj?stationName=' + encodeURIComponent(fromName), userAgentHeaders());
   const saleTime = saleResponse.code >= 200 && saleResponse.code < 300 ? parseStationSaleTime(saleResponse.text, fromName) : '';
-  const saleAt = presaleSaleAt(date, saleTime);
+  const saleAt = presaleSaleAt(date, saleTime, range);
   if (saleAt.length === 0) {
     return undefined;
   }
@@ -10558,7 +10568,7 @@ async function callStructuredTrainTool(prompt: string): Promise<DataResult> {
     if (searchPath === 'presale') {
       const trainCode = extractExactTrainCode(source);
       const presaleTrain = await resolveFuturePresaleTrain(
-        date, trainCode, fromName, fromCode, toName, toCode, cookieHeader);
+        date, trainCode, fromName, fromCode, toName, toCode, cookieHeader, range!);
       if (presaleTrain === undefined) {
         const message = '12306 未能验证 ' + trainCode + ' 的日期、车站、起售时间或票价；未展示候选车次。';
         return structuredErrorWithData(
