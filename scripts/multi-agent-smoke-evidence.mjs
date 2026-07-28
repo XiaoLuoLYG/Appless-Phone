@@ -278,6 +278,21 @@ export function multiAgentTurnEvidence(logText, options = {}) {
       dependencyMatches(task, dependency, dataById));
     if (candidates.length !== 1) failures.push('missing_dependency_binding');
   }
+  for (const expectation of options.expectedDataRounds || []) {
+    const candidates = [...dataById.values()].filter((task) =>
+      task.fields.tool === expectation.toolId && task.round === Number(expectation.round));
+    if (candidates.length !== 1) failures.push('missing_expected_data_round');
+  }
+  const parallelToolIds = options.expectedParallelDataToolIds || [];
+  if (parallelToolIds.length > 0) {
+    const parallelTasks = [...dataById.values()].filter((task) =>
+      parallelToolIds.includes(task.fields.tool));
+    if (parallelTasks.length !== parallelToolIds.length ||
+      new Set(parallelTasks.map((task) => task.fields.tool)).size !== parallelToolIds.length ||
+      new Set(parallelTasks.map((task) => task.round)).size !== 1) {
+      failures.push('missing_parallel_data_round');
+    }
+  }
 
   const uiTasks = events.filter((item) => item.marker === 'MultiAgentUiTask');
   const uiById = new Map();
@@ -380,7 +395,7 @@ export function multiAgentTurnEvidence(logText, options = {}) {
   const virtualActions = virtualPlans.flatMap((item) => list(item.fields.actions));
   const action = multiAgentActionEvidence(events.map((item) => item.normalized).join('\n'),
     virtualPlans.length > 0 ? {
-      expectedActionId: virtualActions.length === 1 ? virtualActions[0] : 'invalid',
+      expectedActionIds: virtualActions,
       expectedConversationId: selected?.fields.conversation || 'invalid',
       expectedTurnId: selected?.fields.turn || 'invalid',
       expectedVirtual: true
@@ -390,7 +405,7 @@ export function multiAgentTurnEvidence(logText, options = {}) {
   if (dataTasks.length > 0 && status !== 'canceled' && expectedTurnStatus !== status) {
     failures.push('terminal_status_mismatch');
   }
-  if (dataTasks.length === 0 && toolIds.length > 0 && !action.complete) {
+  if (virtualPlans.length > 0 && !action.complete) {
     failures.push('missing_action_terminal');
   }
   if (dataTasks.length === 0 && action.complete && status !== action.status) {
@@ -992,6 +1007,8 @@ function optionMismatch(item, options, expectedSurface) {
 export function multiAgentActionEvidence(logText, options = {}) {
   const all = records(logText);
   const expectedSurface = options.currentSurfaceId || options.surfaceId || '';
+  const expectedActionIds = Array.isArray(options.expectedActionIds) ?
+    options.expectedActionIds.filter((actionId) => typeof actionId === 'string' && actionId.length > 0) : [];
   const actionRuns = options.expectedVirtual === true ? [] : all.filter((item) => item.marker === 'MultiAgentActionRun' &&
     (!options.expectedActionId || item.fields.action === options.expectedActionId));
   const candidates = actionRuns.filter((item) => !optionMismatch(item, options, expectedSurface));
@@ -1031,7 +1048,9 @@ export function multiAgentActionEvidence(logText, options = {}) {
 
   const plans = options.expectedVirtual === false ? [] : all.filter((item) => item.marker === 'MultiAgentActionPlan' &&
     item.fields.virtual === 'true' && list(item.fields.dataTasks).length === 0 &&
-    (!options.expectedActionId || list(item.fields.actions).includes(options.expectedActionId)));
+    (!options.expectedActionId || list(item.fields.actions).includes(options.expectedActionId)) &&
+    (expectedActionIds.length === 0 ||
+      JSON.stringify(list(item.fields.actions)) === JSON.stringify(expectedActionIds)));
   for (let index = plans.length - 1; index >= 0; index--) {
     const plan = plans[index];
     const actions = list(plan.fields.actions);
@@ -1045,7 +1064,7 @@ export function multiAgentActionEvidence(logText, options = {}) {
       item.fields.task === plan.fields.task);
     const result = matchingResults[0];
     if (!plan.fields.conversation || !plan.fields.turn || !plan.fields.task ||
-      plan.fields.uiTask !== plan.fields.task || actions.length !== 1 ||
+      plan.fields.uiTask !== plan.fields.task || actions.length === 0 ||
       fabricatedRun || matchingResults.length !== 1 || result.index <= plan.index ||
       !result.fields.surface || result.fields.surface === 'none' ||
       (result.fields.surface === 'invalid' && options.expectedVirtual !== true) || !result.fields.plan ||
@@ -1057,6 +1076,7 @@ export function multiAgentActionEvidence(logText, options = {}) {
       ok: truthful && result.fields.status === 'success',
       status: result.fields.status,
       actionId: actions[0],
+      actionIds: actions,
       surfaceId: result.fields.surface,
       conversationId: plan.fields.conversation,
       turnId: plan.fields.turn,

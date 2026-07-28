@@ -6,6 +6,7 @@ import {
   ActionOffer,
   ActionOffersReadyPayload,
   ActionPlanReadyPayload,
+  CreateDataTaskPayload,
   CreateUiTaskPayload,
   DataResult,
   DataSource,
@@ -22,6 +23,10 @@ import {
 interface HotelResult {
   hotelId: number;
   name: string;
+}
+
+interface HotelSearchArgs {
+  query: string;
 }
 
 interface SurfaceWrite {
@@ -340,6 +345,47 @@ function uiTaskMessage(
 function multiUiTaskMessage(dataTaskIds: string[]): AgentMessage {
   const payload: CreateUiTaskPayload = {
     taskId: 'ui-multi',
+    skillId: '',
+    intent: 'Show ordered travel results',
+    expectedOutputSchema: 'hotelSearchResults',
+    dataTaskIds: dataTaskIds.slice()
+  };
+  return {
+    type: AgentMessageType.TASK_CREATE_UI,
+    conversationId: 'conversation-a',
+    turnId: 'turn-multi',
+    taskId: payload.taskId,
+    payload
+  };
+}
+
+function semanticDataTaskMessage(taskId: string, round: number): AgentMessage {
+  const args: HotelSearchArgs = {
+    query: 'serial'
+  };
+  const payload: CreateDataTaskPayload = {
+    taskId,
+    roundId: 'turn-multi:round-' + round.toString(),
+    skillId: '',
+    goal: 'Show ordered travel results',
+    allowedToolIds: ['hotel.search'],
+    toolId: 'hotel.search',
+    outputSchema: 'hotelSearchResults',
+    args,
+    required: true
+  };
+  return {
+    type: AgentMessageType.TASK_CREATE_DATA,
+    conversationId: 'conversation-a',
+    turnId: 'turn-multi',
+    taskId,
+    payload
+  };
+}
+
+function serialFinalUiTaskMessage(dataTaskIds: string[]): AgentMessage {
+  const payload: CreateUiTaskPayload = {
+    taskId: 'input-serial:ui',
     skillId: '',
     intent: 'Show ordered travel results',
     expectedOutputSchema: 'hotelSearchResults',
@@ -744,6 +790,40 @@ export default function uiAgentTest() {
       expect(writer.writes[1].jsonl).assertEqual(JSON.stringify('result:202'));
       expect(writer.writes[0].surfaceId).assertEqual(writer.writes[1].surfaceId);
       expect(renderer.resultHotelIds.join(',')).assertEqual('202');
+
+      agent.stop();
+      observer.close();
+    });
+
+    it('writes each newly authorized serial result before the final UI task', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const renderer = new RecordingRenderer();
+      const writer = new RecordingSurfaceWriter();
+      const agent = new UiAgent(bus, renderer, writer);
+      const observer = bus.openReader();
+      agent.start();
+
+      const firstTaskId = 'input-serial:round-1:k1';
+      const secondTaskId = 'input-serial:round-2:k2';
+      bus.publish(semanticDataTaskMessage(firstTaskId, 1));
+      await settle();
+      publishData(bus, 'conversation-a', 'turn-multi', firstTaskId, 101);
+      await settle();
+
+      bus.publish(semanticDataTaskMessage(secondTaskId, 2));
+      publishData(bus, 'conversation-a', 'turn-multi', secondTaskId, 202);
+      await settle();
+
+      bus.publish(serialFinalUiTaskMessage([firstTaskId, secondTaskId]));
+      await receiveUiState(observer, 'result');
+
+      expect(writer.writes.length).assertEqual(3);
+      expect(writer.writes[0].jsonl).assertEqual(JSON.stringify('skeleton:input-serial:ui'));
+      expect(writer.writes[1].jsonl).assertEqual(JSON.stringify('result:101'));
+      expect(writer.writes[2].jsonl).assertEqual(JSON.stringify('result:101,202'));
+      expect(writer.writes[0].surfaceId).assertEqual(writer.writes[1].surfaceId);
+      expect(writer.writes[1].surfaceId).assertEqual(writer.writes[2].surfaceId);
+      expect(renderer.resultBatchSizes.join(',')).assertEqual('1,2');
 
       agent.stop();
       observer.close();

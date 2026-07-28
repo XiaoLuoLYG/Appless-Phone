@@ -945,6 +945,9 @@ export class MultiAgentRuntime {
       (result.status !== 'success' && result.status !== 'error' && result.status !== 'canceled')) {
       return;
     }
+    if (pending.uiTerminal) {
+      return;
+    }
     const status: TurnResultStatus = result.status === 'success' ? 'success' :
       result.status === 'canceled' ? 'canceled' : 'error';
     const messageText: string = result.status === 'success' ?

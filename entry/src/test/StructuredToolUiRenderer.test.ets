@@ -503,6 +503,32 @@ export default function structuredToolUiRendererTest() {
       expect(rendered.jsonl.split('"createSurface"').length - 1).assertEqual(1);
     });
 
+    it('keeps the first page selected as later serial rounds finish', 0, async () => {
+      const renderer = new StructuredToolUiRenderer();
+      const travel = dataResult('travel.search', 'travelOptions', object(
+        '{"title":"旅行","body":"","summary":"travel first","options":[],"rows":[]}'
+      ));
+      const train = dataResult('train.search', 'trains', object(
+        '{"title":"高铁","body":"","summary":"train second","trains":[]}'
+      ));
+      const rendered = await renderer.result(
+        uiTask(['input:round-1:travel', 'input:round-2:train']),
+        [travel, train],
+        [],
+        'surface-serial'
+      );
+      const parsed = parseA2uiJsonl(rendered.jsonl);
+      const store = new A2uiSurfaceStore();
+      parsed.envelopes.forEach((envelope: A2uiEnvelope) => {
+        store.apply(envelope);
+      });
+      const model = JSON.parse(store.getSurface().dataModelJson) as Record<string, Object>;
+      const board = model['multiTask'] as Record<string, Object>;
+
+      expect(board['mode'] as string).assertEqual('serial');
+      expect(board['activeSectionId'] as string).assertEqual('slot_0');
+    });
+
     it('combines mail and calendar rows without dangling duplicate generic components', 0, async () => {
       const renderer = new StructuredToolUiRenderer();
       const mail = dataResult('mail.search', 'mailThreads', object(

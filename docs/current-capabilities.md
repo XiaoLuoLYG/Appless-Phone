@@ -1,10 +1,10 @@
 # 当前工具能力总表
 
-更新时间：2026-07-22
+更新时间：2026-07-27
 
 来源：`agent_core/src/main/ets/aiphone/AiphoneToolDefinitions.ets`、`agent_core/src/main/ets/aiphone/runtime/ToolDefinitionRegistry.ets`、`entry/src/main/ets/pages/A2uiHome/agent/MultiAgentRuntime.ets`、`entry/src/main/ets/pages/A2uiHome/agent/MultiAgentCanaryRuntime.ets`、`agent_core/src/main/ets/aiphone/runtime/AggregateSearchClient.ets`、`agent_core/src/main/ets/aiphone/runtime/ComposioDynamicBackend.ets`、`scripts/aiphone-device-smoke.mjs`、支付/Composio 相关单测。
 
-当前 agent 工具箱：46 个固定 `ToolDefinition`（25 个 Data Agent + 21 个 Action Agent）+ `memory.update` + `dynamic.search` 两个虚拟 owner。`hotel.navigate`、`hotel.booking.open` 与 `gmail.message.send` 只从当前 surface 派生，不直接暴露给模型；结合按 query 收窄的瑞幸预览，运行时最多 45 个模型可选工具。Composio 不新增固定 toolId，主要挂在 `dynamic.search`；自动回归以 core/full/manual-only/excluded/review-required 标记为准。
+当前 agent 工具箱：47 个固定 `ToolDefinition`（26 个 Data Agent + 21 个 Action Agent）+ `memory.update` + `dynamic.search` 两个虚拟 owner。`hotel.navigate`、`hotel.booking.open` 与 `gmail.message.send` 只从当前 surface 派生，不直接暴露给模型；结合按 query 收窄的瑞幸预览，运行时最多 46 个模型可选工具。Composio 不新增固定 toolId，主要挂在 `dynamic.search`；自动回归以 core/full/manual-only/excluded/review-required 标记为准。
 
 授权页统一显示 app 名称。Slack、X 的读取和授权统一走当前用户的 Composio connected account；用户确认发送 Slack 回复时固定执行 `SLACK_CHAT_POST_MESSAGE`，X 回复仍不支持。QQ 邮箱、瑞幸、滴滴继续使用当前默认凭证和原有 provider 逻辑，授权页只新增各自官方授权/开发者页面入口，不会把网页登录结果自动写回 App。
 
@@ -12,7 +12,7 @@
 
 自动 smoke 以同一 `conversation`、`turn`、`task` 下的 `MultiAgentInput`、Data/UI task 与 terminal、`MultiAgentTurnResult` 为主证据；并行任务必须全部 terminal，依赖任务必须出现递增的 `round-*`。`success`、`partial`、`empty`、`error`、`canceled` 保留原状态，不把旧 `LoopBackend`/页面 ready/HTTP 200 单独当成成功。当前 surface 动作还要求 `MultiAgentActionRun` 与同一 surface/run 的 `MultiAgentActionResult`；virtual action 使用精确 `MultiAgentActionPlan` request 与 terminal result 关联。
 
-`node scripts/aiphone-device-smoke.mjs --list-cases` 只列 C01-C20，`--full-regression --list-cases` 再列 F01-F16，均不运行设备或 provider。`gmail.message.send` 不进入自动列表；只有同时配置 `AIPHONE_GMAIL_SAFE_THREAD_ID` 与 `AIPHONE_GMAIL_SAFE_RECIPIENT` 时，`--gmail-send-manual --list-cases` 才显示 manual-only M01，且脚本不会自动发送。X02“不确认直接发送”继续 excluded。
+`node scripts/aiphone-device-smoke.mjs --list-cases` 只列 C01-C22，`--full-regression --list-cases` 再列 F01-F16，均不运行设备或 provider。`gmail.message.send` 不进入自动列表；只有同时配置 `AIPHONE_GMAIL_SAFE_THREAD_ID` 与 `AIPHONE_GMAIL_SAFE_RECIPIENT` 时，`--gmail-send-manual --list-cases` 才显示 manual-only M01，且脚本不会自动发送。X02“不确认直接发送”继续 excluded。
 
 ## 固定/虚拟能力 owner 账本
 
@@ -21,6 +21,7 @@
 | capability | migrated owner | automation state | confirmation |
 | --- | --- | --- | --- |
 | `travel.search` | Data Agent | core | 无 |
+| `time` | Data Agent | core | 读取设备本地日期和时间；不访问网络 |
 | `train.search` | Data Agent | full | 无；购票为既有 Web client action |
 | `flight.search` | Data Agent | full | 无 |
 | `hotel.search` | Data Agent | core | 无 |
@@ -72,6 +73,7 @@
 | 领域 | toolId | 核心 query | 预期结果 | 风险 | 授权/配置 | VPN/网络 | 走 Composio | 覆盖 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 出行 | `travel.search` | `我明天要从北京去上海，帮我搜索出行方案` | 综合高铁/航班候选；不造假，缺 provider 显示真实失败 | `read` | 无；航班源可能要 `VARIFLIGHT_API_KEY` | 通常不需要 VPN，取决于 12306/飞常准网络 | 否 | 默认 smoke |
+| 系统 | `time` | `查一下现在的时间` | 返回设备本地日期、时间和时区 | `read` | 无 | 不需要 | 否 | core C21 |
 | 出行 | `train.search` | `帮我查询深圳北出发到香港西九龙明天晚上六点之后的高铁` | 12306 真实余票与最低可售价格；展开后可在 App 内打开 12306 官网继续购票，指定车次需在官网重选，订单与支付结果以 12306 为准 | `read` | 无 | 通常不需要 VPN | 否 | full regression |
 | 出行 | `flight.search` | `帮我查明天北京到上海航班` | 飞常准/航班结果或缺 key 错误 | `read` | `FLIGHT_MCP_KEY` / `VARIFLIGHT_API_KEY` | 通常不需要 VPN，取决于供应商 | 否 | full regression |
 | 餐饮 | `food.search` | `帮我搜索深圳坂田华为基地附近的咖啡店` | 周边餐饮/咖啡结果；不下单不支付 | `read` | `AMAP_KEY` 等本地生活 provider key | 通常不需要 VPN | 否 | 默认 smoke |

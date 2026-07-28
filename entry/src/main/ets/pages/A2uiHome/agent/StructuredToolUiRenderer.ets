@@ -446,7 +446,23 @@ function authJsonl(data: DataResult, surfaceId: string): string | null {
   return null;
 }
 
-function aggregateJsonl(jsonls: string[], data: DataResult[], surfaceId: string): string {
+function serialRoundTask(task: CreateUiTaskPayload): boolean {
+  const rounds: Set<string> = new Set<string>();
+  for (let index = 0; index < task.dataTaskIds.length; index++) {
+    const match = task.dataTaskIds[index].match(/:round-([1-9][0-9]*):/);
+    if (match !== null) {
+      rounds.add(match[1]);
+    }
+  }
+  return rounds.size > 1;
+}
+
+function aggregateJsonl(
+  jsonls: string[],
+  data: DataResult[],
+  surfaceId: string,
+  serial: boolean
+): string {
   if (jsonls.length === 1) {
     return jsonls[0];
   }
@@ -458,6 +474,9 @@ function aggregateJsonl(jsonls: string[], data: DataResult[], surfaceId: string)
   data.forEach((item: DataResult) => {
     calls.push({ name: item.toolId, input: '{}' });
   });
+  if (serial) {
+    composer.setExecutionMode('serial');
+  }
   composer.registerSlots(calls);
   composer.emitShell();
   for (let index = 0; index < jsonls.length; index++) {
@@ -798,7 +817,7 @@ export class StructuredToolUiRenderer implements UiTaskRenderer {
   }
 
   async result(
-    _task: CreateUiTaskPayload,
+    task: CreateUiTaskPayload,
     data: DataResult[],
     offers: ActionOffer[],
     surfaceId: string
@@ -816,7 +835,7 @@ export class StructuredToolUiRenderer implements UiTaskRenderer {
           safeData[index], offersForTool(safeData[index], safeOffers), surfaceId
         ) : auth);
       }
-      const baseline = aggregateJsonl(jsonls, safeData, surfaceId);
+      const baseline = aggregateJsonl(jsonls, safeData, surfaceId, serialRoundTask(task));
       return rendered(await this.layout(safeData, safeOffers, surfaceId, baseline));
     } catch (_error) {
       return rendered(errorJsonl(surfaceId, '结构化结果格式无效或暂不受支持。'));

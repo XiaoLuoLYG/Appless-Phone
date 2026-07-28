@@ -1292,7 +1292,7 @@ export default function multiAgentRuntimeTest() {
       runtime.dispose();
     });
 
-    it('renders two dependent Data rounds with one skeleton one final surface and one TurnResult', 0, async () => {
+    it('renders each dependent Data round on one surface before the final TurnResult', 0, async () => {
       const bus = new CountingBus();
       const renderer = new RecordingRenderer();
       const writer = new RecordingWriter();
@@ -1324,11 +1324,14 @@ export default function multiAgentRuntimeTest() {
       expect(detailsPayload.roundId.endsWith(':round-2')).assertTrue();
       expect((detailsPayload.args as Record<string, string>)['placeId']).assertEqual('hotel-101');
       expect(renderer.skeletonCalls).assertEqual(1);
-      expect(renderer.resultCalls).assertEqual(1);
-      expect(renderer.dataTaskIds.join(',')).assertEqual(dataTasks[0].taskId + ',' + dataTasks[1].taskId);
-      expect(writer.writes.length).assertEqual(2);
+      expect(renderer.resultCalls).assertEqual(2);
+      expect(renderer.dataTaskIds.join(',')).assertEqual(dataTasks[0].taskId);
+      expect(writer.writes[0]).assertEqual(JSON.stringify('skeleton'));
+      expect(writer.writes[1]).assertEqual(JSON.stringify('result-1'));
+      expect(writer.writes[2]).assertEqual(JSON.stringify('result-2'));
       expect(writer.surfaces[0]).assertEqual(writer.surfaces[1]);
-      expect(outcome.surfaceId).assertEqual(writer.surfaces[1]);
+      expect(writer.surfaces[1]).assertEqual(writer.surfaces[2]);
+      expect(outcome.surfaceId).assertEqual(writer.surfaces[2]);
       runtime.dispose();
     });
 

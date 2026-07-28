@@ -49,6 +49,7 @@ export interface LeaderDecision {
   dataTasks: LeaderDecisionDataTask[];
   uiIntent: LeaderUiIntent;
   normalizationCurrentLocalDate?: string;
+  normalizedActionInputText?: string;
   actionIntent?: LeaderActionIntent;
   answer?: string;
   reasonCode: string;
