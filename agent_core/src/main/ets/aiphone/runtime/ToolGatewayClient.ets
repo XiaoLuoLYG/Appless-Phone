@@ -306,7 +306,70 @@ interface LeftTicketData {
 }
 
 interface LeftTicketPayload {
+  status?: boolean;
   data?: LeftTicketData;
+}
+
+export type TrainPresaleAvailabilityStatus =
+  'verified' | 'sold_out' | 'provider_error' | 'mismatch' | 'unsupported_seat';
+
+export interface TrainPresaleRecheckRequest {
+  trainCode: string;
+  travelDate: string;
+  fromName: string;
+  fromCode: string;
+  toName: string;
+  toCode: string;
+  seatPriority: string;
+}
+
+export interface TrainPresaleAvailabilityCheck {
+  status: TrainPresaleAvailabilityStatus;
+  reason: string;
+  trainCode: string;
+  travelDate: string;
+  fromCode: string;
+  toCode: string;
+  seatPriority: string;
+  bookingUrl: string;
+}
+
+export interface TrainPresaleDebugSelectionRequest {
+  fromName: string;
+  fromCode: string;
+  toName: string;
+  toCode: string;
+  seatPriority: string;
+}
+
+export interface TrainPresaleDebugSelection {
+  status: TrainPresaleAvailabilityStatus;
+  reason: string;
+  trainCode: string;
+  travelDate: string;
+  fromName: string;
+  fromCode: string;
+  toName: string;
+  toCode: string;
+  seatPriority: string;
+  bookingUrl: string;
+}
+
+export interface TrainPresaleExecutionTask {
+  state: 'scheduled' | 'executing' | 'awaiting_payment' | 'needs_user' | 'cancelled';
+  trainCode: string;
+  travelDate: string;
+  fromName: string;
+  fromCode: string;
+  toName: string;
+  toCode: string;
+  seatPriority: string;
+}
+
+export interface TrainPresaleExecutionDecision {
+  state: 'executing' | 'needs_user';
+  reason: string;
+  bookingUrl: string;
 }
 
 interface StationEntry {
@@ -317,6 +380,89 @@ interface StationEntry {
 interface StationCache {
   entries: StationEntry[];
   names: string[];
+}
+
+export interface PresaleRange {
+  today: string;
+  lastSaleDate: string;
+}
+
+export interface FutureTrainMetadata {
+  trainCode: string;
+  trainNo: string;
+  travelDate: string;
+  from: string;
+  to: string;
+  fromStopNo: string;
+  toStopNo: string;
+  depart: string;
+  arrive: string;
+}
+
+interface PresaleResponseData {
+  today?: string;
+  hlwlptysq?: string;
+}
+
+interface PresaleResponsePayload {
+  status?: boolean;
+  data?: PresaleResponseData;
+}
+
+interface FutureTrainSearchItem {
+  date?: string;
+  station_train_code?: string;
+  train_no?: string;
+  from_station?: string;
+  to_station?: string;
+}
+
+interface FutureTrainStop {
+  station_name?: string;
+  station_train_code?: string;
+  station_no?: string;
+  start_time?: string;
+  arrive_time?: string;
+}
+
+interface FutureTrainStopData {
+  data?: FutureTrainStop[];
+}
+
+interface FutureTrainPayload {
+  status?: boolean;
+  data?: FutureTrainSearchItem[] | FutureTrainStopData;
+}
+
+interface StationSaleTimeItem {
+  name?: string;
+  value?: string;
+}
+
+interface StationSaleTimePayload {
+  status?: boolean;
+  data?: StationSaleTimeItem[];
+}
+
+type TrainPriceValue = Object | string | number | boolean | null | undefined;
+
+interface TrainPriceData {
+  WZ?: TrainPriceValue;
+  A1?: TrainPriceValue;
+  A2?: TrainPriceValue;
+  A3?: TrainPriceValue;
+  A4?: TrainPriceValue;
+  A6?: TrainPriceValue;
+  A9?: TrainPriceValue;
+  F?: TrainPriceValue;
+  M?: TrainPriceValue;
+  O?: TrainPriceValue;
+  P?: TrainPriceValue;
+}
+
+interface TrainPricePayload {
+  status?: boolean;
+  data?: TrainPriceValue;
 }
 
 interface StationDefault {
@@ -1999,6 +2145,26 @@ function pad2(value: number): string {
     return '0' + value.toString();
   }
   return value.toString();
+}
+
+function formatDate(date: Date): string {
+  return date.getFullYear().toString() + '-' + pad2(date.getMonth() + 1) + '-' + pad2(date.getDate());
+}
+
+export function format12306BeijingTimestamp(epochMillis: number): string {
+  if (!Number.isFinite(epochMillis)) {
+    return '';
+  }
+  const china = new Date(epochMillis + 8 * 60 * 60 * 1000);
+  return china.getUTCFullYear().toString() + '-' + pad2(china.getUTCMonth() + 1) + '-' +
+    pad2(china.getUTCDate()) + 'T' + pad2(china.getUTCHours()) + ':' + pad2(china.getUTCMinutes()) + ':' +
+    pad2(china.getUTCSeconds()) + '+08:00';
+}
+
+export function current12306BeijingDate(
+  clock: () => number = (): number => Date.now()
+): string {
+  return format12306BeijingTimestamp(clock()).substring(0, 10);
 }
 
 function normalizeTrainStationName(name: string, source: string): string {
@@ -4251,6 +4417,348 @@ export function build12306BookingUrl(
     '&flag=N,N,Y';
 }
 
+export function decideTrainPresaleExecution(
+  task: TrainPresaleExecutionTask,
+  check: TrainPresaleAvailabilityCheck
+): TrainPresaleExecutionDecision {
+  if (task.state !== 'executing') {
+    return { state: 'needs_user', reason: '开售任务不在执行状态，请重新确认。', bookingUrl: '' };
+  }
+  if (check.status !== 'verified') {
+    const reason = check.reason.length > 0 ? check.reason : '12306 当前余票未通过核验，请手动确认。';
+    return { state: 'needs_user', reason: reason, bookingUrl: '' };
+  }
+  const expectedUrl = build12306BookingUrl(
+    task.travelDate,
+    task.fromName,
+    task.fromCode,
+    task.toName,
+    task.toCode
+  );
+  if (check.trainCode.trim().toUpperCase() !== task.trainCode.trim().toUpperCase() ||
+    check.travelDate.trim() !== task.travelDate.trim() ||
+    check.fromCode.trim().toUpperCase() !== task.fromCode.trim().toUpperCase() ||
+    check.toCode.trim().toUpperCase() !== task.toCode.trim().toUpperCase() ||
+    check.seatPriority.trim() !== task.seatPriority.trim() || check.bookingUrl !== expectedUrl) {
+    return { state: 'needs_user', reason: '12306 返回的车次、日期、路线或席别与提醒不匹配，请手动确认。', bookingUrl: '' };
+  }
+  return { state: 'executing', reason: '', bookingUrl: expectedUrl };
+}
+
+function normalizedOfficialDate(yearText: string, monthText: string, dayText: string): string {
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  if (year < 2000 || year > 2099 || month < 1 || month > 12 || day < 1 || day > 31) {
+    return '';
+  }
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+    return '';
+  }
+  return year.toString() + '-' + pad2(month) + '-' + pad2(day);
+}
+
+function normalizeOfficialDate(value: string, fallbackDate: string = ''): string {
+  const compact = /^(20\d{2})(\d{2})(\d{2})$/.exec(value.trim());
+  if (compact !== null) {
+    return normalizedOfficialDate(compact[1], compact[2], compact[3]);
+  }
+  const iso = /^(20\d{2})[-年](\d{1,2})[-月](\d{1,2})日?$/.exec(value.trim());
+  if (iso !== null) {
+    return normalizedOfficialDate(iso[1], iso[2], iso[3]);
+  }
+  const monthDay = /^(\d{1,2})月(\d{1,2})日$/.exec(value.trim());
+  if (monthDay !== null && /^20\d{2}-\d{2}-\d{2}$/.test(fallbackDate)) {
+    const reference = normalizeOfficialDate(fallbackDate);
+    if (reference.length === 0) {
+      return '';
+    }
+    let year = Number(reference.substring(0, 4));
+    let result = normalizedOfficialDate(year.toString(), monthDay[1], monthDay[2]);
+    if (result.length > 0 && result < reference) {
+      year += 1;
+      result = normalizedOfficialDate(year.toString(), monthDay[1], monthDay[2]);
+    }
+    return result;
+  }
+  return '';
+}
+
+function isOfficialTime(value: string): boolean {
+  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  return match !== null && Number(match[1]) <= 23 && Number(match[2]) <= 59;
+}
+
+export function parsePresaleRange(payload: string): PresaleRange | undefined {
+  try {
+    const parsed = JSON.parse(payload) as PresaleResponsePayload;
+    if (parsed.status !== true || parsed.data === undefined) {
+      return undefined;
+    }
+    const today = normalizeOfficialDate(parsed.data.today === undefined ? '' : parsed.data.today);
+    const lastSaleDate = normalizeOfficialDate(parsed.data.hlwlptysq === undefined ? '' : parsed.data.hlwlptysq, today);
+    return today.length > 0 && lastSaleDate.length > 0 ? { today: today, lastSaleDate: lastSaleDate } : undefined;
+  } catch (_error) {
+    return undefined;
+  }
+}
+
+export function build12306PresaleRangeUrl(now: number = Date.now()): string {
+  return 'https://hzfw.12306.cn/zgzfw/zgzfw/init?_=' + now.toString();
+}
+
+export function extractExactTrainCode(text: string): string {
+  const match = /(?:^|[^A-Z0-9])([GDCZTKYLSP]\d{1,5})(?:次|$|[^A-Z0-9])/i.exec(text);
+  if (match !== null) {
+    return match[1].toUpperCase();
+  }
+  const numeric = /(?:^|[^\d])(\d{1,5})\s*次(?:$|[^\d])/.exec(text);
+  if (numeric !== null) {
+    return numeric[1];
+  }
+  const exact = text.trim();
+  return /^\d{1,5}$/.test(exact) ? exact : '';
+}
+
+export function selectTrainSearchPath(source: string, travelDate: string, range: PresaleRange | undefined): string {
+  const date = normalizeOfficialDate(travelDate);
+  if (date.length === 0) {
+    return 'leftTicket';
+  }
+  if (range === undefined) {
+    if (date > formatDate(new Date())) {
+      return extractExactTrainCode(source).length > 0 ? 'presaleRangeUnavailable' : 'presaleRangeUnavailableRouteOnly';
+    }
+    return 'leftTicket';
+  }
+  if (date <= range.lastSaleDate) {
+    return 'leftTicket';
+  }
+  return extractExactTrainCode(source).length > 0 ? 'presale' : 'futureTrainCodeRequired';
+}
+
+export function buildPresaleTrainData(
+  trainCode: string,
+  travelDate: string,
+  from: string,
+  fromCode: string,
+  to: string,
+  toCode: string,
+  depart: string,
+  arrive: string,
+  saleAt: string,
+  price: number
+): A2uiTrainData | undefined {
+  const date = normalizeOfficialDate(travelDate);
+  const code = extractExactTrainCode(trainCode);
+  if (date.length === 0 || code.length === 0 || from.length === 0 || fromCode.length === 0 || to.length === 0 || toCode.length === 0 ||
+    !isOfficialTime(depart) || !isOfficialTime(arrive) || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+08:00$/.test(saleAt) ||
+    saleAt.substring(0, 10) >= date || price <= 0) {
+    return undefined;
+  }
+  return {
+    trainCode: code,
+    from: from,
+    to: to,
+    depart: depart,
+    arrive: arrive,
+    duration: '',
+    seats: '',
+    status: '待开售',
+    business: '',
+    first: '',
+    second: '',
+    noSeat: '',
+    hardSeat: '',
+    sleeperSoft: '',
+    price: price.toString(),
+    bookingUrl: build12306BookingUrl(date, from, fromCode, to, toCode),
+    travelDate: date,
+    saleState: 'presale',
+    saleAt: saleAt,
+    fromCode: fromCode,
+    toCode: toCode
+  };
+}
+
+function emptyFutureTrainMetadata(trainCode: string): FutureTrainMetadata {
+  return {
+    trainCode: trainCode,
+    trainNo: '',
+    travelDate: '',
+    from: '',
+    to: '',
+    fromStopNo: '',
+    toStopNo: '',
+    depart: '',
+    arrive: ''
+  };
+}
+
+export function parseFutureTrainMetadata(payload: string, trainCode: string): FutureTrainMetadata | undefined {
+  const exactCode = trainCode.trim().toUpperCase();
+  if (exactCode.length === 0) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(payload) as FutureTrainPayload;
+    if (parsed.status === false || parsed.data === undefined) {
+      return undefined;
+    }
+    if (Array.isArray(parsed.data)) {
+      for (let index = 0; index < parsed.data.length; index++) {
+        const item = parsed.data[index];
+        if ((item.station_train_code === undefined ? '' : item.station_train_code.toUpperCase()) !== exactCode) {
+          continue;
+        }
+        const travelDate = normalizeOfficialDate(item.date === undefined ? '' : item.date);
+        if (travelDate.length === 0) {
+          continue;
+        }
+        const trainNo = item.train_no === undefined ? '' : item.train_no.trim();
+        const from = item.from_station === undefined ? '' : item.from_station.trim();
+        const to = item.to_station === undefined ? '' : item.to_station.trim();
+        if (trainNo.length > 0 && from.length > 0 && to.length > 0) {
+          const metadata = emptyFutureTrainMetadata(exactCode);
+          metadata.trainNo = trainNo;
+          metadata.travelDate = travelDate;
+          metadata.from = from;
+          metadata.to = to;
+          return metadata;
+        }
+      }
+      return undefined;
+    }
+    const stops = parsed.data.data === undefined ? [] : parsed.data.data;
+    if (stops.length < 2 || (stops[0].station_train_code === undefined ? '' : stops[0].station_train_code.toUpperCase()) !== exactCode) {
+      return undefined;
+    }
+    const origin = stops[0];
+    const destination = stops[stops.length - 1];
+    const from = origin.station_name === undefined ? '' : origin.station_name.trim();
+    const to = destination.station_name === undefined ? '' : destination.station_name.trim();
+    const fromStopNo = origin.station_no === undefined ? '' : origin.station_no.trim();
+    const toStopNo = destination.station_no === undefined ? '' : destination.station_no.trim();
+    const depart = origin.start_time === undefined ? '' : origin.start_time.trim();
+    const arrive = destination.arrive_time === undefined ? '' : destination.arrive_time.trim();
+    if (from.length === 0 || to.length === 0 || fromStopNo.length === 0 || toStopNo.length === 0 ||
+      !isOfficialTime(depart) || !isOfficialTime(arrive)) {
+      return undefined;
+    }
+    const metadata = emptyFutureTrainMetadata(exactCode);
+    metadata.from = from;
+    metadata.to = to;
+    metadata.fromStopNo = fromStopNo;
+    metadata.toStopNo = toStopNo;
+    metadata.depart = depart;
+    metadata.arrive = arrive;
+    return metadata;
+  } catch (_error) {
+    return undefined;
+  }
+}
+
+export function parseFutureTrainForTravelDate(payload: string, trainCode: string, expectedTravelDate: string): FutureTrainMetadata | undefined {
+  const metadata = parseFutureTrainMetadata(payload, trainCode);
+  const expected = normalizeOfficialDate(expectedTravelDate);
+  return metadata === undefined || expected.length === 0 || metadata.travelDate !== expected ? undefined : metadata;
+}
+
+export function parseStationSaleTime(payload: string, stationName: string): string {
+  try {
+    const parsed = JSON.parse(payload) as StationSaleTimePayload;
+    if (parsed.status !== true || parsed.data === undefined) {
+      return '';
+    }
+    for (let index = 0; index < parsed.data.length; index++) {
+      const item = parsed.data[index];
+      if (item.name !== stationName || item.value === undefined || !isOfficialTime(item.value.trim())) {
+        continue;
+      }
+      return item.value.trim();
+    }
+  } catch (_error) {
+    return '';
+  }
+  return '';
+}
+
+export function presaleSaleAt(travelDate: string, saleTime: string, range: PresaleRange): string {
+  const date = normalizeOfficialDate(travelDate);
+  const today = normalizeOfficialDate(range.today);
+  const lastSaleDate = normalizeOfficialDate(range.lastSaleDate);
+  if (date.length === 0 || today.length === 0 || lastSaleDate.length === 0 ||
+    !isOfficialTime(saleTime) || today > lastSaleDate || date <= lastSaleDate) {
+    return '';
+  }
+  const saleDate = new Date(Date.parse(today + 'T00:00:00Z') +
+    Date.parse(date + 'T00:00:00Z') - Date.parse(lastSaleDate + 'T00:00:00Z'))
+    .toISOString().substring(0, 10);
+  return saleDate + 'T' + saleTime + ':00+08:00';
+}
+
+export function parseOfficialTrainPriceValue(value: TrainPriceValue): number | undefined {
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    return undefined;
+  }
+  if (typeof value === 'number' && !Number.isFinite(value)) {
+    return undefined;
+  }
+  const text = typeof value === 'string' ? value.trim() : value.toString();
+  const match = (typeof value === 'string' ? /^[¥￥]?(\d+)(?:\.(\d{1,2}))?$/ : /^(\d+)(?:\.(\d{1,2}))?$/).exec(text);
+  if (match === null) {
+    return undefined;
+  }
+  const fraction = match[2] === undefined ? '00' : (match[2].length === 1 ? match[2] + '0' : match[2]);
+  const cents = Number(match[1] + fraction);
+  const price = Number(match[1] + (match[2] === undefined ? '' : '.' + match[2]));
+  return Number.isSafeInteger(cents) && cents > 0 && Number.isFinite(price) && price > 0 ? price : undefined;
+}
+
+export function parseLowestTrainPrice(payload: string): number | undefined {
+  try {
+    const parsed = JSON.parse(payload) as TrainPricePayload;
+    if (parsed.status !== true || parsed.data === undefined || parsed.data === null ||
+      typeof parsed.data !== 'object' || Array.isArray(parsed.data)) {
+      return undefined;
+    }
+    const data = parsed.data as TrainPriceData;
+    let lowest: number | undefined = undefined;
+    const values: TrainPriceValue[] = [data.WZ, data.A1, data.A2, data.A3, data.A4, data.A6, data.A9,
+      data.F, data.M, data.O, data.P];
+    for (let index = 0; index < values.length; index++) {
+      const price = parseOfficialTrainPriceValue(values[index]);
+      if (price === undefined) {
+        continue;
+      }
+      if (lowest === undefined || price < lowest) {
+        lowest = price;
+      }
+    }
+    return lowest;
+  } catch (_error) {
+    return undefined;
+  }
+}
+
+function build12306FutureTrainSearchUrl(date: string, trainCode: string): string {
+  return 'https://search.12306.cn/search/v1/train/search?keyword=' + encodeURIComponent(trainCode) +
+    '&date=' + encodeURIComponent(date.replace(/-/g, '')) + '&_=' + Date.now().toString();
+}
+
+function build12306TrainStopsUrl(trainNo: string, fromCode: string, toCode: string, date: string): string {
+  return 'https://kyfw.12306.cn/otn/czxx/queryByTrainNo?train_no=' + encodeURIComponent(trainNo) +
+    '&from_station_telecode=' + encodeURIComponent(fromCode) +
+    '&to_station_telecode=' + encodeURIComponent(toCode) + '&depart_date=' + encodeURIComponent(date);
+}
+
+function build12306TrainPriceUrl(metadata: FutureTrainMetadata, date: string): string {
+  return 'https://kyfw.12306.cn/otn/leftTicket/queryTicketPrice?train_no=' + encodeURIComponent(metadata.trainNo) +
+    '&from_station_no=' + encodeURIComponent(metadata.fromStopNo) + '&to_station_no=' + encodeURIComponent(metadata.toStopNo) +
+    '&seat_types=OM9&train_date=' + encodeURIComponent(date);
+}
+
 function redirected12306Url(text: string, date: string, fromCode: string, toCode: string): string {
   const match = /"c_url"\s*:\s*"([^"]+)"/.exec(text);
   if (match === null || match[1].length === 0) {
@@ -4343,8 +4851,56 @@ async function request12306LeftTicket(date: string, fromCode: string, toCode: st
   return lastResponse;
 }
 
+async function resolveFuturePresaleTrain(
+  date: string,
+  trainCode: string,
+  fromName: string,
+  fromCode: string,
+  toName: string,
+  toCode: string,
+  cookieHeader: string,
+  range: PresaleRange
+): Promise<A2uiTrainData | undefined> {
+  const trainResponse = await requestText(build12306FutureTrainSearchUrl(date, trainCode), userAgentHeaders());
+  const searched = trainResponse.code >= 200 && trainResponse.code < 300 ? parseFutureTrainForTravelDate(trainResponse.text, trainCode, date) : undefined;
+  if (searched === undefined || searched.from !== fromName || searched.to !== toName) {
+    return undefined;
+  }
+  const stopsResponse = await requestText(build12306TrainStopsUrl(searched.trainNo, fromCode, toCode, date), leftTicketHeaders(cookieHeader));
+  const stops = stopsResponse.code >= 200 && stopsResponse.code < 300 ? parseFutureTrainMetadata(stopsResponse.text, trainCode) : undefined;
+  if (stops === undefined || stops.from !== fromName || stops.to !== toName) {
+    return undefined;
+  }
+  const saleResponse = await requestText('https://mobile.12306.cn/weixin/wxcore/queryQssj?stationName=' + encodeURIComponent(fromName), userAgentHeaders());
+  const saleTime = saleResponse.code >= 200 && saleResponse.code < 300 ? parseStationSaleTime(saleResponse.text, fromName) : '';
+  const saleAt = presaleSaleAt(date, saleTime, range);
+  if (saleAt.length === 0) {
+    return undefined;
+  }
+  const priceResponse = await requestText(build12306TrainPriceUrl({
+    trainCode: trainCode,
+    trainNo: searched.trainNo,
+    travelDate: searched.travelDate,
+    from: fromName,
+    to: toName,
+    fromStopNo: stops.fromStopNo,
+    toStopNo: stops.toStopNo,
+    depart: stops.depart,
+    arrive: stops.arrive
+  }, date), leftTicketHeaders(cookieHeader));
+  const price = priceResponse.code >= 200 && priceResponse.code < 300 ? parseLowestTrainPrice(priceResponse.text) : undefined;
+  if (price === undefined) {
+    return undefined;
+  }
+  return buildPresaleTrainData(trainCode, date, fromName, fromCode, toName, toCode, stops.depart, stops.arrive, saleAt, price);
+}
+
 async function load12306Stations(): Promise<StationCache> {
   if (stationCache !== null) {
+    if (!hasValid12306StationSchema(stationCache)) {
+      stationCache = null;
+      throw new Error('12306 station_name schema invalid');
+    }
     return stationCache;
   }
   const response = await requestText('https://kyfw.12306.cn/otn/resources/js/framework/station_name.js', userAgentHeaders());
@@ -4352,9 +4908,19 @@ async function load12306Stations(): Promise<StationCache> {
     throw new Error('12306 station_name HTTP ' + response.code.toString());
   }
 
+  const loaded = parse12306Stations(response.text);
+  if (!hasValid12306StationSchema(loaded)) {
+    throw new Error('12306 station_name schema invalid');
+  }
+  stationCache = loaded;
+  aiLogInfo('[AIPhone][LocalToolStations] count=' + stationCache.entries.length.toString());
+  return stationCache;
+}
+
+function parse12306Stations(payload: string): StationCache {
   const entries: StationEntry[] = [];
   const names: string[] = [];
-  response.text.split('@').forEach((part: string) => {
+  payload.split('@').forEach((part: string) => {
     const fields = part.split('|');
     if (fields.length >= 3 && fields[1].length > 0 && fields[2].length > 0) {
       entries.push({
@@ -4472,8 +5038,359 @@ function parse12306Row(row: string, stations: StationCache): A2uiTrainData {
     noSeat: fields.length > 26 ? fields[26] : '',
     hardSeat: fields.length > 29 ? fields[29] : '',
     sleeperSoft: fields.length > 23 && fields[23].length > 0 ? fields[23] : (fields.length > 28 ? fields[28] : ''),
-    price: lowestAvailable12306Price(fields)
+    price: lowestAvailable12306Price(fields),
+    fromCode: fields.length > 6 ? fields[6] : '',
+    toCode: fields.length > 7 ? fields[7] : ''
   };
+}
+
+function trainSeatForPreference(item: A2uiTrainData, seatPriority: string): string {
+  if (seatPriority === '二等座') {
+    return item.second;
+  }
+  if (seatPriority === '一等座') {
+    return item.first;
+  }
+  if (seatPriority === '商务座') {
+    return item.business;
+  }
+  if (seatPriority === '无座') {
+    return item.noSeat;
+  }
+  return '';
+}
+
+function trainSeatColumnForPreference(seatPriority: string): number {
+  if (seatPriority === '二等座') {
+    return 30;
+  }
+  if (seatPriority === '一等座') {
+    return 31;
+  }
+  if (seatPriority === '商务座') {
+    return 32;
+  }
+  if (seatPriority === '无座') {
+    return 26;
+  }
+  return -1;
+}
+
+function trainPresaleAvailability(
+  request: TrainPresaleRecheckRequest,
+  status: TrainPresaleAvailabilityStatus,
+  reason: string,
+  bookingUrl: string = ''
+): TrainPresaleAvailabilityCheck {
+  return {
+    status: status,
+    reason: reason,
+    trainCode: request.trainCode.trim().toUpperCase(),
+    travelDate: request.travelDate.trim(),
+    fromCode: request.fromCode.trim().toUpperCase(),
+    toCode: request.toCode.trim().toUpperCase(),
+    seatPriority: request.seatPriority.trim(),
+    bookingUrl: bookingUrl
+  };
+}
+
+function hasValid12306StationSchema(stations: StationCache): boolean {
+  if (stations.entries.length === 0) {
+    return false;
+  }
+  for (let index = 0; index < stations.entries.length; index++) {
+    if (!/^[A-Z]{3}$/.test(stations.entries[index].code)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function trainPresaleAvailabilityFromOfficialPayload(
+  request: TrainPresaleRecheckRequest,
+  stations: StationCache,
+  payloadText: string
+): TrainPresaleAvailabilityCheck {
+  const trainCode = request.trainCode.trim().toUpperCase();
+  const travelDate = request.travelDate.trim();
+  const fromCode = request.fromCode.trim().toUpperCase();
+  const toCode = request.toCode.trim().toUpperCase();
+  const fromName = request.fromName.trim();
+  const toName = request.toName.trim();
+  const seatPriority = request.seatPriority.trim();
+  if (!hasValid12306StationSchema(stations)) {
+    return trainPresaleAvailability(request, 'provider_error', '12306 车站数据格式无效或为空。');
+  }
+  if (stationCodeFor(fromName, stations) !== fromCode || stationNameForCode(fromCode, stations) !== fromName ||
+    stationCodeFor(toName, stations) !== toCode || stationNameForCode(toCode, stations) !== toName) {
+    return trainPresaleAvailability(request, 'mismatch', '提醒中的车站名称与官方车站代码不匹配，请重新查询。');
+  }
+  let payload: LeftTicketPayload;
+  try {
+    payload = JSON.parse(payloadText) as LeftTicketPayload;
+  } catch (_error) {
+    return trainPresaleAvailability(request, 'provider_error', '12306 余票响应不是可解析的官方数据。');
+  }
+  if (payload.status !== true || payload.data === undefined || !Array.isArray(payload.data.result)) {
+    return trainPresaleAvailability(request, 'provider_error', '12306 余票响应缺少有效结果。');
+  }
+  const rows = payload.data.result;
+  const seatColumn = trainSeatColumnForPreference(seatPriority);
+  if (seatColumn < 0) {
+    return trainPresaleAvailability(request, 'unsupported_seat', '当前不支持核验席别：' + seatPriority + '。');
+  }
+  for (let index = 0; index < rows.length; index++) {
+    const row = rows[index];
+    if (typeof row !== 'string') {
+      return trainPresaleAvailability(request, 'provider_error', '12306 余票结果行不是文本。');
+    }
+    const fields = row.split('|');
+    if (fields.length <= 11 || fields.length <= seatColumn || trainField(fields, 3).trim().length === 0 ||
+      trainField(fields, 6).trim().length === 0 || trainField(fields, 7).trim().length === 0) {
+      return trainPresaleAvailability(request, 'provider_error', '12306 余票结果行格式已变化或不完整。');
+    }
+    const item = parse12306Row(row, stations);
+    if (item.trainCode.trim().toUpperCase() !== trainCode) {
+      continue;
+    }
+    if (item.fromCode !== fromCode || item.toCode !== toCode || item.from !== fromName || item.to !== toName) {
+      return trainPresaleAvailability(request, 'mismatch', '12306 返回的 ' + trainCode + ' 车站与提醒不匹配。');
+    }
+    const seat = trainSeatForPreference(item, seatPriority);
+    if (trainField(fields, 11) !== 'Y' || !isAvailableTrainSeat(seat)) {
+      return trainPresaleAvailability(request, 'sold_out', trainCode + ' ' + seatPriority + ' 当前无可用余票。');
+    }
+    return trainPresaleAvailability(
+      request,
+      'verified',
+      '',
+      build12306BookingUrl(travelDate, item.from, fromCode, item.to, toCode)
+    );
+  }
+  return trainPresaleAvailability(request, 'mismatch', '12306 当前结果未返回提醒中的车次 ' + trainCode + '。');
+}
+
+export function trainPresaleAvailabilityFromOfficialPayloadForTest(
+  request: TrainPresaleRecheckRequest,
+  stationPayload: string,
+  payloadText: string
+): TrainPresaleAvailabilityCheck {
+  return trainPresaleAvailabilityFromOfficialPayload(request, parse12306Stations(stationPayload), payloadText);
+}
+
+async function recheck12306TrainAvailabilityWithStationLoader(
+  request: TrainPresaleRecheckRequest,
+  stationLoader: () => Promise<StationCache>
+): Promise<TrainPresaleAvailabilityCheck> {
+  const seatPriority = request.seatPriority.trim();
+  if (seatPriority !== '二等座' && seatPriority !== '一等座' && seatPriority !== '商务座' && seatPriority !== '无座') {
+    return trainPresaleAvailability(request, 'unsupported_seat', '当前不支持核验席别：' + seatPriority + '。');
+  }
+  const trainCode = extractExactTrainCode(request.trainCode);
+  const travelDate = normalizeOfficialDate(request.travelDate);
+  const fromCode = request.fromCode.trim().toUpperCase();
+  const toCode = request.toCode.trim().toUpperCase();
+  if (trainCode.length === 0 || trainCode !== request.trainCode.trim().toUpperCase() ||
+    travelDate.length === 0 || travelDate !== request.travelDate.trim() ||
+    !/^[A-Z]{3}$/.test(fromCode) || !/^[A-Z]{3}$/.test(toCode) || fromCode === toCode ||
+    request.fromName.trim().length === 0 || request.toName.trim().length === 0) {
+    return trainPresaleAvailability(request, 'mismatch', '提醒中的车次、日期或路线无效，请重新查询。');
+  }
+  try {
+    const stations = await stationLoader();
+    if (stationCodeFor(request.fromName.trim(), stations) !== fromCode ||
+      stationCodeFor(request.toName.trim(), stations) !== toCode) {
+      return trainPresaleAvailability(request, 'mismatch', '提醒中的车站名称与官方车站代码不匹配，请重新查询。');
+    }
+    const init = await requestText('https://kyfw.12306.cn/otn/leftTicket/init', userAgentHeaders());
+    if (init.code < 200 || init.code >= 300) {
+      return trainPresaleAvailability(request, 'provider_error', '12306 初始化返回 HTTP ' + init.code.toString() + '。');
+    }
+    const cookieHeader = cookieHeaderFromRaw(init.cookies + '\n' + init.headers);
+    const response = await request12306LeftTicket(travelDate, fromCode, toCode, leftTicketHeaders(cookieHeader));
+    if (response.code < 200 || response.code >= 300) {
+      return trainPresaleAvailability(request, 'provider_error', '12306 余票查询返回 HTTP ' + response.code.toString() + '。');
+    }
+    return trainPresaleAvailabilityFromOfficialPayload(request, stations, response.text);
+  } catch (error) {
+    return trainPresaleAvailability(
+      request,
+      'provider_error',
+      '12306 实时余票查询失败：' + describeThrown(error).substring(0, 240)
+    );
+  }
+}
+
+export async function recheck12306TrainAvailability(
+  request: TrainPresaleRecheckRequest
+): Promise<TrainPresaleAvailabilityCheck> {
+  return recheck12306TrainAvailabilityWithStationLoader(
+    request,
+    async (): Promise<StationCache> => load12306Stations()
+  );
+}
+
+export async function recheck12306TrainAvailabilityWithStationPayloadForTest(
+  request: TrainPresaleRecheckRequest,
+  stationPayload: string
+): Promise<TrainPresaleAvailabilityCheck> {
+  return recheck12306TrainAvailabilityWithStationLoader(
+    request,
+    async (): Promise<StationCache> => {
+      const loaded = parse12306Stations(stationPayload);
+      if (!hasValid12306StationSchema(loaded)) {
+        throw new Error('12306 station_name schema invalid');
+      }
+      return loaded;
+    }
+  );
+}
+
+function emptyTrainPresaleDebugSelection(
+  status: TrainPresaleAvailabilityStatus,
+  reason: string
+): TrainPresaleDebugSelection {
+  return {
+    status: status,
+    reason: reason,
+    trainCode: '',
+    travelDate: '',
+    fromName: '',
+    fromCode: '',
+    toName: '',
+    toCode: '',
+    seatPriority: '',
+    bookingUrl: ''
+  };
+}
+
+function trainPresaleDebugSelectionFromOfficialPayload(
+  request: TrainPresaleDebugSelectionRequest,
+  travelDate: string,
+  stations: StationCache,
+  payloadText: string
+): TrainPresaleDebugSelection {
+  const date = normalizeOfficialDate(travelDate);
+  const fromName = request.fromName.trim();
+  const fromCode = request.fromCode.trim().toUpperCase();
+  const toName = request.toName.trim();
+  const toCode = request.toCode.trim().toUpperCase();
+  const seatPriority = request.seatPriority.trim();
+  const seatColumn = trainSeatColumnForPreference(seatPriority);
+  if (date.length === 0 || fromName.length === 0 || toName.length === 0 ||
+    !/^[A-Z]{3}$/.test(fromCode) || !/^[A-Z]{3}$/.test(toCode) || fromCode === toCode) {
+    return emptyTrainPresaleDebugSelection('mismatch', '调试查询中的日期或路线无效，请重新查询。');
+  }
+  if (seatColumn < 0) {
+    return emptyTrainPresaleDebugSelection('unsupported_seat', '当前不支持核验席别：' + seatPriority + '。');
+  }
+  if (!hasValid12306StationSchema(stations)) {
+    return emptyTrainPresaleDebugSelection('provider_error', '12306 车站数据格式无效或为空。');
+  }
+  if (stationCodeFor(fromName, stations) !== fromCode || stationNameForCode(fromCode, stations) !== fromName ||
+    stationCodeFor(toName, stations) !== toCode || stationNameForCode(toCode, stations) !== toName) {
+    return emptyTrainPresaleDebugSelection('mismatch', '调试查询中的车站名称与官方车站代码不匹配，请重新查询。');
+  }
+  let payload: LeftTicketPayload;
+  try {
+    payload = JSON.parse(payloadText) as LeftTicketPayload;
+  } catch (_error) {
+    return emptyTrainPresaleDebugSelection('provider_error', '12306 余票响应不是可解析的官方数据。');
+  }
+  if (payload.status !== true || payload.data === undefined || !Array.isArray(payload.data.result)) {
+    return emptyTrainPresaleDebugSelection('provider_error', '12306 余票响应缺少有效结果。');
+  }
+  const rows = payload.data.result;
+  let exactHighSpeedFound = false;
+  for (let index = 0; index < rows.length; index++) {
+    const row = rows[index];
+    if (typeof row !== 'string') {
+      return emptyTrainPresaleDebugSelection('provider_error', '12306 余票结果行不是文本。');
+    }
+    const fields = row.split('|');
+    if (fields.length <= 11 || fields.length <= seatColumn || trainField(fields, 3).length === 0 ||
+      trainField(fields, 6).length === 0 || trainField(fields, 7).length === 0) {
+      return emptyTrainPresaleDebugSelection('provider_error', '12306 余票结果行格式已变化或不完整。');
+    }
+    const item = parse12306Row(row, stations);
+    const trainCode = item.trainCode.trim().toUpperCase();
+    if ((!trainCode.startsWith('G') && !trainCode.startsWith('D')) ||
+      extractExactTrainCode(trainCode) !== trainCode) {
+      continue;
+    }
+    if (item.fromCode !== fromCode || item.toCode !== toCode || item.from !== fromName || item.to !== toName) {
+      continue;
+    }
+    exactHighSpeedFound = true;
+    if (trainField(fields, 11) !== 'Y' || !isAvailableTrainSeat(trainSeatForPreference(item, seatPriority))) {
+      continue;
+    }
+    return {
+      status: 'verified',
+      reason: '',
+      trainCode: trainCode,
+      travelDate: date,
+      fromName: fromName,
+      fromCode: fromCode,
+      toName: toName,
+      toCode: toCode,
+      seatPriority: seatPriority,
+      bookingUrl: build12306BookingUrl(date, fromName, fromCode, toName, toCode)
+    };
+  }
+  return exactHighSpeedFound ?
+    emptyTrainPresaleDebugSelection('sold_out', '12306 当前没有符合所选席别的在售高铁余票。') :
+    emptyTrainPresaleDebugSelection('mismatch', '12306 当前结果没有可验证的在售高铁车次。');
+}
+
+export function trainPresaleDebugSelectionFromOfficialPayloadForTest(
+  request: TrainPresaleDebugSelectionRequest,
+  travelDate: string,
+  stationPayload: string,
+  payloadText: string
+): TrainPresaleDebugSelection {
+  return trainPresaleDebugSelectionFromOfficialPayload(
+    request, travelDate, parse12306Stations(stationPayload), payloadText);
+}
+
+export async function select12306DebugTrain(
+  request: TrainPresaleDebugSelectionRequest
+): Promise<TrainPresaleDebugSelection> {
+  try {
+    const stations = await load12306Stations();
+    const fromCode = request.fromCode.trim().toUpperCase();
+    const toCode = request.toCode.trim().toUpperCase();
+    if (stationCodeFor(request.fromName.trim(), stations) !== fromCode ||
+      stationCodeFor(request.toName.trim(), stations) !== toCode) {
+      return emptyTrainPresaleDebugSelection(
+        'mismatch', '调试查询中的车站名称与官方车站代码不匹配，请重新查询。');
+    }
+    const presaleResponse = await requestText(build12306PresaleRangeUrl(), userAgentHeaders());
+    if (presaleResponse.code < 200 || presaleResponse.code >= 300) {
+      return emptyTrainPresaleDebugSelection(
+        'provider_error', '12306 预售范围查询返回 HTTP ' + presaleResponse.code.toString() + '。');
+    }
+    const range = parsePresaleRange(presaleResponse.text);
+    if (range === undefined || range.today !== current12306BeijingDate() || range.today > range.lastSaleDate) {
+      return emptyTrainPresaleDebugSelection(
+        'provider_error', '12306 未返回可验证的当前在售日期。');
+    }
+    const init = await requestText('https://kyfw.12306.cn/otn/leftTicket/init', userAgentHeaders());
+    if (init.code < 200 || init.code >= 300) {
+      return emptyTrainPresaleDebugSelection(
+        'provider_error', '12306 初始化返回 HTTP ' + init.code.toString() + '。');
+    }
+    const cookieHeader = cookieHeaderFromRaw(init.cookies + '\n' + init.headers);
+    const response = await request12306LeftTicket(range.today, fromCode, toCode, leftTicketHeaders(cookieHeader));
+    if (response.code < 200 || response.code >= 300) {
+      return emptyTrainPresaleDebugSelection(
+        'provider_error', '12306 余票查询返回 HTTP ' + response.code.toString() + '。');
+    }
+    return trainPresaleDebugSelectionFromOfficialPayload(request, range.today, stations, response.text);
+  } catch (error) {
+    return emptyTrainPresaleDebugSelection(
+      'provider_error', '12306 调试车次查询失败：' + describeThrown(error).substring(0, 240));
+  }
 }
 
 function formatTrainSeatsSummary(item: A2uiTrainData): string {
@@ -4517,7 +5434,12 @@ function normalizeTrainRecord(item: A2uiTrainData, bookingUrl: string = ''): A2u
     hardSeat: item.hardSeat,
     sleeperSoft: item.sleeperSoft,
     price: item.price === undefined ? '' : item.price,
-    bookingUrl: bookingUrl
+    bookingUrl: bookingUrl,
+    travelDate: item.travelDate,
+    saleState: item.saleState,
+    saleAt: item.saleAt,
+    fromCode: item.fromCode,
+    toCode: item.toCode
   };
 }
 
@@ -9642,6 +10564,7 @@ async function callStructuredTrainTool(prompt: string): Promise<DataResult> {
   }
 
   const bookingUrl = build12306BookingUrl(date, fromName, fromCode, toName, toCode);
+  const sources: DataSource[] = [localAdapterSource('12306', 'leftTicket')];
 
   let init: HttpTextResponse;
   let response: HttpTextResponse;
@@ -9649,6 +10572,45 @@ async function callStructuredTrainTool(prompt: string): Promise<DataResult> {
     init = await requestText('https://kyfw.12306.cn/otn/leftTicket/init', userAgentHeaders());
     const cookieHeader = cookieHeaderFromRaw(init.cookies + '\n' + init.headers);
     aiLogInfo('[AIPhone][LocalTool12306Request] from=' + fromName + '(' + fromCode + ') to=' + toName + '(' + toCode + ') date=' + date + ' initCode=' + init.code.toString() + ' cookieChars=' + cookieHeader.length.toString() + ' headerChars=' + init.headers.length.toString());
+    const presaleResponse = await requestText(build12306PresaleRangeUrl(), userAgentHeaders());
+    const range = presaleResponse.code >= 200 && presaleResponse.code < 300 ?
+      parsePresaleRange(presaleResponse.text) : undefined;
+    const searchPath = selectTrainSearchPath(source, date, range);
+    if (searchPath === 'presaleRangeUnavailable' || searchPath === 'presaleRangeUnavailableRouteOnly') {
+      const trainCode = extractExactTrainCode(source);
+      const message = searchPath === 'presaleRangeUnavailable' ?
+        '12306 未返回可用的预售期信息，无法确认 ' + trainCode + ' 是否开售；未展示候选车次。' :
+        '12306 未返回可用的预售期信息，无法确认该未来路线是否开售；当前版本不按路线展示预售车次。';
+      return structuredErrorWithData(
+        'train.search', 'trains', trainErrorData('12306 预售范围未验证', message),
+        'TRAIN_PRESALE_RANGE_UNAVAILABLE', message, true, sources
+      );
+    }
+    if (searchPath === 'futureTrainCodeRequired') {
+      const message = '当前版本仅支持查询指定车次的预售信息；请补充车次号，例如 G1。';
+      return structuredErrorWithData(
+        'train.search', 'trains', trainErrorData('未来日期需明确车次', message),
+        'TRAIN_FUTURE_TRAIN_REQUIRED', message, false, sources
+      );
+    }
+    if (searchPath === 'presale') {
+      const trainCode = extractExactTrainCode(source);
+      const presaleTrain = await resolveFuturePresaleTrain(
+        date, trainCode, fromName, fromCode, toName, toCode, cookieHeader, range!);
+      if (presaleTrain === undefined) {
+        const message = '12306 未能验证 ' + trainCode + ' 的日期、车站、起售时间或票价；未展示候选车次。';
+        return structuredErrorWithData(
+          'train.search', 'trains', trainErrorData('12306 预售信息未验证', message),
+          'TRAIN_PRESALE_NOT_VERIFIED', message, true, sources
+        );
+      }
+      return trainStructuredDataResult({
+        title: '12306 预售车次',
+        body: '以下车次尚未开售；起售时间和票价均来自 12306 官方响应。',
+        summary: '已解析 ' + date + ' ' + presaleTrain.trainCode + ' 的预售提醒信息。',
+        trains: [presaleTrain]
+      }, sources);
+    }
     response = await request12306LeftTicket(date, fromCode, toCode, leftTicketHeaders(cookieHeader));
   } catch (error) {
     const message = describeThrown(error);
@@ -9657,7 +10619,6 @@ async function callStructuredTrainTool(prompt: string): Promise<DataResult> {
       'TRAIN_TRANSPORT_EXCEPTION', message, true, [], [message]
     );
   }
-  const sources: DataSource[] = [localAdapterSource('12306', 'leftTicket')];
   if (response.code < 200 || response.code >= 300) {
     const message = '12306 返回 HTTP ' + response.code.toString() + '。这是供应商或网络返回，不是 Mac gateway 连接失败。';
     return structuredErrorWithData(

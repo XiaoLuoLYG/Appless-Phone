@@ -24,6 +24,13 @@ import { HtmlHomeSurfaceView } from './HtmlHomeSurfaceView';
 import { A2uiSurfaceView } from './A2uiSurfaceView';
 import { CheckoutWebKind, CheckoutWebOverlay } from './CheckoutWebOverlay';
 import {
+  emptyTrainPresaleTrip,
+  TrainPresalePanel,
+  TrainPresalePanelSubmission,
+  TrainPresaleTrip
+} from './TrainPresalePanel';
+import { TrainPresaleTask } from '../train/TrainPresaleTaskStore';
+import {
   isPromptInputEnabled,
   nextSendSpinnerRotation
 } from '../state/A2uiHomeState';
@@ -77,6 +84,14 @@ export struct HomePage {
   @Prop showCheckoutWeb: boolean = false;
   @Prop checkoutWebKind: CheckoutWebKind = 'payment';
   @Prop checkoutWebUrl: string = '';
+  @Prop checkoutWebTaskId: string = '';
+  @Prop showTrainPresalePanel: boolean = false;
+  @Prop trainPresaleTrip: TrainPresaleTrip = emptyTrainPresaleTrip();
+  @Prop trainPresaleTask: TrainPresaleTask | null = null;
+  @Prop trainPresaleTaskState: string = '';
+  @Prop trainPresaleError: string = '';
+  @Prop trainPresaleWorking: boolean = false;
+  @Prop isDebugBuild: boolean = false;
   @State sendSpinnerRotation: number = 0;
   @State voicePulseTick: number = 0;
   private sendSpinnerTimerId: number = -1;
@@ -88,8 +103,12 @@ export struct HomePage {
   onStartVoiceInput: () => void = () => {};
   onStopVoiceInput: () => void = () => {};
   onResetSession: () => void = () => {};
-  onCloseCheckoutWeb: () => void = () => {};
+  onCloseCheckoutWeb: (taskId: string) => void = (_taskId: string): void => {};
   onCheckoutWebReturn: (url: string) => void = (_url: string): void => {};
+  onTrainPresaleConfirm: (submission: TrainPresalePanelSubmission) => void =
+    (_submission: TrainPresalePanelSubmission): void => {};
+  onCloseTrainPresale: () => void = () => {};
+  onCancelTrainPresaleTask: () => void = () => {};
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
 
   aboutToAppear(): void {
@@ -370,10 +389,25 @@ export struct HomePage {
       .margin({ top: this.showHistory ? A2UI_HOME_SECTION_GAP : 0 })
       .animation({ duration: A2UI_MOTION_NORMAL_MS, curve: A2UI_MOTION_MOVE_CURVE })
 
-      if (this.showCheckoutWeb && this.checkoutWebUrl.trim().length > 0) {
+      if (this.showTrainPresalePanel) {
+        TrainPresalePanel({
+          trip: this.trainPresaleTrip,
+          task: this.trainPresaleTask,
+          taskState: this.trainPresaleTaskState,
+          errorMessage: this.trainPresaleError,
+          isWorking: this.trainPresaleWorking,
+          isDebugBuild: this.isDebugBuild,
+          onConfirm: this.onTrainPresaleConfirm,
+          onClose: this.onCloseTrainPresale,
+          onCancelTask: this.onCancelTrainPresaleTask
+        })
+          .layoutWeight(1)
+          .margin({ top: A2UI_HOME_SECTION_GAP })
+      } else if (this.showCheckoutWeb && this.checkoutWebUrl.trim().length > 0) {
         CheckoutWebOverlay({
           kind: this.checkoutWebKind,
           url: this.checkoutWebUrl,
+          taskId: this.checkoutWebTaskId,
           onClose: this.onCloseCheckoutWeb,
           onReturnUrl: this.onCheckoutWebReturn
         })

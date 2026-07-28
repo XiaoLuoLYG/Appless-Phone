@@ -1753,7 +1753,8 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('G123')).assertLarger(-1);
       expect(html.indexOf('麦当劳 科技园店')).assertLarger(-1);
       expect(html.indexOf("var price = metric(block, ['price']);")).assertLarger(-1);
-      expect(html.indexOf("'¥' + price + '起'")).assertLarger(-1);
+      expect(html.indexOf('var displayPrice = trainPrice(price);')).assertLarger(-1);
+      expect(html.indexOf("add(priceBlock, 'b', '', displayPrice)")).assertLarger(-1);
       expect(html.indexOf("add(mainline, 'div', 'journey-price')")).assertLarger(-1);
       expect(html.indexOf("summaryMetrics.push(['', '¥' + price + '起'])")).assertEqual(-1);
       expect(html.indexOf('grid-column: 4')).assertLarger(-1);

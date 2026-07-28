@@ -1,36 +1,99 @@
-import { aiLogInfo, isAllowedHotelBookingNavigationUrl } from '@loop/agent-core';
+import { aiLogError, aiLogInfo, isAllowedHotelBookingNavigationUrl } from '@loop/agent-core';
+import { common } from '@kit.AbilityKit';
+import { preferences } from '@kit.ArkData';
+import { webview } from '@kit.ArkWeb';
 import { url as arkUrl } from '@kit.ArkTS';
+import {
+  transitionTrainPresaleHandoff,
+  TRAIN_PRESALE_PENDING_TASK_KEY,
+  TRAIN_PRESALE_HANDOFF_EVENT,
+  TrainPresaleHandoffTransitionResult
+} from '../../../entryability/EntryAbility';
+import {
+  buildTrainWebAssistExecutionRequest,
+  isCurrentTrainWebAssistExecution,
+  isCurrentTrainWebAssistTimer,
+  initialTrainWebAssistBudget,
+  nextTrainWebAssistEpoch,
+  parseTrainWebAssistOutcome,
+  trainWebAssistBudgetAfterActivation,
+  trainWebAssistBudgetAfterExecution,
+  trainWebAssistBudgetForOutcome,
+  trainWebAssistBudgetForStageTransition,
+  trainWebAssistFinalClickMayHaveRun,
+  trainWebAssistLoadErrorOutcome,
+  trainWebAssistNavigationTimeoutMs,
+  trainWebAssistNavigationTimeoutOutcome,
+  trainWebAssistReasonText,
+  trainWebAssistRetryExhausted,
+  trainWebAssistRetryLimit,
+  trainWebAssistTargetState,
+  TrainWebAssistBudget,
+  TrainWebAssistExecutionBinding,
+  TrainWebAssistExecutionRequest,
+  TrainWebAssistOutcome
+} from '../train/TrainPresaleWebAutomation';
+import {
+  TRAIN_PRESALE_TASK_STORE_NAME,
+  TrainPresaleTaskState,
+  TrainPresaleTaskStore
+} from '../train/TrainPresaleTaskStore';
 import { COLOR_CARD, COLOR_CARD_EDGE, COLOR_ERROR, COLOR_ERROR_SOFT, COLOR_INK, COLOR_MUTED, COLOR_PAGE } from '../style/A2uiHomeTheme';
 import { A2uiButtonView } from './common/A2uiButtonView';
-import { A2uiWebSurfaceView } from './common/A2uiWebSurfaceView';
+import { A2uiWebControllerIdentity, A2uiWebSurfaceView } from './common/A2uiWebSurfaceView';
 
 export type CheckoutWebKind = 'payment' | 'hotel' | 'train';
 export type CheckoutNavigationDecision = 'allow' | 'payment_return' | 'block';
 
+interface StrictHttpsLocation {
+  host: string;
+  path: string;
+}
+
+function strictHttpsLocation(value: string): StrictHttpsLocation | undefined {
+  const url = value.trim();
+  if (!url.toLowerCase().startsWith('https://') || url.indexOf('\\') >= 0) return undefined;
+  const remainder = url.substring(8);
+  let authorityEnd = remainder.length;
+  const separators: number[] = [remainder.indexOf('/'), remainder.indexOf('?'), remainder.indexOf('#')];
+  for (let index = 0; index < separators.length; index++) {
+    if (separators[index] >= 0 && separators[index] < authorityEnd) authorityEnd = separators[index];
+  }
+  const authority = remainder.substring(0, authorityEnd);
+  if (authority.length === 0 || authority.indexOf('@') >= 0 || authority.indexOf(':') >= 0 ||
+    /\s/.test(authority)) return undefined;
+  const suffix = remainder.substring(authorityEnd);
+  const queryStart = suffix.indexOf('?');
+  const fragmentStart = suffix.indexOf('#');
+  let pathEnd = suffix.length;
+  if (queryStart >= 0 && queryStart < pathEnd) pathEnd = queryStart;
+  if (fragmentStart >= 0 && fragmentStart < pathEnd) pathEnd = fragmentStart;
+  const path = suffix.startsWith('/') ? suffix.substring(0, pathEnd) : '/';
+  return { host: authority.toLowerCase(), path: path };
+}
+
+function isAllowed12306MainFrameUrl(value: string): boolean {
+  const parsed = strictHttpsLocation(value);
+  if (parsed === undefined) return false;
+  if (parsed.host === 'epay.12306.cn') {
+    return ['/pay/webBusiness', '/pay/payGatewayT', '/pay/payResponse'].indexOf(parsed.path) >= 0;
+  }
+  if (parsed.host !== 'kyfw.12306.cn') return false;
+  return [
+    '/otn/leftTicket/init',
+    '/otn/login/init',
+    '/otn//login/init',
+    '/otn/resources/login.html',
+    '/otn/passport',
+    '/otn/confirmPassenger/initDc',
+    '/otn/payOrder/init',
+    '/payOrder/init'
+  ].indexOf(parsed.path) >= 0;
+}
+
 export function isAllowed12306BookingUrl(url: string): boolean {
-  try {
-    const parsed = new arkUrl.URL(url.trim());
-    if (parsed.protocol.length > 0) {
-      return parsed.protocol.toLowerCase() === 'https:' &&
-        parsed.hostname.toLowerCase() === 'kyfw.12306.cn' &&
-        parsed.port.length === 0 &&
-        parsed.username.length === 0 &&
-        parsed.password.length === 0 &&
-        parsed.pathname === '/otn/leftTicket/init';
-    }
-  } catch (_error) {}
-  const value = url.trim();
-  const authority = 'https://kyfw.12306.cn';
-  if (!value.toLowerCase().startsWith(authority)) {
-    return false;
-  }
-  const suffix = value.substring(authority.length);
-  const path = '/otn/leftTicket/init';
-  if (!suffix.startsWith(path)) {
-    return false;
-  }
-  const tail = suffix.substring(path.length);
-  return tail.length === 0 || tail.startsWith('?') || tail.startsWith('#');
+  const parsed = strictHttpsLocation(url);
+  return parsed !== undefined && parsed.host === 'kyfw.12306.cn' && parsed.path === '/otn/leftTicket/init';
 }
 
 export function checkoutWebInitialSource(kind: CheckoutWebKind, url: string): string {
@@ -39,6 +102,14 @@ export function checkoutWebInitialSource(kind: CheckoutWebKind, url: string): st
 
 export function checkoutWebMobileReadable(kind: CheckoutWebKind): boolean {
   return kind === 'train';
+}
+
+export function isOfficial12306PaymentUrl(value: string): boolean {
+  const parsed = strictHttpsLocation(value);
+  return parsed !== undefined && ((parsed.host === 'epay.12306.cn' &&
+    ['/pay/webBusiness', '/pay/payGatewayT', '/pay/payResponse'].indexOf(parsed.path) >= 0) ||
+    (parsed.host === 'kyfw.12306.cn' &&
+      (parsed.path === '/otn/payOrder/init' || parsed.path === '/payOrder/init')));
 }
 
 export function checkoutWebNavigationDecision(
@@ -57,6 +128,9 @@ export function checkoutWebNavigationDecision(
     return 'payment_return';
   }
   if (kind === 'hotel' && !isAllowedHotelBookingNavigationUrl(url)) {
+    return 'block';
+  }
+  if (kind === 'train' && !isAllowed12306MainFrameUrl(url)) {
     return 'block';
   }
   return 'allow';
@@ -106,10 +180,258 @@ export function webHostForDisplay(url: string): string {
 export struct CheckoutWebOverlay {
   @Prop kind: CheckoutWebKind = 'payment';
   @Prop url: string = '';
-  onClose: () => void = () => {};
+  @Prop taskId: string = '';
+  onClose: (taskId: string) => void = (_taskId: string): void => {};
   onReturnUrl: (url: string) => void = (_url: string): void => {};
   @State blockedNavigation: string = '';
   @State currentUrl: string = '';
+  @State assistScript: string = '';
+  @State assistScriptSession: number = 0;
+  @State assistScriptTarget: A2uiWebControllerIdentity = 'none';
+  @State assistScriptGeneration: number = -1;
+  @State assistCancelToken: number = 0;
+  private assistStage: 'initial' | 'final' | 'stopped' = 'initial';
+  private assistBudget: TrainWebAssistBudget = initialTrainWebAssistBudget();
+  private assistTimer: number = -1;
+  private assistEpoch: number = 0;
+  private activeController: A2uiWebControllerIdentity = 'none';
+  private activeGeneration: number = -1;
+  private activeUrl: string = '';
+  private requestBinding: TrainWebAssistExecutionBinding | undefined = undefined;
+  private assistDisposed: boolean = false;
+  private finalClickMayHaveRun: boolean = false;
+
+  aboutToAppear(): void {
+    this.assistStage = 'initial';
+    this.assistBudget = initialTrainWebAssistBudget();
+    this.assistDisposed = false;
+    this.finalClickMayHaveRun = false;
+  }
+
+  aboutToDisappear(): void { this.cancelTrainAssist(true); }
+
+  private trainPreferences(): preferences.Preferences | null {
+    if (this.kind !== 'train' || this.taskId.length === 0) {
+      return null;
+    }
+    try {
+      const context = this.getUIContext().getHostContext() as common.Context;
+      return preferences.getPreferencesSync(context, { name: TRAIN_PRESALE_TASK_STORE_NAME });
+    } catch (_error) {
+      aiLogError('[AIPhone][TrainWebAssistStore] ok=false');
+      return null;
+    }
+  }
+
+  private clearPendingTrainAssist(): void {
+    if (this.assistTimer >= 0) clearTimeout(this.assistTimer);
+    this.assistTimer = -1;
+    this.assistScriptTarget = 'none';
+    this.assistScriptGeneration = -1;
+    this.requestBinding = undefined;
+    this.assistEpoch = nextTrainWebAssistEpoch(this.assistEpoch);
+  }
+
+  private cancelTrainAssist(stop: boolean): void {
+    this.clearPendingTrainAssist();
+    this.assistScript = '';
+    this.assistCancelToken += 1;
+    if (stop) {
+      this.assistStage = 'stopped';
+      this.assistBudget = initialTrainWebAssistBudget();
+      this.assistDisposed = true;
+    }
+  }
+
+  private pendingTaskId(store: preferences.Preferences): string {
+    const value = store.getSync(TRAIN_PRESALE_PENDING_TASK_KEY, '');
+    return typeof value === 'string' ? value.trim() : '';
+  }
+
+  private requestTrainAssist(): void {
+    if (this.kind !== 'train' || this.taskId.length === 0 || this.assistDisposed || this.assistStage === 'stopped' ||
+      (this.activeController !== 'main' && this.activeController !== 'popup') || this.activeUrl.length === 0) return;
+    if (isOfficial12306PaymentUrl(this.activeUrl)) {
+      this.handleTerminalAssist({ state: 'awaiting_payment' }, this.activeUrl);
+      return;
+    }
+    if (this.assistStage === 'final' && this.finalClickMayHaveRun) {
+      this.assistBudget = trainWebAssistBudgetAfterExecution(this.assistBudget);
+      if (this.assistBudget.attempts >= trainWebAssistRetryLimit('confirm')) {
+        this.handleTerminalAssist({ state: 'needs_user', reason: 'no_navigation' }, this.activeUrl);
+      } else {
+        this.scheduleTrainAssistRetry();
+      }
+      return;
+    }
+    const nativeStore = this.trainPreferences();
+    if (nativeStore === null) {
+      this.handleTerminalAssist({ state: 'needs_user', reason: 'not_authorized' }, this.activeUrl);
+      return;
+    }
+    const task = new TrainPresaleTaskStore(nativeStore).get(this.taskId);
+    const request: TrainWebAssistExecutionRequest = buildTrainWebAssistExecutionRequest(
+      this.assistStage === 'final' ? 'final' : 'initial', this.kind, this.taskId,
+      this.pendingTaskId(nativeStore), task, this.activeUrl);
+    if (request.reason.length > 0 || request.script.length === 0) {
+      this.handleTerminalAssist({ state: 'needs_user', reason: request.reason }, this.activeUrl);
+      return;
+    }
+    this.assistScriptTarget = this.activeController;
+    this.assistScriptGeneration = this.activeGeneration;
+    this.assistScript = request.script;
+    const nextSession = this.assistScriptSession + 1;
+    this.requestBinding = { controller: this.activeController, generation: this.activeGeneration,
+      session: nextSession } as TrainWebAssistExecutionBinding;
+    this.assistScriptSession = nextSession;
+  }
+
+  private scheduleTrainAssistRetry(delayMs: number = 250): void {
+    if (this.assistTimer >= 0) clearTimeout(this.assistTimer);
+    const epoch = this.assistEpoch;
+    this.assistTimer = setTimeout(() => {
+      this.assistTimer = -1;
+      if (isCurrentTrainWebAssistTimer(epoch, this.assistEpoch, this.assistDisposed)) this.requestTrainAssist();
+    }, delayMs);
+  }
+
+  private scheduleTrainAssistNavigationTimeout(binding: TrainWebAssistExecutionBinding): void {
+    if (this.assistTimer >= 0) clearTimeout(this.assistTimer);
+    const epoch = this.assistEpoch;
+    this.assistTimer = setTimeout(() => {
+      this.assistTimer = -1;
+      if (!isCurrentTrainWebAssistTimer(epoch, this.assistEpoch, this.assistDisposed)) return;
+      const outcome = trainWebAssistNavigationTimeoutOutcome(this.activeController, this.activeGeneration,
+        this.assistScriptSession, binding);
+      if (outcome !== undefined) this.handleTerminalAssist(outcome, this.activeUrl);
+    }, trainWebAssistNavigationTimeoutMs());
+  }
+
+  private trainAssistPreflight(sourceUrl: string, controller: 'main' | 'popup', generation: number,
+    session: number): string {
+    const actual: TrainWebAssistExecutionBinding = { controller, generation, session };
+    if (this.requestBinding === undefined || !isCurrentTrainWebAssistExecution(this.requestBinding, actual)) {
+      return '{"state":"needs_user","reason":"invalid_result"}';
+    }
+    const nativeStore = this.trainPreferences();
+    if (nativeStore === null) return '{"state":"needs_user","reason":"not_authorized"}';
+    const task = new TrainPresaleTaskStore(nativeStore).get(this.taskId);
+    const request = buildTrainWebAssistExecutionRequest(this.assistStage === 'final' ? 'final' : 'initial',
+      this.kind, this.taskId, this.pendingTaskId(nativeStore), task, sourceUrl);
+    return request.reason.length === 0 ? '' :
+      '{"state":"needs_user","reason":"' + request.reason + '"}';
+  }
+
+  private activateTrainAssist(controller: A2uiWebControllerIdentity, url: string, generation: number): void {
+    if (trainWebAssistFinalClickMayHaveRun(this.assistStage === 'final' ? 'final' : 'initial',
+      this.requestBinding !== undefined, undefined)) {
+      // A stale final execution may already have clicked before its result is invalidated. Never issue another click.
+      this.finalClickMayHaveRun = true;
+    }
+    this.clearPendingTrainAssist();
+    this.activeController = controller;
+    this.activeGeneration = generation;
+    this.activeUrl = url;
+    this.currentUrl = url;
+    this.assistBudget = trainWebAssistBudgetAfterActivation(this.assistBudget);
+    if (this.kind === 'train' && this.taskId.length > 0 && controller !== 'none') {
+      if (url.length > 0) this.requestTrainAssist();
+      else this.scheduleTrainAssistNavigationTimeout({ controller, generation,
+        session: this.assistScriptSession } as TrainWebAssistExecutionBinding);
+    }
+  }
+
+  private saveTrainCookies(): void {
+    if (this.kind !== 'train') {
+      return;
+    }
+    webview.WebCookieManager.saveCookieAsync()
+      .catch((_error: Error) => {
+        aiLogError('[AIPhone][TrainWebCookieSave] ok=false');
+      });
+  }
+
+  private close(): void {
+    this.cancelTrainAssist(true);
+    this.saveTrainCookies();
+    this.onClose(this.taskId);
+  }
+
+  private handleAssistResult(raw: string, sourceUrl: string, controller: 'main' | 'popup',
+    generation: number, session: number): void {
+    const actual: TrainWebAssistExecutionBinding = { controller, generation, session };
+    if (this.requestBinding === undefined || this.assistDisposed ||
+      !isCurrentTrainWebAssistExecution(this.requestBinding, actual)) return;
+    this.clearPendingTrainAssist();
+    const outcome: TrainWebAssistOutcome = parseTrainWebAssistOutcome(raw);
+    if (outcome.state === 'waiting_user') {
+      this.scheduleTrainAssistRetry(1000);
+      return;
+    }
+    if (outcome.state === 'retry') {
+      this.assistBudget = trainWebAssistBudgetAfterExecution(this.assistBudget);
+      this.assistBudget = trainWebAssistBudgetForOutcome(this.assistBudget, outcome);
+      if (trainWebAssistRetryExhausted(this.assistStage === 'final' ? 'final' : 'initial',
+        outcome, this.assistBudget.attempts)) {
+        this.handleTerminalAssist({ state: 'needs_user', reason: 'no_navigation' }, sourceUrl);
+      } else {
+        if (trainWebAssistFinalClickMayHaveRun(this.assistStage === 'final' ? 'final' : 'initial',
+          false, outcome)) this.finalClickMayHaveRun = true;
+        this.scheduleTrainAssistRetry();
+      }
+      return;
+    }
+    if (outcome.state === 'ready_to_confirm') {
+      if (this.assistStage !== 'initial') {
+        this.handleTerminalAssist({ state: 'needs_user', reason: 'invalid_result' }, sourceUrl);
+        return;
+      }
+      this.assistStage = 'final';
+      this.assistBudget = trainWebAssistBudgetForStageTransition('confirm');
+      this.requestTrainAssist();
+      return;
+    }
+    if (outcome.state === 'awaiting_payment' && !isOfficial12306PaymentUrl(sourceUrl)) {
+      this.handleTerminalAssist({ state: 'needs_user', reason: 'page_mismatch' }, sourceUrl);
+      return;
+    }
+    this.handleTerminalAssist(outcome, sourceUrl);
+  }
+
+  private handleAssistLoadError(reason: string, controller: 'main' | 'popup', generation: number,
+    session: number): void {
+    const actual: TrainWebAssistExecutionBinding = { controller, generation, session };
+    if (this.kind !== 'train' || this.assistDisposed) return;
+    const outcome = trainWebAssistLoadErrorOutcome(reason, this.activeController, this.activeGeneration,
+      this.assistScriptSession, actual);
+    if (outcome !== undefined) this.handleTerminalAssist(outcome, this.activeUrl);
+  }
+
+  private handleTerminalAssist(outcome: TrainWebAssistOutcome, _sourceUrl: string): void {
+    const targetState: TrainPresaleTaskState | undefined = trainWebAssistTargetState(outcome);
+    if (targetState === undefined) {
+      return;
+    }
+    this.cancelTrainAssist(true);
+    const nativeStore = this.trainPreferences();
+    if (nativeStore === null) {
+      return;
+    }
+    const reason = outcome.state === 'needs_user' ? trainWebAssistReasonText(outcome.reason) : '';
+    try {
+      const transition: TrainPresaleHandoffTransitionResult = transitionTrainPresaleHandoff(
+        nativeStore, this.taskId, targetState, reason);
+      if (transition.task === undefined || transition.task.state !== targetState || !transition.cleared) {
+        aiLogError('[AIPhone][TrainWebAssistTransition] ok=false');
+        return;
+      }
+      const context = this.getUIContext().getHostContext() as common.Context;
+      context.getApplicationContext().eventHub.emit(TRAIN_PRESALE_HANDOFF_EVENT);
+      aiLogInfo('[AIPhone][TrainWebAssistTransition] state=' + targetState);
+    } catch (_error) {
+      aiLogError('[AIPhone][TrainWebAssistTransition] ok=false');
+    }
+  }
 
   private title(): string {
     if (this.kind === 'train') {
@@ -169,7 +491,7 @@ export struct CheckoutWebOverlay {
           label: this.closeLabel(),
           shape: 'pill',
           tone: 'secondary'
-        }).onClick(() => this.onClose())
+        }).onClick(() => this.close())
       }
       .width('100%')
       .height(72)
@@ -194,9 +516,25 @@ export struct CheckoutWebOverlay {
         allowPopup: true,
         javaScriptEnabled: true,
         domStorageEnabled: true,
+        pageScript: this.assistScript,
+        pageScriptSession: this.assistScriptSession,
+        pageScriptTarget: this.assistScriptTarget,
+        pageScriptTargetGeneration: this.assistScriptGeneration,
+        pageScriptCancelToken: this.assistCancelToken,
+        onActiveControllerChange: (controller: A2uiWebControllerIdentity, activeUrl: string,
+          generation: number): void => this.activateTrainAssist(controller, activeUrl, generation),
+        onPageScriptWillExecute: (sourceUrl: string, controller: 'main' | 'popup', generation: number,
+          session: number): string => this.trainAssistPreflight(sourceUrl, controller, generation, session),
+        onPageScriptResult: (result: string, sourceUrl: string, controller: 'main' | 'popup',
+          generation: number, session: number): void =>
+          this.handleAssistResult(result, sourceUrl, controller, generation, session),
+        onLoadError: (reason: string, controller: 'main' | 'popup', generation: number,
+          session: number): void => this.handleAssistLoadError(reason, controller, generation, session),
         onUrlIntercept: (url: string, isMainFrame: boolean): boolean => this.intercept(url, isMainFrame),
-        onLoadEnd: (url: string): void => {
-          this.currentUrl = url;
+        onLoadEnd: (url: string, _controller: 'main' | 'popup'): void => {
+          if (this.kind === 'train' && url.trim().toLowerCase().startsWith('https://kyfw.12306.cn/')) {
+            this.saveTrainCookies();
+          }
           aiLogInfo('[AIPhone][CheckoutWebLoadEnd] kind=' + this.kind + ' chars=' + url.length.toString());
         }
       }).layoutWeight(1)

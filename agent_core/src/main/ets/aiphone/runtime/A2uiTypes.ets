@@ -64,6 +64,11 @@ export interface A2uiTrainData {
   sleeperSoft: string;
   price?: string;
   bookingUrl?: string;
+  travelDate?: string;
+  saleState?: string;
+  saleAt?: string;
+  fromCode?: string;
+  toCode?: string;
 }
 
 export interface A2uiFlightData {
