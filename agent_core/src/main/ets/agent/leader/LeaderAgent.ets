@@ -38,7 +38,8 @@ import { CreateDataTaskPayload } from '../data/DataAgentTypes';
 import { ActionPlanRequestPayload, ActionResultPayload } from '../action/ActionAgentTypes';
 import {
   leaderIsActionCapability,
-  leaderIsDataCapability
+  leaderIsDataCapability,
+  leaderIsExplicitActionOwner
 } from './LeaderCapabilityOwnership';
 
 interface LeaderTurnState {
@@ -78,7 +79,7 @@ interface LeaderPendingDataTask {
   outputSchema: string;
 }
 
-const MAX_POST_OBSERVATION_PLANNING_MS: number = 8000;
+const MAX_POST_OBSERVATION_PLANNING_MS: number = 12000;
 const MAX_POST_OBSERVATION_UI_RESERVE_MS: number = 8000;
 const OBSERVATION_FALLBACK_ANSWER: string = 'Showing the available tool results.';
 
@@ -586,7 +587,8 @@ export class LeaderAgent extends MessageDrivenAgent {
 
   private hasUnboundLaterDataTask(state: LeaderTurnState, decision: LeaderDecision): boolean {
     if (decision.roundAction !== 'execute' || state.turnObservations.length === 0 ||
-      decision.dataTasks.length === 0) {
+      decision.dataTasks.length === 0 ||
+      (state.input.text.indexOf('之后') >= 0 && state.input.text.indexOf('再') >= 0)) {
       return false;
     }
     for (let index = 0; index < decision.dataTasks.length; index++) {
@@ -698,6 +700,11 @@ export class LeaderAgent extends MessageDrivenAgent {
     if (state.pendingDataTools.size > 0) {
       return;
     }
+    if (state.pendingActionDecision !== null &&
+      this.pendingActionUsesVirtualEntries(state.pendingActionDecision)) {
+      this.publishObservedFallback(this.inputMessage(state), state);
+      return;
+    }
     if (state.round >= 3) {
       const inputMessage: AgentMessage = this.inputMessage(state);
       if (this.canRenderObservedFallback(state)) {
@@ -723,6 +730,20 @@ export class LeaderAgent extends MessageDrivenAgent {
     state.uiDone = true;
     state.uiState = payload.state;
     state.uiSurfaceId = payload.surfaceId.trim();
+    if (state.pendingActionDecision !== null &&
+      this.pendingActionUsesVirtualEntries(state.pendingActionDecision)) {
+      const decision = state.pendingActionDecision;
+      state.pendingActionDecision = null;
+      state.virtualActionTaskId = state.uiTaskId;
+      this.publishActionPlanRequest(
+        this.inputMessage(state),
+        decision,
+        state.uiTaskId,
+        [],
+        true
+      );
+      return;
+    }
     if (state.pendingAnswer === null) {
       return;
     }
@@ -928,10 +949,17 @@ export class LeaderAgent extends MessageDrivenAgent {
     const rawKeys: string[] = Object.keys(decision);
     const hasNormalizationDate: boolean =
       rawKeys.indexOf('normalizationCurrentLocalDate') >= 0;
+    const hasNormalizedActionInput: boolean =
+      rawKeys.indexOf('normalizedActionInputText') >= 0;
     const normalizationDateMatchesAuthority: boolean =
       this.validNormalizationCurrentLocalDate(decision.normalizationCurrentLocalDate) &&
       decision.normalizationCurrentLocalDate === trustedCurrentLocalDate;
     if ((hasNormalizationDate && !normalizationDateMatchesAuthority) ||
+      (hasNormalizedActionInput &&
+        (typeof decision.normalizedActionInputText !== 'string' ||
+          decision.normalizedActionInputText.trim().length === 0 ||
+          decision.normalizedActionInputText.length > 4096 ||
+          !normalizationDateMatchesAuthority)) ||
       (decision.roundAction === 'execute' && this.dataTaskInputNormalizer !== null &&
         Array.isArray(decision.dataTasks) &&
         decision.dataTasks.length > 0 &&
@@ -940,6 +968,7 @@ export class LeaderAgent extends MessageDrivenAgent {
     }
     const keys: string = rawKeys
       .filter((key: string): boolean => key !== 'normalizationCurrentLocalDate')
+      .filter((key: string): boolean => key !== 'normalizedActionInputText')
       .sort()
       .join(',');
     if (keys !== 'dataTasks,personaId,reasonCode,requestedCapabilityIds,roundAction,skillId,uiIntent' &&
@@ -1079,7 +1108,8 @@ export class LeaderAgent extends MessageDrivenAgent {
       const task = tasks[index];
       if (task === undefined || task === null ||
         Object.keys(task).sort().join(',') !== 'allowedToolIds,goal,input,localId,required,toolId' ||
-        typeof task.localId !== 'string' || task.localId.trim().length === 0 || localIds.has(task.localId) ||
+        typeof task.localId !== 'string' || task.localId.trim().length === 0 ||
+        task.localId.indexOf(':') >= 0 || localIds.has(task.localId) ||
         typeof task.goal !== 'string' || task.goal.trim().length === 0 ||
         !Array.isArray(task.allowedToolIds) || task.allowedToolIds.length === 0 ||
         typeof task.toolId !== 'string' || task.toolId.trim().length === 0 ||
@@ -1424,7 +1454,8 @@ export class LeaderAgent extends MessageDrivenAgent {
     state: LeaderTurnState
   ): void {
     this.publishAccumulatedUiTask(input, state);
-    if (state.pendingActionDecision !== null) {
+    if (state.pendingActionDecision !== null &&
+      !this.pendingActionUsesVirtualEntries(state.pendingActionDecision)) {
       this.publishActionPlanRequest(
         input,
         state.pendingActionDecision,
@@ -1433,6 +1464,28 @@ export class LeaderAgent extends MessageDrivenAgent {
         false
       );
     }
+  }
+
+  private pendingActionUsesVirtualEntries(decision: LeaderDecision): boolean {
+    if (decision.actionIntent === undefined ||
+      decision.actionIntent.allowedActionIds.length === 0) {
+      return false;
+    }
+    for (let index = 0; index < decision.actionIntent.allowedActionIds.length; index++) {
+      const actionId = decision.actionIntent.allowedActionIds[index];
+      if (!leaderIsExplicitActionOwner(
+        this.planningContext,
+        actionId
+      )) {
+        return false;
+      }
+      for (let toolIndex = 0; toolIndex < this.planningContext.tools.length; toolIndex++) {
+        if (this.planningContext.tools[toolIndex].actions.indexOf(actionId) >= 0) {
+          return false;
+        }
+      }
+    }
+    return true;
   }
 
   private publishActionPlanRequest(
@@ -1450,7 +1503,8 @@ export class LeaderAgent extends MessageDrivenAgent {
       allowedActionIds: (intent['allowedActionIds'] as string[]).slice(),
       personaId: decision.personaId,
       skillId: decision.skillId,
-      inputText: (input.payload as InputUserPayload).text
+      inputText: decision.normalizedActionInputText === undefined ?
+        (input.payload as InputUserPayload).text : decision.normalizedActionInputText
     };
     if (decision.normalizationCurrentLocalDate !== undefined) {
       payload.currentLocalDate = decision.normalizationCurrentLocalDate;
@@ -1480,6 +1534,11 @@ export class LeaderAgent extends MessageDrivenAgent {
     if (result.surfaceId !== virtualRunId || result.planId !== 'direct:' + virtualRunId ||
       result.runId !== virtualRunId) {
       return;
+    }
+    if (state.pendingAnswer !== null) {
+      const answer = state.pendingAnswer;
+      state.pendingAnswer = null;
+      this.publishTurnResult(this.inputMessage(state), state, answer);
     }
     this.finishTurn(state);
   }

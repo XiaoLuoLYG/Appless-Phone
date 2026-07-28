@@ -6,6 +6,7 @@ import {
 import { ActionOffer, ActionOffersReadyPayload } from '../action/ActionOfferTypes';
 import { JsonValue } from '../action/ActionPlanTypes';
 import { cloneJsonValue } from '../action/JsonPointer';
+import { CreateDataTaskPayload } from '../data/DataAgentTypes';
 import { MessageDrivenAgent } from '../MessageDrivenAgent';
 import {
   AgentMessage,
@@ -80,6 +81,8 @@ interface UiTurnContext {
   skeletonWritten: boolean;
   resultWritten: boolean;
   terminalRenderStarted: boolean;
+  finalUiTaskReceived: boolean;
+  renderedDataTaskIds: string[];
   operationChain: Promise<void>;
   queuedMessages: Map<number, AgentMessage>;
   nextOperationId: number;
@@ -138,6 +141,7 @@ export class UiAgent extends MessageDrivenAgent {
 
   protected accepts(message: AgentMessage): boolean {
     return message.type === AgentMessageType.TASK_CREATE_UI ||
+      message.type === AgentMessageType.TASK_CREATE_DATA ||
       message.type === AgentMessageType.TASK_RESULT_DATA ||
       message.type === AgentMessageType.ACTION_OFFERS_READY ||
       message.type === AgentMessageType.TASK_ERROR ||
@@ -165,6 +169,15 @@ export class UiAgent extends MessageDrivenAgent {
       const task: CreateUiTaskPayload | null = this.uiTask(message.payload, message.taskId);
       if (task === null) {
         this.publishInputError(message, 'UI_TASK_INVALID', 'UI task payload is malformed');
+        return;
+      }
+      const context: UiTurnContext = this.contextFor(message, key);
+      this.enqueue(message, key, context);
+      return;
+    }
+    if (message.type === AgentMessageType.TASK_CREATE_DATA) {
+      const task: CreateDataTaskPayload | null = this.semanticDataTask(message.payload, message.taskId);
+      if (task === null || this.uiTaskIdForDataTask(task) === '') {
         return;
       }
       const context: UiTurnContext = this.contextFor(message, key);
@@ -215,6 +228,13 @@ export class UiAgent extends MessageDrivenAgent {
       }
       return;
     }
+    if (message.type === AgentMessageType.TASK_CREATE_DATA) {
+      const task: CreateDataTaskPayload | null = this.semanticDataTask(message.payload, message.taskId);
+      if (task !== null) {
+        await this.handleDataTask(message, task, key, context);
+      }
+      return;
+    }
     if (message.type === AgentMessageType.TASK_RESULT_DATA) {
       await this.handleDataResult(message, key, context);
       return;
@@ -236,11 +256,71 @@ export class UiAgent extends MessageDrivenAgent {
     key: string,
     context: UiTurnContext
   ): Promise<void> {
-    if (context.canceled || context.skeletonWritten || context.uiTask !== undefined) {
+    if (context.canceled || context.resultWritten) {
       return;
     }
+    if (context.uiTask !== undefined) {
+      if (!this.validFinalUiTask(context.uiTask, task)) {
+        return;
+      }
+      context.uiTask = task;
+      context.finalUiTaskReceived = true;
+      await this.maybeRenderData(context, key);
+      return;
+    }
+    if (context.skeletonWritten) {
+      return;
+    }
+    context.finalUiTaskReceived = true;
+    await this.startUiTask(task, key, context);
+  }
+
+  private async handleDataTask(
+    message: AgentMessage,
+    task: CreateDataTaskPayload,
+    key: string,
+    context: UiTurnContext
+  ): Promise<void> {
+    if (context.canceled || context.resultWritten || context.finalUiTaskReceived) {
+      return;
+    }
+    const uiTaskId: string = this.uiTaskIdForDataTask(task);
+    if (uiTaskId.length === 0) {
+      return;
+    }
+    if (context.uiTask === undefined) {
+      const provisional: CreateUiTaskPayload = {
+        taskId: uiTaskId,
+        dataTaskIds: [message.taskId],
+        skillId: task.skillId,
+        intent: task.goal,
+        expectedOutputSchema: task.outputSchema
+      };
+      await this.startUiTask(provisional, key, context);
+      return;
+    }
+    if (context.uiTask.taskId !== uiTaskId ||
+      context.uiTask.skillId !== task.skillId ||
+      context.uiTask.dataTaskIds.indexOf(message.taskId) >= 0) {
+      return;
+    }
+    context.uiTask = {
+      taskId: context.uiTask.taskId,
+      dataTaskIds: context.uiTask.dataTaskIds.concat([message.taskId]),
+      skillId: context.uiTask.skillId,
+      intent: context.uiTask.intent,
+      expectedOutputSchema: context.uiTask.expectedOutputSchema
+    };
+    await this.maybeRenderData(context, key);
+  }
+
+  private async startUiTask(
+    task: CreateUiTaskPayload,
+    key: string,
+    context: UiTurnContext
+  ): Promise<void> {
     context.uiTask = task;
-    context.uiTaskId = message.taskId;
+    context.uiTaskId = task.taskId;
     const rendered: UiRenderResult = await this.renderer.skeleton(task, context.surfaceId);
     if (!this.isActive(key, context)) {
       return;
@@ -256,7 +336,9 @@ export class UiAgent extends MessageDrivenAgent {
       return;
     }
     context.skeletonWritten = true;
-    this.publishUiResult(context, 'skeleton');
+    if (context.finalUiTaskReceived) {
+      this.publishUiResult(context, 'skeleton');
+    }
     for (let index = 0; index < task.dataTaskIds.length; index++) {
       const pending = context.pendingDataByTaskId.get(task.dataTaskIds[index]);
       if (pending !== undefined && pending.invalidCode.length > 0) {
@@ -336,39 +418,92 @@ export class UiAgent extends MessageDrivenAgent {
     if (task === undefined || !context.skeletonWritten) {
       return;
     }
+    let terminalCount: number = 0;
+    while (terminalCount < task.dataTaskIds.length) {
+      const pending = context.pendingDataByTaskId.get(task.dataTaskIds[terminalCount]);
+      if (pending === undefined ||
+        (pending.errorMessage === undefined &&
+          (pending.data === undefined || pending.offers === undefined ||
+            pending.offerSourceToolId !== pending.data.toolId))) {
+        break;
+      }
+      terminalCount++;
+    }
+    const allTerminal: boolean = terminalCount === task.dataTaskIds.length;
+    let renderCount: number = terminalCount;
+    if (!allTerminal) {
+      const incompleteRound: number = this.dataTaskRound(task.dataTaskIds[terminalCount]);
+      if (incompleteRound < 1) {
+        return;
+      }
+      while (renderCount > 0 &&
+        this.dataTaskRound(task.dataTaskIds[renderCount - 1]) === incompleteRound) {
+        renderCount--;
+      }
+    }
     const data: DataResult[] = [];
     const offers: ActionOffer[] = [];
     const errors: string[] = [];
-    for (let index = 0; index < task.dataTaskIds.length; index++) {
-      const pending = context.pendingDataByTaskId.get(task.dataTaskIds[index]);
-      if (pending === undefined) {
-        return;
-      }
+    const readyTaskIds: string[] = [];
+    for (let index = 0; index < renderCount; index++) {
+      const pending = context.pendingDataByTaskId.get(task.dataTaskIds[index]) as PendingDataEntry;
+      readyTaskIds.push(task.dataTaskIds[index]);
       if (pending.errorMessage !== undefined) {
         errors.push(pending.errorMessage);
         continue;
       }
-      if (pending.data === undefined || pending.offers === undefined ||
-        pending.offerSourceToolId !== pending.data.toolId) {
-        return;
-      }
-      data.push(pending.data);
-      for (let offerIndex = 0; offerIndex < pending.offers.length; offerIndex++) {
-        offers.push(pending.offers[offerIndex]);
+      if (pending.data !== undefined && pending.offers !== undefined) {
+        data.push(pending.data);
+        for (let offerIndex = 0; offerIndex < pending.offers.length; offerIndex++) {
+          offers.push(pending.offers[offerIndex]);
+        }
       }
     }
     if (data.length === 0) {
-      await this.renderDataError(context, key, errors[0]);
+      if (context.finalUiTaskReceived && allTerminal) {
+        await this.renderDataError(context, key, errors[0]);
+      }
       return;
     }
-    await this.renderData(context, key, data, offers);
+    const unchanged: boolean =
+      readyTaskIds.join(',') === context.renderedDataTaskIds.join(',');
+    if (unchanged) {
+      if (context.finalUiTaskReceived && allTerminal) {
+        this.finishRenderedData(context);
+      }
+      return;
+    }
+    await this.renderData(
+      context,
+      key,
+      data,
+      offers,
+      readyTaskIds,
+      context.finalUiTaskReceived && allTerminal
+    );
+  }
+
+  private dataTaskRound(taskId: string): number {
+    const marker: string = ':round-';
+    const markerIndex: number = taskId.lastIndexOf(marker);
+    if (markerIndex < 0) {
+      return -1;
+    }
+    const roundEnd: number = taskId.indexOf(':', markerIndex + marker.length);
+    if (roundEnd < 0) {
+      return -1;
+    }
+    const round: number = Number(taskId.substring(markerIndex + marker.length, roundEnd));
+    return Number.isInteger(round) && round > 0 ? round : -1;
   }
 
   private async renderData(
     context: UiTurnContext,
     key: string,
     data: DataResult[],
-    offers: ActionOffer[]
+    offers: ActionOffer[],
+    readyTaskIds: string[],
+    terminal: boolean
   ): Promise<void> {
     const task: CreateUiTaskPayload | undefined = context.uiTask;
     if (task === undefined || !context.skeletonWritten || context.resultWritten ||
@@ -384,7 +519,7 @@ export class UiAgent extends MessageDrivenAgent {
       );
       return;
     }
-    context.terminalRenderStarted = true;
+    context.terminalRenderStarted = terminal;
     const rendered: UiRenderResult =
       await this.renderer.result(task, data, offers, context.surfaceId);
     if (!this.isActive(key, context)) {
@@ -400,6 +535,14 @@ export class UiAgent extends MessageDrivenAgent {
     if (!this.isActive(key, context)) {
       return;
     }
+    context.renderedDataTaskIds = readyTaskIds.slice();
+    if (terminal) {
+      this.finishRenderedData(context);
+    }
+  }
+
+  private finishRenderedData(context: UiTurnContext): void {
+    context.terminalRenderStarted = true;
     context.resultWritten = true;
     this.publishUiResult(context, 'result');
     this.clearPendingPayloads(context);
@@ -609,6 +752,8 @@ export class UiAgent extends MessageDrivenAgent {
       skeletonWritten: false,
       resultWritten: false,
       terminalRenderStarted: false,
+      finalUiTaskReceived: false,
+      renderedDataTaskIds: [],
       operationChain: Promise.resolve(),
       queuedMessages: new Map<number, AgentMessage>(),
       nextOperationId: 0
@@ -675,6 +820,60 @@ export class UiAgent extends MessageDrivenAgent {
       return null;
     }
     return payload as CreateUiTaskPayload;
+  }
+
+  private validFinalUiTask(
+    current: CreateUiTaskPayload,
+    next: CreateUiTaskPayload
+  ): boolean {
+    if (current.taskId !== next.taskId ||
+      current.skillId !== next.skillId ||
+      current.expectedOutputSchema !== next.expectedOutputSchema ||
+      (current.personaId !== undefined && current.personaId !== next.personaId) ||
+      current.dataTaskIds.length !== next.dataTaskIds.length) {
+      return false;
+    }
+    for (let index = 0; index < current.dataTaskIds.length; index++) {
+      if (current.dataTaskIds[index] !== next.dataTaskIds[index]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private semanticDataTask(payload: Object, taskId: string): CreateDataTaskPayload | null {
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+      return null;
+    }
+    const task = payload as CreateDataTaskPayload;
+    return task.taskId === taskId &&
+      typeof task.roundId === 'string' && task.roundId.trim().length > 0 &&
+      typeof task.skillId === 'string' &&
+      typeof task.goal === 'string' && task.goal.trim().length > 0 &&
+      Array.isArray(task.allowedToolIds) && task.allowedToolIds.length > 0 &&
+      typeof task.toolId === 'string' && task.toolId.trim().length > 0 &&
+      typeof task.outputSchema === 'string' && task.outputSchema.trim().length > 0 &&
+      task.args !== null && typeof task.args === 'object' && !Array.isArray(task.args) &&
+      typeof task.required === 'boolean' ? task : null;
+  }
+
+  private uiTaskIdForDataTask(task: CreateDataTaskPayload): string {
+    const marker: string = ':round-';
+    const markerIndex: number = task.taskId.lastIndexOf(marker);
+    if (markerIndex <= 0) {
+      return '';
+    }
+    const roundEnd: number = task.taskId.indexOf(':', markerIndex + marker.length);
+    if (roundEnd < 0) {
+      return '';
+    }
+    const roundText: string = task.taskId.substring(markerIndex + marker.length, roundEnd);
+    const round: number = Number(roundText);
+    if (!Number.isInteger(round) || round < 1 ||
+      !task.roundId.endsWith(marker + roundText)) {
+      return '';
+    }
+    return task.taskId.substring(0, markerIndex) + ':ui';
   }
 
   private validDataTaskIds(dataTaskIds: Object[], uiTaskId: string): boolean {

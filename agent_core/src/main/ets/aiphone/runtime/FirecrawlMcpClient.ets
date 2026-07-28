@@ -1659,25 +1659,6 @@ function rankedShoppingCandidates(
   return candidates;
 }
 
-function hasTwoComparableShoppingOffers(results: DynamicGenericToolResult[]): boolean {
-  for (let index = 0; index < results.length; index++) {
-    if (rowValueOf(results[index].rows, 'comparisonEligible') !== 'true') {
-      continue;
-    }
-    const key = rowValueOf(results[index].rows, 'comparisonKey');
-    if (key.length === 0) {
-      continue;
-    }
-    for (let other = index + 1; other < results.length; other++) {
-      if (rowValueOf(results[other].rows, 'comparisonEligible') === 'true' &&
-        rowValueOf(results[other].rows, 'comparisonKey') === key) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 function shoppingResultSort(
   left: DynamicGenericToolResult,
   right: DynamicGenericToolResult
@@ -3057,13 +3038,14 @@ export class FirecrawlMcpClient {
     searchUsages.push(search.usage);
     const candidates = search.status === 'success' ?
       rankedShoppingCandidates(cleanQuery, search.items, domains) : [];
-    let scrapeCount = 0;
-    for (let index = 0; index < candidates.length && scrapeCount < 3 &&
-      (visibleLimit === 1 ? results.length === 0 :
-        !hasTwoComparableShoppingOffers(results.slice(0, visibleLimit))); index++) {
+    const scrapeLimit = visibleLimit === 1 ? 1 : 3;
+    const scrapePromises: Promise<ScrapeOutcome>[] = [];
+    for (let index = 0; index < candidates.length && index < scrapeLimit; index++) {
       const pageUrl = textOf(candidates[index].url);
-      scrapeCount++;
-      const scrape = await this.callScrape(toolId, pageUrl, productArguments(pageUrl), config);
+      scrapePromises.push(this.callScrape(toolId, pageUrl, productArguments(pageUrl), config));
+    }
+    for (let index = 0; index < scrapePromises.length; index++) {
+      const scrape = await scrapePromises[index];
       scrapeUsages.push(scrape.usage);
       const additions = this.shoppingOfferResults(
         toolId, cleanQuery, preferenceText, candidates[index], scrape, search, config

@@ -14328,6 +14328,35 @@ async function callStructuredLuckinStatus(args: Object | null): Promise<DataResu
   );
 }
 
+async function callStructuredFirecrawlTool(
+  toolId: string,
+  prompt: string,
+  args: Object | null
+): Promise<DataResult> {
+  const config: FirecrawlConfig = {
+    apiKey: localProviderConfig.firecrawlApiKey,
+    mcpUrl: localProviderConfig.firecrawlMcpUrl
+  };
+  try {
+    const output = await firecrawlMcpClient.execute(toolId, prompt, '', args, config);
+    return genericStructuredDataResult(toolId, 'genericToolResults', output.results);
+  } catch (error) {
+    let message = error instanceof Error ? error.message : JSON.stringify(error);
+    if (config.apiKey.length > 0) {
+      message = message.split(config.apiKey).join('[REDACTED]');
+    }
+    if (config.mcpUrl.length > 0) {
+      message = message.split(config.mcpUrl).join('[REDACTED]');
+    }
+    return errorDataResult(
+      toolId,
+      'genericToolResults',
+      'FIRECRAWL_EXCEPTION',
+      message.substring(0, 1200)
+    );
+  }
+}
+
 export async function callStructuredTool(
   toolId: string,
   prompt: string,
@@ -14398,6 +14427,9 @@ export async function callStructuredTool(
   }
   if (toolId === 'luckin.order.status') {
     return callStructuredLuckinStatus(args);
+  }
+  if (isFirecrawlToolId(toolId)) {
+    return callStructuredFirecrawlTool(toolId, prompt, args);
   }
   if (toolId === 'ride.estimate' || toolId === 'ride.app.link' || toolId === 'ride.driver.location') {
     return callStructuredRideReadTool(toolId, args);

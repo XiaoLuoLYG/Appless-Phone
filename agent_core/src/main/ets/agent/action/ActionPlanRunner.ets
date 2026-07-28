@@ -576,7 +576,8 @@ export class ActionPlanRunner {
             this.completedStepIds(completed)
           );
         }
-        if (currentValidation.definition !== null &&
+        if (contextSnapshot.virtualAction !== true &&
+          currentValidation.definition !== null &&
           currentValidation.definition.riskLevel === 'confirm_required' &&
           availableConfirmation !== step.stepId) {
           return pausedOutcome(
@@ -747,10 +748,10 @@ export class ActionPlanRunner {
     requireSurface: boolean
   ): ActionCatalogResult {
     const step = plan.steps[index];
+    if (context.virtualAction === true) {
+      return this.catalog.validateActionIntentExecution(step.actionId, args);
+    }
     if (index === 0) {
-      if (context.virtualAction === true) {
-        return this.catalog.validateActionIntentExecution(step.actionId, args);
-      }
       if (context.pageActionId !== undefined && context.pageActionId.length > 0) {
         return this.catalog.validatePageExecution(
           context.conversationId,
@@ -786,10 +787,10 @@ export class ActionPlanRunner {
     args: Object
   ): ActionCatalogResult {
     const step = plan.steps[index];
+    if (context.virtualAction === true) {
+      return this.catalog.validateActionIntentExecution(step.actionId, args);
+    }
     if (index === 0) {
-      if (context.virtualAction === true) {
-        return this.catalog.validateActionIntentExecution(step.actionId, args);
-      }
       if (context.pageActionId !== undefined && context.pageActionId.length > 0) {
         return this.catalog.validatePageExecution(
           context.conversationId,

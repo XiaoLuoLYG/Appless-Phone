@@ -45,10 +45,13 @@ export { AgentTool } from './src/main/ets/agent/AgentTool';
 export { AgentToolRunOptions } from './src/main/ets/agent/AgentToolRunOptions';
 export { MultiToolSurfaceComposer, MultiToolSurfaceEmitHandler } from './src/main/ets/agent/MultiToolSurfaceComposer';
 export {
+  appendMultiTaskSlot,
   childSurfaceIdForMultiTaskSlot,
   isMultiTaskSurface,
   mergeSlotObservationIntoMultiTaskSurface,
-  resolveMultiTaskSlotId
+  mergeSurfaceIntoMultiTaskSurface,
+  resolveMultiTaskSlotId,
+  wrapSurfaceWithMultiTaskAction
 } from './src/main/ets/agent/MultiTaskSurfaceMerge';
 export { MultiTaskBoardData, MultiToolSlotCall } from './src/main/ets/agent/MultiToolTypes';
 export { A2uiObservationDigest, summarizeA2uiObservation, summarizeAppliedA2uiSurface } from './src/main/ets/agent/A2uiObservationDigest';

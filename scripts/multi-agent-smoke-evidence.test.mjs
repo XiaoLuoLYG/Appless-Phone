@@ -1299,7 +1299,8 @@ test('requires every parallel tool task to reach a terminal', () => {
     [AIPhone][MultiAgentTurnResult] conversation=c1 turn=t1 task=input-1 status=success surface=s1 roundCount=1 messageChars=8
   `;
   assert.equal(multiAgentTurnEvidence(parallel, {
-    expectedToolIds: ['flight.search', 'train.search']
+    expectedToolIds: ['flight.search', 'train.search'],
+    expectedParallelDataToolIds: ['flight.search', 'train.search']
   }).complete, true);
   assert.equal(multiAgentTurnEvidence(
     parallel.replace(/^.*task=flight tool=flight.search status=.*\n/m, ''),
@@ -1322,7 +1323,11 @@ test('accepts dependent tools only with increasing round evidence', () => {
   `;
   assert.equal(multiAgentTurnEvidence(dependent, {
     expectedToolIds: ['maps.place.search', 'maps.place.details'],
-    minimumDataRounds: 2
+    minimumDataRounds: 2,
+    expectedDataRounds: [
+      { toolId: 'maps.place.search', round: 1 },
+      { toolId: 'maps.place.details', round: 2 }
+    ]
   }).complete, true);
   assert.equal(multiAgentTurnEvidence(
     dependent.replace('round=2 tool=maps.place.details',
@@ -1673,6 +1678,19 @@ test('correlates a virtual action request with its exact terminal result', () =>
   assert.equal(result.surfaceId, 's1');
 });
 
+test('correlates one ordered multi-action virtual plan with one exact terminal result', () => {
+  const result = multiAgentActionEvidence(`
+    [AIPhone][MultiAgentActionPlan] conversation=c1 turn=t1 task=a1 uiTask=a1 dataTasks=none actions=luckin.order.preview,payment.send virtual=true
+    [AIPhone][MultiAgentActionResult] conversation=c1 turn=t1 task=a1 surface=s1 plan=p1 run=r1 status=success
+  `, {
+    expectedActionIds: ['luckin.order.preview', 'payment.send'],
+    expectedVirtual: true
+  });
+  assert.equal(result.complete, true);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.actionIds, ['luckin.order.preview', 'payment.send']);
+});
+
 test('accepts the exact C11b virtual memory terminal with its invalid surface sentinel', () => {
   const result = multiAgentActionEvidence(`
     [AIPhone][MultiAgentActionPlan] conversation=c77776924 turn=t921f1276 task=k2 uiTask=k2 dataTasks=none actions=memory.update virtual=true
@@ -1831,10 +1849,10 @@ test('requires a virtual action request before its exact result', () => {
   }).complete, false);
 });
 
-test('lists exactly C01-C20 and F01-F16 without excluded sends', () => {
+test('lists exactly C01-C22 and F01-F16 without excluded sends', () => {
   const core = listedCases();
   assert.deepEqual(core.map((item) => item.id),
-    Array.from({ length: 20 }, (_value, index) => `C${String(index + 1).padStart(2, '0')}`));
+    Array.from({ length: 22 }, (_value, index) => `C${String(index + 1).padStart(2, '0')}`));
   const full = listedCases(['--full-regression']);
   assert.deepEqual(full.map((item) => item.id), [
     ...core.map((item) => item.id),
@@ -1853,6 +1871,10 @@ test('lists exactly C01-C20 and F01-F16 without excluded sends', () => {
     'googledrive_find_file');
   assert.equal(full.find((item) => item.id === 'F15')?.expectedDynamicQualifiedName,
     'googledocs_search_documents');
+  assert.deepEqual(full.find((item) => item.id === 'C21')?.expectedToolIds,
+    ['time', 'ride.estimate']);
+  assert.deepEqual(full.find((item) => item.id === 'C22')?.expectedToolIds,
+    ['ride.estimate', 'luckin.order.preview', 'payment.send']);
   assert.doesNotMatch(serialized, /不确认直接发送|gmail\.message\.send/);
 });
 
@@ -1893,7 +1915,7 @@ test('lists Gmail reply send only behind explicit safe manual configuration', ()
   assert.deepEqual(manual[0].expectedToolIds, ['gmail.message.send']);
 });
 
-test('gives production provider actions the same deadline as multi-agent turns', () => {
+test('gives slow read turns more time while keeping provider actions bounded', () => {
   const source = readFileSync(
     'entry/src/main/ets/pages/A2uiHome/Index.ets',
     'utf8'
@@ -1902,6 +1924,6 @@ test('gives production provider actions the same deadline as multi-agent turns',
     source.indexOf('const options: MultiAgentCanaryOptions = {'),
     source.indexOf('this.multiAgentRuntime = new MultiAgentCanaryRuntime(options);')
   );
-  assert.match(options, /\bsubmitTimeoutMs\s*:\s*45000\s*,/);
+  assert.match(options, /\bsubmitTimeoutMs\s*:\s*90000\s*,/);
   assert.match(options, /\bactionTimeoutMs\s*:\s*45000\s*,/);
 });

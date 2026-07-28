@@ -49,7 +49,7 @@ import {
 } from './multi-agent-smoke-evidence.mjs';
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
-const outDir = join(rootDir, 'tool-gateway', '.smoke');
+const outDir = process.env.AIPHONE_SMOKE_OUT_DIR || join(rootDir, 'tool-gateway', '.smoke');
 mkdirSync(outDir, { recursive: true });
 
 const defaultCases = [
@@ -222,6 +222,29 @@ const coreRegressionCases = [
     expectedToolId: 'hotel.search',
     verifyHotelDetail: true,
     hotelCapabilities: ['hotel.detail', 'hotel.booking.open', 'hotel.navigate']
+  },
+  {
+    id: 'C21',
+    query: '查一下现在的时间，查好时间之后帮我打车从华为坂田基地打车到秋岗花园，再在明天的这个时间新建一个会议日程',
+    expectsTool: true,
+    expectedToolId: 'time',
+    expectedToolIds: ['time', 'ride.estimate'],
+    minimumDataRounds: 2,
+    expectedDataRounds: [
+      { toolId: 'time', round: 1 },
+      { toolId: 'ride.estimate', round: 2 }
+    ]
+  },
+  {
+    id: 'C22',
+    query: '我现在要打车从深圳华为坂田基地到秋港花园，帮我点一杯瑞幸生椰拿铁，半糖少冰，转账给罗一格5美金',
+    expectsTool: true,
+    expectedToolId: 'ride.estimate',
+    expectedToolIds: ['ride.estimate', 'luckin.order.preview', 'payment.send'],
+    minimumDataRounds: 1,
+    expectedDataRounds: [
+      { toolId: 'ride.estimate', round: 1 }
+    ]
   }
 ];
 
@@ -285,7 +308,9 @@ function lifecycleOptions(testCase) {
     expectedToolIds: testCase.expectedToolIds ||
       (expectedToolId.length > 0 ? [expectedToolId] : []),
     minimumDataRounds: testCase.minimumDataRounds || 0,
-    expectedDependencies: testCase.expectedDependencies || []
+    expectedDependencies: testCase.expectedDependencies || [],
+    expectedDataRounds: testCase.expectedDataRounds || [],
+    expectedParallelDataToolIds: testCase.expectedParallelDataToolIds || []
   };
 }
 
@@ -300,7 +325,9 @@ const coreScenarioManifest = [
   ['C16', ['maps.route.open']], ['C17', ['payment.send']],
   ['C18', ['whatsapp.message.send']],
   ['C19', ['calendar.events.search', 'calendar.event.create', 'calendar.event.update', 'calendar.event.delete']],
-  ['C20', ['hotel.search']]
+  ['C20', ['hotel.search']],
+  ['C21', ['time', 'ride.estimate']],
+  ['C22', ['ride.estimate', 'luckin.order.preview', 'payment.send']]
 ].map(([id, expectedToolIds]) => ({ id, expectedToolIds }));
 
 const fullScenarioManifest = retainedFullCases.map((testCase) => ({
@@ -1553,18 +1580,24 @@ function analyze(
   expectedDynamicQualifiedName = '',
   expectedToolIds = [],
   minimumDataRounds = 0,
-  expectedDependencies = []
+  expectedDependencies = [],
+  expectedDataRounds = [],
+  expectedParallelDataToolIds = []
 ) {
   const text = logs.join('\n');
   const multiAgentLifecycle = multiAgentTurnEvidence(text, {
     expectedToolIds,
     minimumDataRounds,
-    expectedDependencies
+    expectedDependencies,
+    expectedDataRounds,
+    expectedParallelDataToolIds
   });
   const executionEvidence = toolExecutionEvidence(text, {
     expectedToolIds,
     minimumDataRounds,
-    expectedDependencies
+    expectedDependencies,
+    expectedDataRounds,
+    expectedParallelDataToolIds
   });
   const htmlHomeDocument = htmlHomeDocumentEvidence(logs);
   const htmlHomeSurfaceLoad = htmlHomeSurfaceLoadEvidence(logs);
@@ -3003,6 +3036,8 @@ async function runQuery(query, index, expectedTool, expectedCaseOverride = null,
   const expectedToolIds = lifecycle.expectedToolIds;
   const minimumDataRounds = lifecycle.minimumDataRounds;
   const expectedDependencies = lifecycle.expectedDependencies;
+  const expectedDataRounds = lifecycle.expectedDataRounds;
+  const expectedParallelDataToolIds = lifecycle.expectedParallelDataToolIds;
   clearHilog();
   if (!preserveAppSession) {
     hdc(['shell', 'aa', 'force-stop', 'com.example.aiphonedemo']);
@@ -3046,6 +3081,8 @@ async function runQuery(query, index, expectedTool, expectedCaseOverride = null,
     expectedToolIds,
     minimumDataRounds,
     expectedDependencies,
+    expectedDataRounds,
+    expectedParallelDataToolIds,
     postCompletionWaitMs: multiAgentPostCompletionWaitMs(expectedCase.id)
   });
   const safeLogText = sanitizeExternalUrlLogs(logs.join('\n'));
@@ -3064,7 +3101,9 @@ async function runQuery(query, index, expectedTool, expectedCaseOverride = null,
     expectedDynamicQualifiedName,
     expectedToolIds,
     minimumDataRounds,
-    expectedDependencies
+    expectedDependencies,
+    expectedDataRounds,
+    expectedParallelDataToolIds
   );
   summary.caseId = expectedCase.id || '';
   summary.expectedPersonaMemory = expectedPersonaMemory;

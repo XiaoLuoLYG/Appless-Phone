@@ -1031,7 +1031,7 @@ export default function leaderAgentTest() {
         allowedActionIds: ['hotel.navigate']
       };
       decision.requestedCapabilityIds.push('hotel.navigate');
-      const planner = new RoundScriptedPlanner([decision, semanticDecision([], 'answer')]);
+      const planner = new RoundScriptedPlanner([decision]);
       const context = semanticPlanningContext();
       context.tools.push({
         toolId: 'flight.search',
@@ -1095,6 +1095,86 @@ export default function leaderAgentTest() {
 
       bus.publish(terminalMessage(AgentMessageType.TURN_CANCEL, 'cancel-parallel'));
       expect((await receive(observer)).type).assertEqual(AgentMessageType.TURN_CANCEL);
+      leader.stop();
+      observer.close();
+    });
+
+    it('publishes mixed virtual Actions only after the Data surface is ready', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const decision = semanticDecision([semanticDataTask('ride', 'ride.estimate')]);
+      decision.actionIntent = {
+        goal: 'Preview coffee, then open payment confirmation',
+        allowedActionIds: ['luckin.order.preview', 'payment.send']
+      };
+      decision.requestedCapabilityIds.push('luckin.order.preview', 'payment.send');
+      const context = semanticPlanningContext();
+      context.tools.push({
+        toolId: 'ride.estimate',
+        domain: 'ride',
+        intent: 'ride.estimate',
+        riskLevel: 'read',
+        registeredBackends: ['local_adapter'],
+        inputSchema: 'rideEstimateQuery',
+        outputSchema: 'genericToolResults',
+        actions: []
+      }, {
+        toolId: 'luckin.order.preview',
+        domain: 'food',
+        intent: 'luckin.order.preview',
+        riskLevel: 'draft',
+        registeredBackends: ['local_adapter'],
+        inputSchema: 'luckinOrderPreviewRequest',
+        outputSchema: 'genericToolResults',
+        actions: []
+      }, {
+        toolId: 'payment.send',
+        domain: 'payment',
+        intent: 'payment.send',
+        riskLevel: 'confirm_required',
+        registeredBackends: ['local_adapter'],
+        inputSchema: 'paymentSendRequest',
+        outputSchema: 'genericToolResults',
+        actions: []
+      });
+      const planner = new RoundScriptedPlanner([decision, semanticDecision([], 'answer')]);
+      const leader = new LeaderAgent(bus, planner, context);
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage(
+        'conversation-mixed',
+        'turn-mixed',
+        'input-mixed',
+        '打车、点瑞幸并转账'
+      ));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      const dataTask = await receive(observer);
+      expect(dataTask.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+      bus.publish(dataResultMessage(dataTask));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      const uiTask = await receive(observer);
+      expect(uiTask.type).assertEqual(AgentMessageType.TASK_CREATE_UI);
+      bus.publish({
+        type: AgentMessageType.TASK_RESULT_UI,
+        conversationId: uiTask.conversationId,
+        turnId: uiTask.turnId,
+        taskId: uiTask.taskId,
+        payload: {
+          surfaceId: 'surface-mixed',
+          state: 'result'
+        } as UiRenderResultPayload
+      });
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_UI);
+      const actionRequest = await receive(observer);
+      const action = actionRequest.payload as ActionPlanRequestPayload;
+
+      expect(actionRequest.type).assertEqual(AgentMessageType.ACTION_PLAN_REQUEST);
+      expect(action.dataTaskIds.length).assertEqual(0);
+      expect(action.allowedActionIds.join(',')).assertEqual(
+        'luckin.order.preview,payment.send'
+      );
+      expect(action.virtual).assertTrue();
+      expect(planner.calls).assertEqual(1);
       leader.stop();
       observer.close();
     });
@@ -1442,12 +1522,13 @@ export default function leaderAgentTest() {
 
     it('publishes only a virtual Action request for a zero-Data semantic execute decision', 0, async () => {
       const bus = new LinkedMessageBus();
-      const decision = semanticDecision([]);
+      const decision = withNormalizationDate(semanticDecision([]));
       decision.actionIntent = {
         goal: 'Remember the explicit user statement',
         allowedActionIds: ['memory.update']
       };
       decision.requestedCapabilityIds = ['memory.update'];
+      decision.normalizedActionInputText = '我在北京\n已查询的当前本地时间：11:30';
       const context = semanticPlanningContext();
       context.tools.push({
         toolId: 'memory.update',
@@ -1459,7 +1540,15 @@ export default function leaderAgentTest() {
         outputSchema: 'memoryUpdateResult',
         actions: ['memory.update']
       });
-      const leader = new LeaderAgent(bus, new RoundScriptedPlanner([decision]), context);
+      const leader = new LeaderAgent(
+        bus,
+        new RoundScriptedPlanner([decision]),
+        context,
+        30000,
+        undefined,
+        undefined,
+        fixedCurrentLocalDate
+      );
       const observer = bus.openReader();
       leader.start();
 
@@ -1492,7 +1581,7 @@ export default function leaderAgentTest() {
       expect(request.goal).assertEqual('Remember the explicit user statement');
       expect(request.allowedActionIds.join(',')).assertEqual('memory.update');
       expect(request.personaId).assertEqual('travel_companion');
-      expect(request.inputText).assertEqual('我在北京');
+      expect(request.inputText).assertEqual('我在北京\n已查询的当前本地时间：11:30');
       expect(request.virtual).assertTrue();
       leader.stop();
       observer.close();
@@ -2015,6 +2104,37 @@ export default function leaderAgentTest() {
       observer.close();
     });
 
+    it('allows an explicitly serial later Data tool without an entity binding', 0, async () => {
+      const firstTask = semanticDataTask('hotel', 'hotel.search');
+      const secondTask = semanticDataTask('media', 'media.aggregate.search');
+      const planner = new RoundScriptedPlanner([
+        semanticDecision([firstTask]),
+        semanticDecision([secondTask])
+      ]);
+      const bus = new LinkedMessageBus();
+      const leader = new LeaderAgent(bus, planner, aggregatePlanningContext());
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage(
+        'conversation-serial',
+        'turn-serial',
+        'input-serial',
+        '查一下现在的时间，查好时间之后帮我打车，再在明天的这个时间新建会议'
+      ));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      const hotelTask = await receive(observer);
+      expect(hotelTask.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+      bus.publish(dataResultMessage(hotelTask));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      const mediaTask = await receive(observer);
+
+      expect(mediaTask.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+      expect((mediaTask.payload as CreateDataTaskPayload).toolId).assertEqual('media.aggregate.search');
+      leader.stop();
+      observer.close();
+    });
+
     it('authorizes a later Data task from its safe normalized real entity reference', 0, async () => {
       const firstTask = semanticDataTask('place-search', 'maps.place.search');
       firstTask.input = JSON.parse('{"query":"深圳咖啡"}') as Object;
@@ -2302,6 +2422,25 @@ export default function leaderAgentTest() {
       expect(next.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
       expect((next.payload as CreateDataTaskPayload).toolId).assertEqual('travel.search');
       expect(planner.calls).assertEqual(2);
+      leader.stop();
+      observer.close();
+    });
+
+    it('rejects a Data task localId that can collide with round task IDs', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const planner = new RoundScriptedPlanner([
+        semanticDecision([semanticDataTask('step:round-1:x', 'travel.search')])
+      ]);
+      const leader = new LeaderAgent(bus, planner, nineDataPlanningContext());
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      const rejected = await receive(observer);
+      expect(rejected.type).assertEqual(AgentMessageType.TASK_ERROR);
+      expect((rejected.payload as TaskErrorPayload).code).assertEqual('LEADER_PLAN_INVALID');
+
       leader.stop();
       observer.close();
     });

@@ -257,7 +257,7 @@ class ScriptedFirecrawlMcpClient extends FirecrawlMcpClient {
       title: 'Firecrawl 固定路由',
       status: 'success',
       summary: '已通过固定 Firecrawl 客户端执行。',
-      rows: [],
+      rows: [{ label: 'Provider 状态', value: 'success' }],
       rawPreview: ''
     };
     if (toolId === 'social.public.search' && onPartial !== null) {
@@ -1751,6 +1751,31 @@ export default function toolGatewayClientTest() {
         expect(result.raw.indexOf(secret)).assertEqual(-1);
         expect(JSON.stringify(result.surface).indexOf(secret)).assertEqual(-1);
         expect(genericToolResults(result.surface)[0].sourceTag).assertEqual('Firecrawl');
+      } finally {
+        configureFirecrawlMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('dispatches Firecrawl reads through the structured Data Agent adapter', 0, async () => {
+      const client = new ScriptedFirecrawlMcpClient();
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          FIRECRAWL_API_KEY: 'fc-structured-secret'
+        }));
+        configureFirecrawlMcpClientForTests(client);
+
+        const result = await callStructuredTool(
+          'shopping.research',
+          '帮我查一下 Dyson V12 Detect Slim Fluffy 的价格',
+          looseObject('{"query":"Dyson V12 Detect Slim Fluffy"}')
+        );
+
+        expect(result.status).assertEqual('success');
+        expect(result.outputSchema).assertEqual('genericToolResults');
+        expect(result.sources.length).assertEqual(1);
+        expect(result.sources[0].provider).assertEqual('Firecrawl');
+        expect(JSON.stringify(result.data).indexOf('Firecrawl 固定路由')).assertLarger(-1);
       } finally {
         configureFirecrawlMcpClientForTests(null);
         configureLocalProviderConfigFromRawJson('{}');

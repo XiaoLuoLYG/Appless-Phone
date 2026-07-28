@@ -49,6 +49,10 @@ import {
   gmailDraftApplyAction,
   genericToolResultsA2ui,
   isExplicitLuckinOrderPrompt,
+  isMultiTaskSurface,
+  appendMultiTaskSlot,
+  mergeSurfaceIntoMultiTaskSurface,
+  resolveMultiTaskSlotId,
   normalizedCalendarArgsForPrompt,
   parseA2uiJsonl,
   setJsonPointer,
@@ -101,6 +105,7 @@ import {
 } from './RegisteredPageActionRoute';
 
 const MEMORY_ACTION_ID: string = 'memory.update';
+const TIME_TOOL_ID: string = 'time';
 const MEMORY_SUMMARY_LIMIT: number = 240;
 const TURN_HOST_GENERATION_LIMIT: number = 32;
 
@@ -772,6 +777,16 @@ function normalizeCanaryTaskInput(
 }
 
 function authorizeCanaryDataTask(task: CreateDataTaskPayload): DataTaskAuthorizationResult {
+  if (task.toolId === TIME_TOOL_ID) {
+    const validTime = task.required && task.outputSchema === 'genericToolResults' &&
+      task.allowedToolIds.length === 1 && task.allowedToolIds[0] === TIME_TOOL_ID &&
+      Object.keys(task.args).length === 0;
+    return {
+      ok: validTime,
+      code: validTime ? '' : 'DATA_TASK_UNAUTHORIZED',
+      message: validTime ? '' : 'Time requires the exact device-local read tool.'
+    };
+  }
   if (task.toolId === 'dynamic.search') {
     const validDynamic = task.required && task.outputSchema === 'dynamicToolConnect' &&
       task.allowedToolIds.length === 1 && task.allowedToolIds[0] === 'dynamic.search';
@@ -828,6 +843,40 @@ class CanaryStructuredDataExecutor implements DataTaskExecutor {
   }
 
   async execute(task: CreateDataTaskPayload): Promise<DataResult> {
+    if (task.toolId === TIME_TOOL_ID) {
+      const now = new Date();
+      const localTime = now.toLocaleString();
+      const observationSummary = now.getFullYear().toString() + '-' +
+        (now.getMonth() + 1).toString().padStart(2, '0') + '-' +
+        now.getDate().toString().padStart(2, '0') + ' ' +
+        now.getHours().toString().padStart(2, '0') + ':' +
+        now.getMinutes().toString().padStart(2, '0');
+      const result: DynamicGenericToolResult = {
+        sourceTag: 'HarmonyOS device',
+        toolName: TIME_TOOL_ID,
+        title: '当前时间',
+        status: 'success',
+        summary: localTime,
+        rows: [{ label: '本地时间', value: localTime }],
+        rawPreview: ''
+      };
+      return {
+        toolId: TIME_TOOL_ID,
+        outputSchema: 'genericToolResults',
+        status: 'success',
+        sources: [{
+          provider: 'HarmonyOS device',
+          backend: 'local_adapter',
+          operation: 'time.now',
+          fetchedAt: now.toISOString()
+        }],
+        data: JSON.parse(JSON.stringify({
+          summary: observationSummary,
+          results: [result]
+        })) as Object,
+        warnings: []
+      };
+    }
     let prompt: string = task.goal;
     if (task.toolId === 'travel.search' || task.toolId === 'train.search' ||
       task.toolId === 'flight.search') {
@@ -1558,9 +1607,22 @@ export class MultiAgentCanaryRuntime {
           if (hostGeneration === undefined || hostGeneration <= 0) {
             return;
           }
-          surface.runtimeOwner = 'multi_agent';
-          surface.runtimeGeneration = hostGeneration;
-          options.onSurface(surface, hostGeneration);
+          let nextSurface: A2uiSurfaceState = surface;
+          const current: A2uiSurfaceState | null = this.currentHostSurface();
+          if (surface.intent === 'calendar' && current !== null && isMultiTaskSurface(current)) {
+            let slotId: string = resolveMultiTaskSlotId(current, 'calendar.event.create');
+            let composite: A2uiSurfaceState = current;
+            if (slotId.length === 0) {
+              composite = appendMultiTaskSlot(composite, 'calendar.event.create');
+              slotId = resolveMultiTaskSlotId(composite, 'calendar.event.create');
+            }
+            nextSurface = mergeSurfaceIntoMultiTaskSurface(
+              composite, slotId, 'calendar.event.create', surface, false
+            );
+          }
+          nextSurface.runtimeOwner = 'multi_agent';
+          nextSurface.runtimeGeneration = hostGeneration;
+          options.onSurface(nextSurface, hostGeneration);
         },
         currentGmailDraftApply
       ),

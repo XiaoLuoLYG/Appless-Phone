@@ -870,6 +870,28 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       return;
     }
     stored.compiling = true;
+    if (stored.request.allowedActionIds.length > 1) {
+      const pending: Promise<VirtualActionIntent | null>[] = [];
+      for (let index = 0; index < stored.request.allowedActionIds.length; index++) {
+        const request = this.singleVirtualRequest(
+          stored.request,
+          stored.request.allowedActionIds[index]
+        );
+        try {
+          pending.push(resolver.resolve(request).catch(
+            (_error: Object): VirtualActionIntent | null => null
+          ));
+        } catch (_error) {
+          pending.push(Promise.resolve(null));
+        }
+      }
+      Promise.all(pending).then((intents: (VirtualActionIntent | null)[]) => {
+        this.finishVirtualResolutions(key, stored, intents);
+      }).catch((_error: Object) => {
+        this.finishVirtualResolutions(key, stored, []);
+      });
+      return;
+    }
     try {
       resolver.resolve(stored.request).then((intent: VirtualActionIntent | null) => {
         this.finishVirtualResolution(key, stored, intent);
@@ -879,6 +901,148 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     } catch (_error) {
       this.finishVirtualResolution(key, stored, null);
     }
+  }
+
+  private singleVirtualRequest(
+    source: ActionPlanRequestPayload,
+    actionId: string
+  ): ActionPlanRequestPayload {
+    const request: ActionPlanRequestPayload = {
+      uiTaskId: source.uiTaskId,
+      dataTaskIds: [],
+      goal: source.goal,
+      allowedActionIds: [actionId],
+      skillId: source.skillId,
+      virtual: true
+    };
+    if (source.personaId !== undefined) {
+      request.personaId = source.personaId;
+    }
+    if (source.inputText !== undefined) {
+      request.inputText = source.inputText;
+    }
+    if (source.currentLocalDate !== undefined) {
+      request.currentLocalDate = source.currentLocalDate;
+    }
+    return request;
+  }
+
+  private finishVirtualResolutions(
+    key: string,
+    stored: StoredPlanRequest,
+    intents: (VirtualActionIntent | null)[]
+  ): void {
+    if (!this.compilationIsActive(key, stored)) {
+      return;
+    }
+    this.pendingPlanRequests.delete(key);
+    this.rememberTerminalPlanRequest(key);
+    if (intents.length !== stored.request.allowedActionIds.length) {
+      this.publishVirtualInputError(
+        stored.message,
+        'ACTION_VIRTUAL_INTENT_INVALID',
+        'Virtual Action resolver returned an invalid intent list.'
+      );
+      return;
+    }
+    const steps: ActionPlanStep[] = [];
+    for (let index = 0; index < intents.length; index++) {
+      const intent = intents[index];
+      if (intent === null || typeof intent !== 'object' || Array.isArray(intent) ||
+        Object.keys(intent).sort().join(',') !== 'autoRun,offer,sourceToolId' ||
+        intent.autoRun !== true ||
+        intent.sourceToolId !== VIRTUAL_ACTION_INTENT_SOURCE_TOOL_ID ||
+        intent.offer === null || typeof intent.offer !== 'object' ||
+        Array.isArray(intent.offer) ||
+        intent.offer.actionId !== stored.request.allowedActionIds[index]) {
+        this.publishVirtualInputError(
+          stored.message,
+          'ACTION_VIRTUAL_INTENT_INVALID',
+          'Virtual Action resolver returned an invalid ordered intent.'
+        );
+        return;
+      }
+      const offer = this.sanitizeActionIntentOffer(intent.offer);
+      if (offer === null) {
+        this.publishVirtualInputError(
+          stored.message,
+          'ACTION_VIRTUAL_INTENT_INVALID',
+          'Virtual Action resolver returned an unauthorized offer.'
+        );
+        return;
+      }
+      steps.push({
+        stepId: 'step-' + (index + 1).toString(),
+        actionId: offer.actionId,
+        args: offer.args
+      });
+    }
+    this.startVirtualPlan(stored, steps);
+  }
+
+  private startVirtualPlan(stored: StoredPlanRequest, steps: ActionPlanStep[]): void {
+    const surfaceId = 'virtual:' + stored.message.taskId;
+    const runId = surfaceId;
+    const planId = 'direct:' + runId;
+    const key = this.runKey(
+      stored.message.conversationId,
+      stored.message.turnId,
+      surfaceId,
+      runId
+    );
+    if (this.runExists(key) || !this.hasLiveCapacity()) {
+      this.publishVirtualInputError(
+        stored.message,
+        this.runExists(key) ? 'ACTION_RUN_DUPLICATE' : 'ACTION_STATE_CAPACITY',
+        this.runExists(key) ?
+          'Action run identity already exists.' :
+          'Action agent live state capacity is exhausted.'
+      );
+      return;
+    }
+    const plan = frozenPlan(
+      stored.message,
+      planId,
+      surfaceId,
+      stored.request.goal,
+      steps,
+      this.catalog
+    );
+    if (plan === null) {
+      this.publishVirtualInputError(
+        stored.message,
+        'ACTION_VIRTUAL_INTENT_INVALID',
+        'Virtual Action plan could not be frozen.'
+      );
+      return;
+    }
+    const context: ActionPlanRunContext = {
+      conversationId: stored.message.conversationId,
+      turnId: stored.message.turnId,
+      taskId: stored.message.taskId,
+      surfaceId,
+      sourceToolId: VIRTUAL_ACTION_INTENT_SOURCE_TOOL_ID,
+      planId,
+      runId,
+      virtualAction: true
+    };
+    const validation = this.runner.validate(plan, context);
+    if (!validation.ok) {
+      this.publishVirtualInputError(
+        stored.message,
+        validation.errorCode,
+        validation.message
+      );
+      return;
+    }
+    this.executeStored({
+      planId,
+      runId,
+      plan,
+      context,
+      taskId: stored.message.taskId,
+      followUpPublished: false
+    }, null, 'step-1');
   }
 
   private finishVirtualResolution(

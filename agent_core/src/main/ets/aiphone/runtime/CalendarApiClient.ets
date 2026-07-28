@@ -452,7 +452,9 @@ function calendarExplicitRange(prompt: string): string[] {
 }
 
 function normalizeCalendarWritePrompt(toolId: string, prompt: string, args: CalendarEventArgs, now: Date): boolean {
-  const create = toolId === 'calendar.event.create' && prompt.indexOf('创建') >= 0 && prompt.indexOf('日程') >= 0;
+  const create = toolId === 'calendar.event.create' &&
+    (prompt.indexOf('创建') >= 0 || prompt.indexOf('新建') >= 0) &&
+    prompt.indexOf('日程') >= 0;
   const update = toolId === 'calendar.event.update' &&
     ((prompt.indexOf('把') >= 0 && prompt.indexOf('日程') >= 0) || prompt.indexOf('原日程：') >= 0);
   if (!create && !update) {

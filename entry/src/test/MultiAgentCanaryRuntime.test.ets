@@ -28,6 +28,7 @@ import {
   LinkedMessageBus,
   ObservationDigest,
   TaskErrorPayload,
+  TurnResultPayload,
   UiSurfaceWriteLease,
   UiSurfaceWriter,
   composioDynamicResultFromObservation,
@@ -120,6 +121,16 @@ const TWO_TOOL_DONE_DECISION: string = '{"personaId":"travel_companion","skillId
   '"dataTasks":[],"uiIntent":{"purpose":"travel.compare",' +
   '"preferredDensity":"comfortable","requiredSections":[]},' +
   '"answer":"出行结果已就绪","reasonCode":"two_tool_ready"}';
+const TIME_DECISION: string = '{"personaId":"default_companion","skillId":"",' +
+  '"requestedCapabilityIds":["time"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"current-time","goal":"查询当前设备时间",' +
+  '"allowedToolIds":["time"],"toolId":"time","input":{},"required":true}],' +
+  '"uiIntent":{"purpose":"time","preferredDensity":"comfortable",' +
+  '"requiredSections":["time"]}}';
+const TIME_DONE_DECISION: string = '{"personaId":"default_companion","skillId":"",' +
+  '"requestedCapabilityIds":["time"],"roundAction":"answer","dataTasks":[],' +
+  '"uiIntent":{"purpose":"time","preferredDensity":"comfortable","requiredSections":[]},' +
+  '"answer":"当前设备时间已返回。"}';
 const FLIGHT_TRAIN_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
   '"requestedCapabilityIds":["flight.search","train.search"],"roundAction":"execute",' +
   '"dataTasks":[{"localId":"flight","goal":"search flights",' +
@@ -178,6 +189,14 @@ const WORLDCUP_ACTION_DECISION: string = '{"personaId":"default_companion","skil
   '"uiIntent":{"purpose":"worldcup.open","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"actionIntent":{"goal":"open the World Cup page",' +
   '"allowedActionIds":["worldcup.open"]},"reasonCode":"worldcup_action"}';
+const MIXED_DATA_ACTION_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["travel.search","worldcup.open"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"travel","goal":"search travel options",' +
+  '"allowedToolIds":["travel.search"],"toolId":"travel.search",' +
+  '"input":{"query":"北京到上海"},"required":true}],' +
+  '"uiIntent":{"purpose":"travel.search","preferredDensity":"comfortable",' +
+  '"requiredSections":["travel"]},"actionIntent":{"goal":"open the World Cup page",' +
+  '"allowedActionIds":["worldcup.open"]},"reasonCode":"mixed_data_action"}';
 const MAPS_ACTION_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
   '"requestedCapabilityIds":["maps.route.open"],"roundAction":"execute","dataTasks":[],' +
   '"uiIntent":{"purpose":"maps.route.open","preferredDensity":"comfortable",' +
@@ -1211,6 +1230,39 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(outcome.status).assertEqual('success');
       expect(outcome.message).assertEqual('你好');
       expect(surfaces.length).assertEqual(0);
+      runtime.dispose();
+    });
+
+    it('executes time from the device clock without calling an external provider', 0, async () => {
+      const model = new QueueModel([TIME_DECISION, TIME_DONE_DECISION]);
+      const surfaces: A2uiSurfaceState[] = [];
+      let externalCalls: number = 0;
+      const options = canaryOptions(
+        model,
+        new RecordingGenericExecutor(),
+        new RecordingOpener(),
+        surfaces,
+        []
+      );
+      options.dataExecutor = undefined;
+      options.structuredToolCall = async (
+        _toolId: string,
+        _prompt: string,
+        _args: Object
+      ): Promise<DataResult> => {
+        externalCalls++;
+        throw new Error('time must not call an external provider');
+      };
+      const runtime = new MultiAgentCanaryRuntime(options);
+
+      const outcome = await runtime.submit('查一下现在的时间', {
+        text: ''
+      }) as MultiAgentSettledOutcome;
+
+      expect(outcome.status).assertEqual('success');
+      expect(externalCalls).assertEqual(0);
+      expect(model.prompts[0].indexOf('"toolId":"time"')).assertLarger(-1);
+      expect(surfaces.length).assertLarger(0);
       runtime.dispose();
     });
 
@@ -2364,6 +2416,48 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(bus.count(AgentMessageType.ACTION_PLAN_REQUEST)).assertEqual(2);
       expect(bus.count(AgentMessageType.ACTION_RESULT)).assertEqual(2);
       expect(bus.count(AgentMessageType.TASK_CREATE_DATA)).assertEqual(0);
+      runtime.dispose();
+    });
+
+    it('publishes one real terminal for a mixed Data and virtual Action turn', 0, async () => {
+      const calls: RecordedPageAction[] = [];
+      const bus = new TrackingBus();
+      const options = canaryOptions(
+        new QueueModel([MIXED_DATA_ACTION_DECISION]),
+        new TwoToolExecutor(),
+        new RecordingOpener(),
+        [],
+        [],
+        bus
+      );
+      options.pageAction = async (
+        actionId: string,
+        args: Object,
+        context: ActionExecutionContext
+      ): Promise<ActionExecutionResult> => {
+        calls.push({ actionId, args, context });
+        return {
+          status: 'success',
+          output: JSON.parse('{"route":"pages/A2uiHome/AnythingDemo","status":"opened"}') as Object
+        };
+      };
+      const runtime = new MultiAgentCanaryRuntime(options);
+
+      const outcome = await runtime.submit(
+        '查询北京到上海的出行方案并打开世界杯页面',
+        { text: '' }
+      ) as MultiAgentSettledOutcome;
+      const terminals = bus.messages.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TURN_RESULT
+      );
+      const terminal = terminals[0].payload as TurnResultPayload;
+
+      expect(outcome.status).assertEqual('success');
+      expect(calls.length).assertEqual(1);
+      expect(calls[0].actionId).assertEqual('worldcup.open');
+      expect(terminals.length).assertEqual(1);
+      expect(terminal.roundCount).assertEqual(1);
+      expect(terminal.surfaceId).assertEqual(outcome.surfaceId);
       runtime.dispose();
     });
 

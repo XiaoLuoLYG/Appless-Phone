@@ -362,10 +362,10 @@ export class AiphoneRegisteredActionExecutor implements RegisteredActionExecutor
         message: 'Action is not registered for product execution.'
       };
     }
-    const current = context.isSurfaceEntry === false ?
-      this.catalog.validateRegisteredStep(actionId, args) :
-      context.virtualAction === true ?
+    const current = context.virtualAction === true ?
         this.catalog.validateActionIntentExecution(actionId, args) :
+      context.isSurfaceEntry === false ?
+        this.catalog.validateRegisteredStep(actionId, args) :
         context.pageActionId !== undefined && context.pageActionId.length > 0 ?
           this.catalog.validatePageExecution(
             context.conversationId,

@@ -1632,6 +1632,67 @@ export default function firecrawlMcpClientTest() {
         expect(output.results.length).assertEqual(3);
       });
 
+    it('starts pooled shopping scrapes together before the first source settles', 0,
+      async () => {
+        const firstUrl = 'https://zol.com.cn/v12-concurrent';
+        const secondUrl = 'https://pconline.com.cn/v12-concurrent';
+        const scripted = new ScriptedGenericMcpClient();
+        let releaseFirst: () => void = (): void => {};
+        let resolveFirstStarted: () => void = (): void => {};
+        let secondStarted = false;
+        const firstGate = new Promise<void>((resolve: () => void): void => {
+          releaseFirst = resolve;
+        });
+        const firstStarted = new Promise<void>((resolve: () => void): void => {
+          resolveFirstStarted = resolve;
+        });
+        scripted.callHandler = async (
+          registration: DynamicToolRegistration,
+          _credentialValue: string,
+          args: Object
+        ): Promise<McpToolCallResult> => {
+          if (registration.mcpToolName === 'firecrawl_search') {
+            return successfulPayload(searchPayload([
+              searchItem(firstUrl, '戴森 V12 Detect Slim Fluffy'),
+              searchItem(secondUrl, '戴森 V12 Detect Slim Fluffy')
+            ]));
+          }
+          const raw = JSON.stringify(args);
+          if (raw.indexOf(firstUrl) >= 0) {
+            resolveFirstStarted();
+            await firstGate;
+            return successfulPayload(productPayload(firstUrl, {
+              name: '戴森 V12 Detect Slim Fluffy',
+              brand: '戴森',
+              model: 'V12 Detect Slim Fluffy',
+              priceText: '¥3,999'
+            }));
+          }
+          secondStarted = true;
+          return successfulPayload(productPayload(secondUrl, {
+            name: '戴森 V12 Detect Slim Fluffy',
+            brand: '戴森',
+            model: 'V12 Detect Slim Fluffy',
+            priceText: '¥3,899'
+          }));
+        };
+
+        const outputPromise = new FirecrawlMcpClient(scripted).execute(
+          'shopping.research',
+          '商品比价',
+          '',
+          { query: '戴森 V12 Detect Slim Fluffy 现在多少钱' } as ShoppingArgs,
+          config()
+        );
+        await firstStarted;
+        await Promise.resolve();
+        const startedTogether = secondStarted;
+        releaseFirst();
+        await outputPromise;
+
+        expect(startedTogether).assertTrue();
+      });
+
     it('isolates a failed pooled candidate without rendering a failure card', 0,
       async () => {
         const zolUrl = 'https://zol.com.cn/v12';

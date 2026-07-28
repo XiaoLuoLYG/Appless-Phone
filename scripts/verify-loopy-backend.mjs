@@ -355,7 +355,7 @@ function hasProductionCanarySubmitTimeout(source) {
       continue;
     }
     directProperties++;
-    if (/^submitTimeoutMs\s*:\s*45000\s*[,}]/.test(code.slice(index))) {
+    if (/^submitTimeoutMs\s*:\s*90000\s*[,}]/.test(code.slice(index))) {
       exactProperties++;
     }
     index += 'submitTimeoutMs'.length - 1;
@@ -548,7 +548,7 @@ function hasLeaderObserveReplan(source) {
 }
 
 function hasValidatedUiA2uiWrite(source) {
-  const body = executableDeclarationBody(source, 'private async handleUiTask(');
+  const body = executableDeclarationBody(source, 'private async startUiTask(');
   const validate = body.search(/this\.validateRenderedJsonl\s*\(\s*rendered\s*,\s*false\s*\)\s*;/);
   const write = body.search(/await\s+this\.writer\.write\s*\(/);
   return validate >= 0 && write > validate;
@@ -712,28 +712,28 @@ Use Google Maps for explicit provider requests.`;
     };
   `;
   assert(
-    hasProductionCanarySubmitTimeout(canaryOptionsFixture('submitTimeoutMs: 45000,')),
+    hasProductionCanarySubmitTimeout(canaryOptionsFixture('submitTimeoutMs: 90000,')),
     'verifier accepts a live direct production timeout'
   );
   assert(
-    !hasProductionCanarySubmitTimeout(canaryOptionsFixture('// submitTimeoutMs: 45000,')),
+    !hasProductionCanarySubmitTimeout(canaryOptionsFixture('// submitTimeoutMs: 90000,')),
     'verifier rejects a commented production timeout decoy'
   );
   assert(
-    !hasProductionCanarySubmitTimeout(canaryOptionsFixture("label: 'submitTimeoutMs: 45000',")),
+    !hasProductionCanarySubmitTimeout(canaryOptionsFixture("label: 'submitTimeoutMs: 90000',")),
     'verifier rejects a string production timeout decoy'
   );
   assert(
-    !hasProductionCanarySubmitTimeout(canaryOptionsFixture('nested: { submitTimeoutMs: 45000 },')),
+    !hasProductionCanarySubmitTimeout(canaryOptionsFixture('nested: { submitTimeoutMs: 90000 },')),
     'verifier rejects a nested production timeout decoy'
   );
   assert(
-    !hasProductionCanarySubmitTimeout(canaryOptionsFixture('not_submitTimeoutMs: 45000,')),
+    !hasProductionCanarySubmitTimeout(canaryOptionsFixture('not_submitTimeoutMs: 90000,')),
     'verifier rejects a longer identifier production timeout decoy'
   );
   assert(
     !hasProductionCanarySubmitTimeout(canaryOptionsFixture(
-      'settingsFingerprint: /submitTimeoutMs: 45000,/.source,'
+      'settingsFingerprint: /submitTimeoutMs: 90000,/.source,'
     )),
     'verifier rejects a regex expression production timeout decoy'
   );
@@ -747,7 +747,7 @@ Use Google Maps for explicit provider requests.`;
   );
   assert(
     !hasProductionCanarySubmitTimeout(canaryOptionsFixture(
-      'submitTimeoutMs: 45000,\n      submitTimeoutMs: 45000,'
+      'submitTimeoutMs: 90000,\n      submitTimeoutMs: 90000,'
     )),
     'verifier rejects duplicate direct production timeouts'
   );
@@ -895,7 +895,7 @@ Use Google Maps for explicit provider requests.`;
   );
 
   const uiFixture = `class UiAgent {
-    private async handleUiTask() {
+    private async startUiTask() {
       this.validateRenderedJsonl(rendered, false);
       await this.writer.write(surface);
     }
@@ -1175,7 +1175,7 @@ function verifySourceContracts() {
   );
   assert(
     hasProductionCanarySubmitTimeout(a2uiHome),
-    'production multi-agent turn deadline is 45000 ms'
+    'production multi-agent turn deadline is 90000 ms'
   );
   assert(!a2uiHome.includes("this.openExternalUrl(uri, ['tel'"), 'hotel opener does not authorize dialer schemes');
   assert(
@@ -1196,9 +1196,10 @@ function verifySourceContracts() {
     'public compatibility module derives the runtime registry'
   );
   assert(runtimeIds.length === runtimeUniqueIds.size, 'runtime tool ids are unique');
-  assert(runtimeIds.length === 52, 'AIPhone runtime tool registry has expected fixed count', `found ${runtimeIds.length}`);
+  assert(runtimeIds.length === 53, 'AIPhone runtime tool registry has expected fixed count', `found ${runtimeIds.length}`);
   for (const id of [
     'travel.search',
+    'time',
     'train.search',
     'flight.search',
     'food.search',

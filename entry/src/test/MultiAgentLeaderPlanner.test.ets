@@ -109,6 +109,31 @@ const FOOD_COFFEE_DECISION: string = '{"personaId":"travel_companion","skillId":
   '"input":{"query":"咖啡"},"required":true}],"uiIntent":{' +
   '"purpose":"展示咖啡选择","preferredDensity":"comfortable",' +
   '"requiredSections":["food"]}}';
+const MIXED_DATA_ACTION_QUERY: string =
+  '我现在要打车从深圳华为坂田基地到秋港花园，帮我点一杯瑞幸生椰拿铁，半糖少冰，转账给罗一格5美金';
+const MIXED_DATA_ACTION_DECISION: string =
+  '{"personaId":"travel_companion","skillId":"","requestedCapabilityIds":[' +
+  '"ride.estimate","luckin.order.preview","payment.send"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"ride","goal":"查询从深圳华为坂田基地到秋港花园的打车估价",' +
+  '"allowedToolIds":["ride.estimate"],"toolId":"ride.estimate",' +
+  '"input":{"origin":"深圳华为坂田基地","destination":"秋港花园"},' +
+  '"required":true}],"uiIntent":{"purpose":"展示打车估价、瑞幸预览和转账确认",' +
+  '"preferredDensity":"comfortable","requiredSections":["ride","luckin","payment"]},' +
+  '"actionIntent":{"goal":"预览瑞幸订单，然后打开转账确认",' +
+  '"allowedActionIds":["luckin.order.preview","payment.send"]},' +
+  '"reasonCode":"mixed_data_action"}';
+const MIXED_MISPLACED_ACTION_DECISION: string = MIXED_DATA_ACTION_DECISION
+  .replace(
+    '"dataTasks":[{"localId":"ride"',
+    '"dataTasks":[{"localId":"luckin","goal":"预览瑞幸订单",' +
+      '"allowedToolIds":["luckin.order.preview"],"toolId":"luckin.order.preview",' +
+      '"input":{"prompt":"帮我点一杯瑞幸生椰拿铁，半糖少冰"},"required":true},' +
+      '{"localId":"ride"'
+  )
+  .replace(
+    '"allowedActionIds":["luckin.order.preview","payment.send"]',
+    '"allowedActionIds":["payment.send"]'
+  );
 const EXPLICIT_GOOGLE_MAPS_AS_FOOD_DECISION: string =
   '{"personaId":"travel_companion","skillId":"","requestedCapabilityIds":["food.search"],' +
   '"roundAction":"execute","dataTasks":[{"localId":"places","goal":"在 Google Maps 搜索附近中餐",' +
@@ -222,6 +247,39 @@ const VALID_ANSWER_DECISION: string = LIVE_ANSWER_WITHOUT_REASON_CODE.substring(
   0,
   LIVE_ANSWER_WITHOUT_REASON_CODE.length - 1
 ) + ',"reasonCode":"greeting"}';
+const EXPLICIT_SERIAL_QUERY: string =
+  '查一下现在的时间，查好时间之后帮我打车从华为坂田基地打车到秋岗花园，再在明天的这个时间新建一个会议日程';
+const EXPLICIT_SERIAL_QUERY_WITH_DURATION: string =
+  '查一下现在的时间，查好时间之后帮我打车从华为坂田基地打车到秋岗花园，' +
+  '再在明天的这个时间新建一个30分钟的会议日程';
+const EXPLICIT_SERIAL_FIRST_DECISION: string =
+  '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["time","ride.estimate","calendar.event.create"],' +
+  '"roundAction":"execute","dataTasks":[' +
+  '{"localId":"time","goal":"查询当前时间","allowedToolIds":["time"],' +
+  '"toolId":"time","input":{},"required":true},' +
+  '{"localId":"ride","goal":"查询打车费用","allowedToolIds":["ride.estimate"],' +
+  '"toolId":"ride.estimate","input":{"origin":"华为坂田基地","destination":"秋岗花园",' +
+  '"city":"深圳"},"required":true}],"uiIntent":{"purpose":"串行执行请求",' +
+  '"preferredDensity":"comfortable","requiredSections":["time","ride","calendar"]},' +
+  '"actionIntent":{"goal":"创建明天同一时间的会议日程",' +
+  '"allowedActionIds":["calendar.event.create"]}}';
+const EXPLICIT_SERIAL_SECOND_DECISION: string =
+  '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["ride.estimate","calendar.event.create"],' +
+  '"roundAction":"execute","dataTasks":[' +
+  '{"localId":"ride","goal":"查询打车费用","allowedToolIds":["ride.estimate"],' +
+  '"toolId":"ride.estimate","input":{"origin":"华为坂田基地","destination":"秋岗花园",' +
+  '"city":"深圳"},"required":true}],"uiIntent":{"purpose":"串行执行请求",' +
+  '"preferredDensity":"comfortable","requiredSections":["ride","calendar"]},' +
+  '"actionIntent":{"goal":"创建明天同一时间的会议日程",' +
+  '"allowedActionIds":["calendar.event.create"]}}';
+const EXPLICIT_SERIAL_THIRD_DECISION: string =
+  '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["calendar.event.create"],"roundAction":"execute","dataTasks":[],' +
+  '"uiIntent":{"purpose":"创建明天同一时间的会议日程","preferredDensity":"comfortable",' +
+  '"requiredSections":["calendar"]},"actionIntent":{"goal":"创建明天同一时间的会议日程",' +
+  '"allowedActionIds":["calendar.event.create"]}}';
 
 function sameRoundDependencyDecision(
   sourceToolId: string,
@@ -453,6 +511,32 @@ class C10C11PromptAwareModel implements LocalModel {
       return hasSelectionContract ? actionDecision('luckin.order.preview') : FOOD_COFFEE_DECISION;
     }
     return hasSelectionContract ? actionDecision('memory.update') : FOOD_COFFEE_DECISION;
+  }
+}
+
+class MixedOwnershipPromptAwareModel implements LocalModel {
+  prompts: string[] = [];
+
+  async complete(prompt: string): Promise<string> {
+    this.prompts.push(prompt);
+    const hasMixedOwnershipContract: boolean = prompt.indexOf(
+      'For a mixed request, put Data-owned capabilities only in dataTasks and Action-owned capabilities only in actionIntent.'
+    ) >= 0;
+    if (hasMixedOwnershipContract) {
+      return MIXED_DATA_ACTION_DECISION;
+    }
+    return MIXED_DATA_ACTION_DECISION
+      .replace(
+        '"dataTasks":[{"localId":"ride"',
+        '"dataTasks":[{"localId":"luckin","goal":"点瑞幸","allowedToolIds":[' +
+          '"luckin.order.preview"],"toolId":"luckin.order.preview","input":{},' +
+          '"required":true},{"localId":"ride"'
+      )
+      .replace(
+        ',"actionIntent":{"goal":"预览瑞幸订单，然后打开转账确认",' +
+          '"allowedActionIds":["luckin.order.preview","payment.send"]}',
+        ''
+      );
   }
 }
 
@@ -2730,13 +2814,13 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.prompts.length).assertEqual(2);
     });
 
-    it('repairs a capability-valid plan whose selected skill does not declare that capability', 0,
+    it('clears a selected skill that does not declare the complete capability set', 0,
       async () => {
         const invalidSkill: string = SOCIAL_ONLY_DECISION.replace(
           '"skillId":""',
           '"skillId":"travel-planning"'
         );
-        const model = new QueueLocalModel([invalidSkill, SOCIAL_ONLY_DECISION]);
+        const model = new QueueLocalModel([invalidSkill, invalidSkill]);
 
         const decision = await new MultiAgentLeaderPlanner(model).plan(
           inputMessage(),
@@ -2746,14 +2830,186 @@ export default function multiAgentLeaderPlannerTest() {
           (): boolean => true
         );
 
-        expect(model.prompts.length).assertEqual(2);
-        expect(model.prompts[1].indexOf('Rejected decision: ' + invalidSkill)).assertLarger(-1);
+        expect(model.prompts.length).assertEqual(1);
         expect(decision.skillId).assertEqual('');
         expect(decision.requestedCapabilityIds.join(',')).assertEqual('social.feed.search');
         expect(decision.dataTasks[0].toolId).assertEqual('social.feed.search');
       });
 
-    it('rejects a skill repair that changes task input UI intent or action intent', 0, async () => {
+    it('executes explicitly ordered independent capabilities one planning round at a time', 0,
+      async () => {
+        const context = actionOwnerContext();
+        context.tools.push({
+          toolId: 'time',
+          domain: 'system',
+          intent: 'time.now',
+          riskLevel: 'read',
+          registeredBackends: ['local_adapter'],
+          inputSchema: 'emptyObject',
+          outputSchema: 'genericToolResults',
+          actions: []
+        }, {
+          toolId: 'ride.estimate',
+          domain: 'ride',
+          intent: 'ride.estimate',
+          riskLevel: 'read',
+          registeredBackends: ['local_adapter'],
+          inputSchema: 'rideEstimateQuery',
+          outputSchema: 'genericToolResults',
+          actions: []
+        });
+        const first = await new MultiAgentLeaderPlanner(
+          new QueueLocalModel([EXPLICIT_SERIAL_FIRST_DECISION])
+        ).plan(
+          inputMessage(),
+          { text: EXPLICIT_SERIAL_QUERY },
+          context,
+          1
+        );
+        context.lockedPersonaId = 'travel_companion';
+        context.lockedSkillId = '';
+        const second = await new MultiAgentLeaderPlanner(
+          new QueueLocalModel([EXPLICIT_SERIAL_SECOND_DECISION])
+        ).plan(
+          inputMessage(),
+          {
+            text: EXPLICIT_SERIAL_QUERY,
+            recentObservations: [{
+              taskId: 'input-1:round-1:time',
+              toolId: 'time',
+              status: 'success',
+              summary: '2026-07-27 11:30',
+              entityRefs: []
+            }]
+          },
+          context,
+          2
+        );
+        const third = await new MultiAgentLeaderPlanner(
+          new QueueLocalModel([EXPLICIT_SERIAL_THIRD_DECISION])
+        ).plan(
+          inputMessage(),
+          {
+            text: EXPLICIT_SERIAL_QUERY,
+            recentObservations: [{
+              taskId: 'input-1:round-1:time',
+              toolId: 'time',
+              status: 'success',
+              summary: '2026-07-27 11:30',
+              entityRefs: []
+            }, {
+              taskId: 'input-1:round-2:ride',
+              toolId: 'ride.estimate',
+              status: 'success',
+              summary: '滴滴估价已返回',
+              entityRefs: []
+            }]
+          },
+          context,
+          3
+        );
+
+        expect(first.dataTasks.length).assertEqual(1);
+        expect(first.dataTasks[0].toolId).assertEqual('time');
+        expect(first.requestedCapabilityIds.join(',')).assertEqual('time');
+        expect(first.actionIntent === undefined).assertTrue();
+        expect(second.dataTasks.length).assertEqual(1);
+        expect(second.dataTasks[0].toolId).assertEqual('ride.estimate');
+        expect(second.requestedCapabilityIds.join(',')).assertEqual('ride.estimate');
+        expect(second.actionIntent === undefined).assertTrue();
+        expect(third.roundAction).assertEqual('clarify');
+        expect(third.dataTasks.length).assertEqual(0);
+        expect(third.actionIntent === undefined).assertTrue();
+        expect(third.requestedCapabilityIds.join(',')).assertEqual('calendar.event.create');
+        expect(third.answer!.indexOf('结束时间或时长')).assertLarger(-1);
+
+        const thirdWithDuration = await new MultiAgentLeaderPlanner(
+          new QueueLocalModel([EXPLICIT_SERIAL_THIRD_DECISION])
+        ).plan(
+          inputMessage(),
+          {
+            text: EXPLICIT_SERIAL_QUERY_WITH_DURATION,
+            recentObservations: [{
+              taskId: 'input-1:round-1:time',
+              toolId: 'time',
+              status: 'success',
+              summary: '2026-07-27 11:30',
+              entityRefs: []
+            }, {
+              taskId: 'input-1:round-2:ride',
+              toolId: 'ride.estimate',
+              status: 'success',
+              summary: '滴滴估价已返回',
+              entityRefs: []
+            }]
+          },
+          context,
+          3
+        );
+        expect(thirdWithDuration.roundAction).assertEqual('execute');
+        expect(thirdWithDuration.actionIntent === undefined).assertFalse();
+      });
+
+    it('keeps mixed read and Action-owned capabilities in their declared agents', 0, async () => {
+      const context = actionOwnerContext();
+      context.tools.push({
+        toolId: 'ride.estimate',
+        domain: 'ride',
+        intent: 'ride.estimate',
+        riskLevel: 'read',
+        registeredBackends: ['local_adapter'],
+        inputSchema: 'rideEstimateQuery',
+        outputSchema: 'genericToolResults',
+        actions: []
+      });
+      const model = new MixedOwnershipPromptAwareModel();
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: MIXED_DATA_ACTION_QUERY },
+        context,
+        1
+      );
+
+      expect(model.prompts.length).assertEqual(1);
+      expect(decision.requestedCapabilityIds.join(',')).assertEqual(
+        'ride.estimate,luckin.order.preview,payment.send'
+      );
+      expect(decision.dataTasks.length).assertEqual(1);
+      expect(decision.dataTasks[0].toolId).assertEqual('ride.estimate');
+      expect(decision.actionIntent!.allowedActionIds.join(',')).assertEqual(
+        'luckin.order.preview,payment.send'
+      );
+    });
+
+    it('normalizes one model-selected mixed Action into its declared owner', 0, async () => {
+      const context = actionOwnerContext();
+      context.tools.push({
+        toolId: 'ride.estimate',
+        domain: 'ride',
+        intent: 'ride.estimate',
+        riskLevel: 'read',
+        registeredBackends: ['local_adapter'],
+        inputSchema: 'rideEstimateQuery',
+        outputSchema: 'genericToolResults',
+        actions: []
+      });
+      const model = new QueueLocalModel([MIXED_MISPLACED_ACTION_DECISION]);
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: MIXED_DATA_ACTION_QUERY },
+        context,
+        1
+      );
+
+      expect(model.prompts.length).assertEqual(1);
+      expect(decision.dataTasks.length).assertEqual(1);
+      expect(decision.dataTasks[0].toolId).assertEqual('ride.estimate');
+      expect(decision.actionIntent!.allowedActionIds.join(',')).assertEqual(
+        'luckin.order.preview,payment.send'
+      );
+    });
+
+    it('does not request a second model decision while clearing an invalid skill', 0, async () => {
       const invalidSocialSkill: string = SOCIAL_ONLY_DECISION.replace(
         '"skillId":""',
         '"skillId":"travel-planning"'
@@ -2762,22 +3018,20 @@ export default function multiAgentLeaderPlannerTest() {
         '"platforms":["x","slack"]',
         '"platforms":["x"]'
       );
-      const changedUi: string = SOCIAL_ONLY_DECISION.replace(
-        '"purpose":"展示 SocialHub 消息"',
-        '"purpose":"展示不同内容"'
-      );
-      const originalAction: string = actionDecision('payment.create').replace(
-        '"skillId":""',
-        '"skillId":"travel-planning"'
-      );
-      const changedAction: string = actionDecision('payment.create').replace(
-        '"goal":"perform requested action"',
-        '"goal":"perform a different action"'
+      const model = new QueueLocalModel([invalidSocialSkill, changedInput]);
+
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: '帮我查看我今天 X 和 Slack 上的消息' },
+        planningContext(),
+        1,
+        (): boolean => true
       );
 
-      expect(await repairFails(invalidSocialSkill, changedInput, planningContext())).assertTrue();
-      expect(await repairFails(invalidSocialSkill, changedUi, planningContext())).assertTrue();
-      expect(await repairFails(originalAction, changedAction, planningContext())).assertTrue();
+      expect(model.prompts.length).assertEqual(1);
+      expect(decision.skillId).assertEqual('');
+      expect(JSON.stringify(decision.dataTasks[0].input))
+        .assertEqual('{"platforms":["x","slack"]}');
     });
 
     it('rejects non-exact JSON, fields, IDs, ownership, and persona-skill pairs', 0, async () => {
@@ -2798,6 +3052,10 @@ export default function multiAgentLeaderPlannerTest() {
       const actionOwnedReadTool = PARALLEL_DECISION.replace(/flight\.search/g, 'hotel.navigate');
       const wrongSkill = PARALLEL_DECISION.replace('"skillId":""', '"skillId":"missing-skill"');
       const duplicateLocalId = PARALLEL_DECISION.replace('"localId":"train"', '"localId":"flight"');
+      const delimitedLocalId = PARALLEL_DECISION.replace(
+        '"localId":"train"',
+        '"localId":"step:round-1:x"'
+      );
       const extraTask = PARALLEL_DECISION.replace(
         '"input":{},"required":false',
         '"input":{},"required":false,"providerOutput":{"secret":"x"}'
@@ -2818,6 +3076,7 @@ export default function multiAgentLeaderPlannerTest() {
       expect(await fails(actionOwnedReadTool)).assertTrue();
       expect(await fails(wrongSkill)).assertTrue();
       expect(await fails(duplicateLocalId)).assertTrue();
+      expect(await fails(delimitedLocalId)).assertTrue();
       expect(await fails(extraTask)).assertTrue();
       expect(await fails(duplicateNested)).assertTrue();
       expect(await fails(ANSWER_WITHOUT_ANSWER_DECISION)).assertTrue();

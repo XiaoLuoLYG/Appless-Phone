@@ -84,6 +84,12 @@ class ActionLookup implements ToolDefinitionLookup {
     if (toolId === 'memory.update') {
       return definition(toolId, 'draft', ['memory.update']);
     }
+    if (toolId === 'luckin.order.preview') {
+      return definition(toolId, 'draft', []);
+    }
+    if (toolId === 'payment.send') {
+      return definition(toolId, 'confirm_required', []);
+    }
     return null;
   }
 }
@@ -334,6 +340,32 @@ class MemoryVirtualIntentResolver implements VirtualActionIntentResolver {
           '"memoryText":"No saved preference. 我在北京",' +
           '"reason":"User explicitly stated a stable location."}'
         ) as Object
+      },
+      autoRun: true
+    };
+  }
+}
+
+class MixedVirtualIntentResolver implements VirtualActionIntentResolver {
+  readonly actionIds: string[] = [];
+
+  async resolve(request: ActionPlanRequestPayload): Promise<VirtualActionIntent | null> {
+    if (request.virtual !== true || request.allowedActionIds.length !== 1) {
+      return null;
+    }
+    const actionId = request.allowedActionIds[0];
+    this.actionIds.push(actionId);
+    if (actionId !== 'luckin.order.preview' && actionId !== 'payment.send') {
+      return null;
+    }
+    return {
+      sourceToolId: 'virtual.action-intent',
+      offer: {
+        offerId: 'virtual-' + actionId,
+        actionId,
+        label: actionId,
+        variant: 'primary',
+        args: JSON.parse('{"originalQuery":"mixed action request"}') as Object
       },
       autoRun: true
     };
@@ -759,6 +791,56 @@ export default function actionAgentTest() {
       expect(result.planId).assertEqual('direct:virtual:unowned-virtual-request');
       expect(result.runId).assertEqual('virtual:unowned-virtual-request');
       expect(executor.actionIds.length).assertEqual(0);
+      agent.stop();
+      observer.close();
+    });
+
+    it('runs multiple exact virtual Action entries serially without compiler or UI', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const compiler = new ScriptedActionPlanCompiler(compiledPlan());
+      const virtualResolver = new MixedVirtualIntentResolver();
+      const executor = new RecordingRegisteredExecutor();
+      const agent = new ActionAgent(
+        bus,
+        catalog(new ActionLookup()),
+        noOffers,
+        executor,
+        compiler,
+        virtualResolver
+      );
+      const observer = bus.openReader();
+      agent.start();
+
+      bus.publish(message(
+        AgentMessageType.ACTION_PLAN_REQUEST,
+        {
+          uiTaskId: 'input-1:round-1:virtual',
+          dataTaskIds: [],
+          goal: 'Preview coffee, then open payment confirmation',
+          allowedActionIds: ['luckin.order.preview', 'payment.send'],
+          personaId: 'food_companion',
+          skillId: '',
+          inputText: 'mixed action request',
+          virtual: true
+        } as ActionPlanRequestPayload,
+        'turn-1',
+        'mixed-virtual-request'
+      ));
+      const observed = await receiveUntilResult(observer);
+      const result = observed[observed.length - 1].payload as ActionResultPayload;
+
+      expect(result.status).assertEqual('success');
+      expect(result.completedStepIds.join(',')).assertEqual('step-1,step-2');
+      expect(virtualResolver.actionIds.join(',')).assertEqual(
+        'luckin.order.preview,payment.send'
+      );
+      expect(executor.actionIds.join(',')).assertEqual(
+        'luckin.order.preview,payment.send'
+      );
+      expect(compiler.goals.length).assertEqual(0);
+      expect(messagesOfType(observed, AgentMessageType.ACTION_PLAN_DRAFT).length).assertEqual(0);
+      expect(messagesOfType(observed, AgentMessageType.ACTION_PLAN_READY).length).assertEqual(0);
+      expect(messagesOfType(observed, AgentMessageType.TASK_CREATE_UI).length).assertEqual(0);
       agent.stop();
       observer.close();
     });

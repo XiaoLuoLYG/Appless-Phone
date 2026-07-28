@@ -45,15 +45,27 @@ export function mergeSectionIntoDataModel(
   if (boardValue !== undefined && boardValue !== null &&
     typeof boardValue === 'object' && !Array.isArray(boardValue)) {
     const board = boardValue as MultiTaskBoardData;
+    let found: boolean = false;
     for (let index = 0; index < board.sections.length; index++) {
       if (board.sections[index].slotId !== slotId) {
         continue;
       }
+      found = true;
       board.sections[index].title = content.title;
       board.sections[index].status = content.status;
       board.sections[index].summary = content.summary;
       board.sections[index].completionReply = content.completionReply;
       break;
+    }
+    if (!found) {
+      board.sections.push({
+        slotId,
+        toolId: content.toolId,
+        title: content.title,
+        status: content.status,
+        summary: content.summary,
+        completionReply: content.completionReply
+      });
     }
     if (activateSlot) {
       board.activeSectionId = slotId;
