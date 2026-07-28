@@ -202,7 +202,7 @@ class TwoDataRoundPlanner implements LeaderPlanner {
       uiIntent: {
         purpose: 'combined results', preferredDensity: 'comfortable', requiredSections: ['place']
       },
-      reasonCode: 'place_search'
+      reasonCode: 'dependency_requires_next_round'
     };
   }
 }
@@ -1241,7 +1241,7 @@ export default function multiAgentRuntimeTest() {
 
       expect(result.kind).assertEqual('settled');
       expect(result.status).assertEqual('success');
-      expect(result.message).assertEqual('酒店结果已就绪');
+      expect(result.message).assertEqual('Showing the available tool results.');
       expect(writer.resultSurfaceId.length > 0).assertTrue();
       expect(result.surfaceId).assertEqual(writer.resultSurfaceId);
       runtime.dispose();

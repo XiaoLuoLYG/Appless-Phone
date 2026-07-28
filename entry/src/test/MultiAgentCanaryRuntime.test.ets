@@ -1266,11 +1266,12 @@ export default function multiAgentCanaryRuntimeTest() {
       runtime.dispose();
     });
 
-    it('owns one independent two-tool turn', 0, async () => {
+    it('owns one independent two-tool turn without a terminal Leader replan', 0, async () => {
       const executor = new TwoToolExecutor();
       const bus = new TrackingBus();
+      const model = new QueueModel([TWO_TOOL_DECISION, TWO_TOOL_DONE_DECISION]);
       const runtime = new MultiAgentCanaryRuntime(canaryOptions(
-        new QueueModel([TWO_TOOL_DECISION, TWO_TOOL_DONE_DECISION]),
+        model,
         executor,
         new RecordingOpener(),
         [],
@@ -1286,6 +1287,7 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(outcome.status).assertEqual('success');
       expect(executor.calls.sort().join(',')).assertEqual('train.search,travel.search');
       expect(bus.count(AgentMessageType.TASK_CREATE_DATA)).assertEqual(2);
+      expect(model.prompts.length).assertEqual(1);
       runtime.dispose();
     });
 
@@ -1357,10 +1359,10 @@ export default function multiAgentCanaryRuntimeTest() {
         const calls: StructuredToolCallRecord[] = [];
         const options: MultiAgentCanaryOptions = canaryOptions(
           new QueueModel([
-            C02_QUERY_DECISION, C02_QUERY_DONE,
-            F01_QUERY_DECISION, F01_QUERY_DONE,
-            F02_QUERY_DECISION, F02_QUERY_DONE,
-            DYNAMIC_READ_DECISION, DYNAMIC_READ_DONE
+            C02_QUERY_DECISION,
+            F01_QUERY_DECISION,
+            F02_QUERY_DECISION,
+            DYNAMIC_READ_DECISION
           ]),
           new CanaryHotelExecutor(),
           new RecordingOpener(),
@@ -1409,12 +1411,8 @@ export default function multiAgentCanaryRuntimeTest() {
         runtime.dispose();
       });
 
-    it('executes C02 travel Data only once when round two repeats it before repair', 0, async () => {
-      const model = new QueueModel([
-        C02_QUERY_DECISION,
-        C02_QUERY_DECISION,
-        C02_QUERY_DONE
-      ]);
+    it('executes C02 travel Data only once without opening a repeat round', 0, async () => {
+      const model = new QueueModel([C02_QUERY_DECISION]);
       const bus = new TrackingBus();
       const surfaces: A2uiSurfaceState[] = [];
       let providerCalls: number = 0;
@@ -1444,7 +1442,7 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(outcome.status).assertEqual('success');
       expect(providerCalls).assertEqual(1);
       expect(bus.count(AgentMessageType.TASK_CREATE_DATA)).assertEqual(1);
-      expect(model.prompts.length).assertEqual(3);
+      expect(model.prompts.length).assertEqual(1);
       const finalSurface = surfaces[surfaces.length - 1];
       let retainedSkeleton: boolean = false;
       for (let index = 0; index < finalSurface.components.length; index++) {
@@ -1742,12 +1740,8 @@ export default function multiAgentCanaryRuntimeTest() {
       runtime.dispose();
     });
 
-    it('wires the production read-only Data Agent planner through the shared model', 0, async () => {
-      const model = new QueueModel([
-        HOTEL_DECISION,
-        HOTEL_DATA_CALL_DECISION,
-        HOTEL_DONE_DECISION
-      ]);
+    it('executes the production Data task directly without Data or terminal Leader model calls', 0, async () => {
+      const model = new QueueModel([HOTEL_DECISION]);
       const executor = new CanaryHotelExecutor();
       const options = canaryOptions(
         model,
@@ -1764,11 +1758,8 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(outcome.status).assertEqual('success');
       expect(executor.calls.length).assertEqual(1);
       expect(executor.calls[0]).assertEqual('hotel.search');
-      expect(model.prompts.length).assertEqual(3);
-      expect(model.prompts[1].indexOf('You are the Appless Data Agent.')).assertEqual(0);
-      expect(model.prompts[1].indexOf('Maximum 3 steps.')).assertLarger(-1);
-      expect(model.prompts[1].indexOf('"allowedToolIds":["hotel.search"]')).assertLarger(-1);
-      expect(model.prompts[2].indexOf('"status":"success"')).assertLarger(-1);
+      expect(model.prompts.length).assertEqual(1);
+      expect(model.prompts[0].indexOf('You are the Appless Data Agent.')).assertEqual(-1);
       runtime.dispose();
     });
 
@@ -1954,8 +1945,7 @@ export default function multiAgentCanaryRuntimeTest() {
       const bus = new TrackingBus();
       const model = new QueueModel([
         c09SocialDecision('{"platforms":["x","slack"],"date":"2026-07-23"}'),
-        c09SocialDecision('{"platforms":["x","slack"]}'),
-        C09_SOCIAL_DONE
+        c09SocialDecision('{"platforms":["x","slack"]}')
       ]);
       const options = canaryOptions(
         model,
@@ -1988,7 +1978,7 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(platforms.length).assertEqual(2);
       expect(platforms[0]).assertEqual('x');
       expect(platforms[1]).assertEqual('slack');
-      expect(model.prompts.length).assertEqual(3);
+      expect(model.prompts.length).assertEqual(2);
       expect(model.prompts[1].indexOf('LEADER_TASK_INPUT_INVALID')).assertLarger(-1);
       runtime.dispose();
     });

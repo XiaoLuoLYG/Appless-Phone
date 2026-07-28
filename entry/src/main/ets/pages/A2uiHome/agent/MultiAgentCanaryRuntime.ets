@@ -67,7 +67,6 @@ import {
 } from '../../../model/PersonaMemoryUpdate';
 import { personaPackForId } from '../../../model/PersonaStore';
 import { MultiAgentLeaderPlanner } from './MultiAgentLeaderPlanner';
-import { ReadOnlyDataPlanner } from './ReadOnlyDataPlanner';
 import { MultiAgentActionPlanCompiler } from './MultiAgentActionPlanCompiler';
 import {
   HotelLocalDateProvider,
@@ -1586,8 +1585,7 @@ export class MultiAgentCanaryRuntime {
       currentLocalDateProvider: options.currentLocalDate,
       dataTaskInputNormalizer,
       dataAuthorizer: authorizeCanaryDataTask,
-      dataPlanner: options.dataPlanner === undefined ?
-        new ReadOnlyDataPlanner(options.model) : options.dataPlanner,
+      dataPlanner: options.dataPlanner,
       dataExecutor: options.dataExecutor === undefined ?
         new CanaryStructuredDataExecutor(options.structuredToolCall) : options.dataExecutor,
       uiRenderer: mailDetailBridge,

@@ -715,8 +715,10 @@ async function rejectionAfterNormalizedInput(normalized: Object): Promise<string
   firstTask.input = JSON.parse('{"query":"深圳咖啡"}') as Object;
   const secondTask = semanticDataTask('place-details', 'maps.place.details');
   secondTask.input = new Object();
+  const firstDecision = withNormalizationDate(semanticDecision([firstTask]));
+  firstDecision.reasonCode = 'dependency_requires_next_round';
   const planner = new RoundScriptedPlanner([
-    withNormalizationDate(semanticDecision([firstTask])),
+    firstDecision,
     withNormalizationDate(semanticDecision([secondTask]))
   ]);
   const normalizer: LeaderDataTaskInputNormalizer = (
@@ -857,8 +859,10 @@ export default function leaderAgentTest() {
 
     it('rejects a legacy-shaped second round immediately and keeps the pump available', 0, async () => {
       const bus = new LinkedMessageBus();
+      const firstDecision = semanticDecision([semanticDataTask('semantic-round-1')]);
+      firstDecision.reasonCode = 'dependency_requires_next_round';
       const planner = new MixedRoundPlanner([
-        semanticDecision([semanticDataTask('semantic-round-1')]),
+        firstDecision,
         hotelPlan('forbidden-round-2-ui', 'forbidden-round-2-data'),
         hotelPlan('recovery-ui', 'recovery-data')
       ]);
@@ -1091,7 +1095,7 @@ export default function leaderAgentTest() {
       expect(action.allowedActionIds.join(',')).assertEqual('hotel.navigate');
       expect(action.personaId).assertEqual('travel_companion');
       expect(action.inputText).assertEqual('Find a Shenzhen hotel');
-      expect(planner.calls).assertEqual(2);
+      expect(planner.calls).assertEqual(1);
 
       bus.publish(terminalMessage(AgentMessageType.TURN_CANCEL, 'cancel-parallel'));
       expect((await receive(observer)).type).assertEqual(AgentMessageType.TURN_CANCEL);
@@ -1336,7 +1340,7 @@ export default function leaderAgentTest() {
       observer.close();
     });
 
-    it('attaches the exact rendered surface to a capability-backed semantic answer', 0, async () => {
+    it('renders a successful independent read without a terminal Leader replan', 0, async () => {
       const bus = new LinkedMessageBus();
       const planner = new RoundScriptedPlanner([
         semanticDecision([semanticDataTask('travel', 'travel.search')]),
@@ -1370,6 +1374,8 @@ export default function leaderAgentTest() {
       expect((terminal.payload as TurnResultPayload).surfaceId).assertEqual(
         'loop_surface_1784723405216'
       );
+      expect((terminal.payload as TurnResultPayload).roundCount).assertEqual(1);
+      expect(planner.calls).assertEqual(1);
       leader.stop();
       observer.close();
     });
@@ -1790,6 +1796,7 @@ export default function leaderAgentTest() {
       const bus = new LinkedMessageBus();
       const first = semanticDecision([semanticDataTask('place')]);
       first.skillId = 'travel-planning';
+      first.reasonCode = 'dependency_requires_next_round';
       const second = semanticDecision([], 'answer');
       second.skillId = 'travel-planning';
       const planner = new RoundScriptedPlanner([first, second]);
@@ -1825,6 +1832,7 @@ export default function leaderAgentTest() {
 
     it('rejects changing persona or skill after the first round of one turn', 0, async () => {
       const first = semanticDecision([semanticDataTask('hotel')]);
+      first.reasonCode = 'dependency_requires_next_round';
       const second = semanticDecision([], 'answer');
       second.personaId = 'default_companion';
       const context = semanticPlanningContext();
@@ -2035,8 +2043,10 @@ export default function leaderAgentTest() {
       firstTask.input = JSON.parse('{"query":"深圳咖啡"}') as Object;
       const secondTask = semanticDataTask('place-details', 'maps.place.details');
       secondTask.input = JSON.parse('{"placeId":"entity-1"}') as Object;
+      const dependencyDecision = semanticDecision([firstTask]);
+      dependencyDecision.reasonCode = 'dependency_requires_next_round';
       const planner = new RoundScriptedPlanner([
-        semanticDecision([firstTask]),
+        dependencyDecision,
         semanticDecision([secondTask]),
         semanticDecision([], 'answer')
       ]);
@@ -2072,6 +2082,42 @@ export default function leaderAgentTest() {
       const terminal = await receive(observer);
       expect(terminal.type).assertEqual(AgentMessageType.TURN_RESULT);
       expect((terminal.payload as TurnResultPayload).surfaceId).assertEqual('surface-two-rounds');
+      expect((terminal.payload as TurnResultPayload).roundCount).assertEqual(2);
+      expect(planner.calls).assertEqual(2);
+      leader.stop();
+      observer.close();
+    });
+
+    it('replans Maps details requests that still need a real placeId', 0, async () => {
+      const firstTask = semanticDataTask('place-search', 'maps.place.search');
+      firstTask.input = JSON.parse('{"query":"伦敦国王十字车站"}') as Object;
+      const secondTask = semanticDataTask('place-details', 'maps.place.details');
+      secondTask.input = JSON.parse('{"placeId":"entity-1"}') as Object;
+      const planner = new RoundScriptedPlanner([
+        semanticDecision([firstTask]),
+        semanticDecision([secondTask])
+      ]);
+      const bus = new LinkedMessageBus();
+      const leader = new LeaderAgent(bus, planner, dependentDataPlanningContext());
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage(
+        'conversation-hotel',
+        'turn-1',
+        'input-1',
+        '先用 Google Maps 搜索伦敦国王十字车站，再用搜索结果的真实 placeId 查询地点详情'
+      ));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      const search = await receive(observer);
+      expect(search.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+      bus.publish(dataResultMessage(search));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      const details = await receive(observer);
+
+      expect(details.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+      expect((details.payload as CreateDataTaskPayload).toolId).assertEqual('maps.place.details');
+      expect(planner.calls).assertEqual(2);
       leader.stop();
       observer.close();
     });
@@ -2081,8 +2127,10 @@ export default function leaderAgentTest() {
       firstTask.input = JSON.parse('{"query":"深圳咖啡"}') as Object;
       const unbound = semanticDataTask('food', 'food.search');
       unbound.input = JSON.parse('{"query":"附近餐厅"}') as Object;
+      const firstDecision = semanticDecision([firstTask]);
+      firstDecision.reasonCode = 'dependency_requires_next_round';
       const planner = new RoundScriptedPlanner([
-        semanticDecision([firstTask]),
+        firstDecision,
         semanticDecision([unbound])
       ]);
       const bus = new LinkedMessageBus();
@@ -2140,8 +2188,10 @@ export default function leaderAgentTest() {
       firstTask.input = JSON.parse('{"query":"深圳咖啡"}') as Object;
       const secondTask = semanticDataTask('place-details', 'maps.place.details');
       secondTask.input = new Object();
+      const firstDecision = withNormalizationDate(semanticDecision([firstTask]));
+      firstDecision.reasonCode = 'dependency_requires_next_round';
       const planner = new RoundScriptedPlanner([
-        withNormalizationDate(semanticDecision([firstTask])),
+        firstDecision,
         withNormalizationDate(semanticDecision([secondTask]))
       ]);
       const normalizer: LeaderDataTaskInputNormalizer = (
@@ -2360,9 +2410,13 @@ export default function leaderAgentTest() {
       );
       const dependent = semanticDataTask('place-details', 'maps.place.details');
       dependent.input = JSON.parse('{"placeId":"entity-1"}') as Object;
+      const firstDecision = semanticDecision(firstRoundTasks);
+      firstDecision.reasonCode = 'dependency_requires_next_round';
+      const secondDecision = semanticDecision([dependent]);
+      secondDecision.reasonCode = 'dependency_requires_next_round';
       const planner = new RoundScriptedPlanner([
-        semanticDecision(firstRoundTasks),
-        semanticDecision([dependent]),
+        firstDecision,
+        secondDecision,
         semanticDecision([semanticDataTask('repeat-travel', 'travel.search')])
       ]);
       const leader = new LeaderAgent(bus, planner, dependentDataPlanningContext());
@@ -2559,14 +2613,17 @@ export default function leaderAgentTest() {
       roundThree.input = JSON.parse('{"provider":"gmail","requestKey":"gmail:entity-1",' +
         '"threadId":"entity-1","messageId":"entity-1"}') as Object;
       const firstDecision = semanticDecision([roundOneMaps, roundOneMail]);
+      firstDecision.reasonCode = 'dependency_requires_next_round';
       firstDecision.actionIntent = {
         goal: 'Navigate after results',
         allowedActionIds: ['hotel.navigate']
       };
       firstDecision.requestedCapabilityIds.push('hotel.navigate');
+      const secondDecision = semanticDecision([roundTwo]);
+      secondDecision.reasonCode = 'dependency_requires_next_round';
       const planner = new RoundScriptedPlanner([
         firstDecision,
-        semanticDecision([roundTwo]),
+        secondDecision,
         semanticDecision([roundThree])
       ]);
       const context = dependentDataPlanningContext();

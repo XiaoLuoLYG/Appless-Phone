@@ -398,7 +398,7 @@ export function hotelMultiAgentSearchEvidence(logText) {
     item.fields.surface === lifecycle.surfaceId);
   if (uiResults.length !== 1) return { ok: false, lifecycle, provider: failedProvider };
   const calling = all.filter((item) => item.marker === 'A2uiHomeSurfaceUpdate' &&
-    item.index > uiTask.index && item.index < document.index &&
+    item.index > dataTask.index && item.index < document.index &&
     item.fields.surfaceId === lifecycle.surfaceId && item.fields.status === 'calling_tool');
   const ready = all.filter((item) => item.marker === 'A2uiHomeSurfaceUpdate' &&
     item.index > document.index && item.index < lifecycle.terminalIndex &&

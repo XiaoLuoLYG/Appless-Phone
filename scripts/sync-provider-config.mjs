@@ -140,11 +140,13 @@ if (!existsSync(envPath)) {
 const env = loadEnv(envPath);
 const config = {};
 for (const key of providerKeys) {
-  if (env[key]) {
+  const value = key === 'AIPHONE_WHATSAPP_TEST_TO' ?
+    (process.env.AIPHONE_WHATSAPP_TEST_TO || env[key]) : env[key];
+  if (value) {
     if (key === 'PAYPAL_CHECKOUT_GATEWAY_URL' || key === 'STRIPE_CHECKOUT_GATEWAY_URL') {
       continue;
     }
-    config[key] = env[key];
+    config[key] = value;
   }
 }
 

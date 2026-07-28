@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
-import { dirname, join } from 'node:path';
+import { dirname, extname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   evaluateHotelSystemActionEvidence,
@@ -51,6 +51,63 @@ import {
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const outDir = process.env.AIPHONE_SMOKE_OUT_DIR || join(rootDir, 'tool-gateway', '.smoke');
 mkdirSync(outDir, { recursive: true });
+const caseEvidenceDir = join(outDir, 'cases');
+const evidenceScreens = [];
+mkdirSync(caseEvidenceDir, { recursive: true });
+
+function snapshotCaseArtifacts(caseId, attempt, sourcePrefixes, summary) {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const destinationDir = join(caseEvidenceDir, caseId);
+  mkdirSync(destinationDir, { recursive: true });
+  for (const fileName of readdirSync(outDir)) {
+    const prefix = sourcePrefixes.find((candidate) =>
+      fileName.startsWith(`${candidate}-`) || fileName.startsWith(`${candidate}.`));
+    if (prefix === undefined) continue;
+    const extension = extname(fileName);
+    const stage = fileName.slice(prefix.length + 1, extension.length > 0 ? -extension.length : undefined)
+      .replace(/[^a-zA-Z0-9_-]+/g, '-') || 'artifact';
+    const destinationPath = join(destinationDir, `${attempt}-${stage}-${timestamp}${extension}`);
+    copyFileSync(join(outDir, fileName), destinationPath);
+    if (extension === '.png') evidenceScreens.push({ caseId, attempt, path: destinationPath });
+  }
+  writeFileSync(
+    join(destinationDir, `${attempt}-summary-${timestamp}.json`),
+    JSON.stringify(summary, null, 2)
+  );
+}
+
+function captureBlockedCase(caseId, attempt, summary) {
+  const prefix = `${caseId}-blocked`;
+  const layout = dumpLayout(`${prefix}-layout.json`);
+  writeFileSync(join(outDir, `${prefix}-layout-text.txt`), collectLayoutText(layout).join('\n') + '\n');
+  captureScreen(`${prefix}-screen.png`);
+  snapshotCaseArtifacts(caseId, attempt, [prefix], summary);
+}
+
+function writeScreenshotIndex() {
+  const ordered = [...evidenceScreens].sort((left, right) => {
+    const leftMatch = /^([CF])(\d+)(.*)$/.exec(left.caseId);
+    const rightMatch = /^([CF])(\d+)(.*)$/.exec(right.caseId);
+    if (leftMatch === null || rightMatch === null) return left.caseId.localeCompare(right.caseId);
+    return (leftMatch[1] === rightMatch[1] ? 0 : leftMatch[1] === 'C' ? -1 : 1) ||
+      Number(leftMatch[2]) - Number(rightMatch[2]) ||
+      leftMatch[3].localeCompare(rightMatch[3]) ||
+      left.attempt - right.attempt;
+  });
+  const lines = ['# 真机场景截图索引', ''];
+  let previousCaseId = '';
+  for (const screen of ordered) {
+    if (screen.caseId !== previousCaseId) {
+      lines.push(`## ${screen.caseId}`, '');
+      previousCaseId = screen.caseId;
+    }
+    const imagePath = relative(outDir, screen.path);
+    lines.push(`![${screen.caseId} attempt ${screen.attempt}](${imagePath})`, '');
+  }
+  const indexPath = join(outDir, 'screenshots-index.md');
+  writeFileSync(indexPath, lines.join('\n'));
+  return indexPath;
+}
 
 const defaultCases = [
   { query: '我明天要从北京去上海，帮我搜索出行方案', expectsTool: true, expectedToolId: 'travel.search' },
@@ -3670,6 +3727,7 @@ for (let index = 0; index < queries.length; index += 1) {
       reason: `Persona memory could not be backed up safely: ${personaMemoryRestore.reason || 'unknown backup failure'}`
     };
     summaries.push(blockedSummary);
+    captureBlockedCase(inferredCase.id || `query-${index + 1}`, 1, blockedSummary);
     console.log(JSON.stringify(blockedSummary, null, 2));
     continue;
   }
@@ -3684,6 +3742,7 @@ for (let index = 0; index < queries.length; index += 1) {
       reason: 'AIPHONE_WHATSAPP_TEST_TO is missing; no recipient was guessed and no message action was opened.'
     };
     summaries.push(blockedSummary);
+    captureBlockedCase(inferredCase.id || `query-${index + 1}`, 1, blockedSummary);
     console.log(JSON.stringify(blockedSummary, null, 2));
     continue;
   }
@@ -3696,6 +3755,12 @@ for (let index = 0; index < queries.length; index += 1) {
     settingsSummary.expectedToolIds = [];
     settingsSummary.status = settingsSummary.status || (settingsSummary.ok ? 'PASS' : 'FAIL');
     summaries.push(settingsSummary);
+    snapshotCaseArtifacts(
+      inferredCase.id || `query-${index + 1}`,
+      1,
+      ['composio-auth', 'external-auth'],
+      settingsSummary
+    );
     console.log(JSON.stringify(settingsSummary, null, 2));
     continue;
   }
@@ -3715,6 +3780,7 @@ for (let index = 0; index < queries.length; index += 1) {
       reason
     };
     summaries.push(blockedSummary);
+    captureBlockedCase(inferredCase.id || `query-${index + 1}`, 1, blockedSummary);
     console.log(JSON.stringify(blockedSummary, null, 2));
     continue;
   }
@@ -3732,6 +3798,12 @@ for (let index = 0; index < queries.length; index += 1) {
     summary = await runQuery(query, index, expectedTool, inferredCase, preserveAppSession);
     summary.attempt = attempt + 1;
     summary.retryLimit = caseRetryLimit;
+    snapshotCaseArtifacts(
+      inferredCase.id || `query-${index + 1}`,
+      attempt + 1,
+      [`query-${index + 1}`],
+      summary
+    );
     const missingScrolledMarkers = Array.isArray(summary.layoutScrolledRequiredMarkers) &&
       Array.isArray(summary.layoutScrolledFoundMarkers) &&
       summary.layoutScrolledRequiredMarkers.some((marker) => !summary.layoutScrolledFoundMarkers.includes(marker));
@@ -3774,6 +3846,7 @@ for (let index = 0; index < queries.length; index += 1) {
         const cleanup = await runQuery(cleanupDelete.query, queries.length, cleanupDelete.expectsTool, cleanupDelete);
         cleanup.caseId = 'C19e-cleanup';
         cleanup.status = cleanup.ok ? 'PASS' : (cleanup.providerFailed ? 'BLOCKED' : 'FAIL');
+        snapshotCaseArtifacts(cleanup.caseId, 1, [`query-${queries.length + 1}`], cleanup);
         return cleanup;
       },
       runAbsence: async () => {
@@ -3781,6 +3854,7 @@ for (let index = 0; index < queries.length; index += 1) {
         const absence = await runQuery(cleanupAbsence.query, queries.length + 1, cleanupAbsence.expectsTool, cleanupAbsence);
         absence.caseId = 'C19f-final-cleanup';
         absence.status = absence.ok ? 'PASS' : (absence.providerFailed ? 'BLOCKED' : 'FAIL');
+        snapshotCaseArtifacts(absence.caseId, 1, [`query-${queries.length + 2}`], absence);
         return absence;
       }
     });
@@ -3951,6 +4025,7 @@ const processCleanup = {
 };
 
 const summaryPath = join(outDir, 'summary.json');
+const screenshotIndexPath = writeScreenshotIndex();
 writeFileSync(summaryPath, JSON.stringify({
   target,
   timeoutMs,
@@ -3962,6 +4037,7 @@ writeFileSync(summaryPath, JSON.stringify({
   processCleanup
 }, null, 2));
 console.log(`\nsummary: ${summaryPath}`);
+console.log(`screenshots: ${screenshotIndexPath}`);
 console.log(`personaMemoryRestore: ${JSON.stringify(personaMemoryRestore, null, 2)}`);
 console.log(`visibleOutput: ${JSON.stringify(visibleOutput, null, 2)}`);
 console.log(`processCleanup: ${JSON.stringify(processCleanup, null, 2)}`);

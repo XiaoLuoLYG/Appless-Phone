@@ -239,6 +239,7 @@ import {
 } from './render/A2uiHomeToolRequest';
 
 const CONNECTION_TEST_PROMPT: string = '连接检查：请返回 A2UI v0.9.1 setup surface，说明 Local API 已可用。';
+const ENABLE_MULTI_AGENT_UI_LAYOUT_LLM: boolean = false;
 const TOOL_GATEWAY_URL: string = defaultToolGatewayUrl();
 const initialConnectionState: ConnectionPanelState = createInitialConnectionPanelState();
 const initialSurface: A2uiSurfaceState = createSeedA2uiSurface();
@@ -1900,7 +1901,7 @@ struct Index {
       actionTimeoutMs: 45000,
       settingsFingerprint: fingerprint
     };
-    if (provider.isConfigured()) {
+    if (ENABLE_MULTI_AGENT_UI_LAYOUT_LLM && provider.isConfigured()) {
       options.uiLayoutPlanner = new A2uiAgentRunner(new OpenAiA2uiModel(provider));
     }
     this.multiAgentRuntime = new MultiAgentCanaryRuntime(options);

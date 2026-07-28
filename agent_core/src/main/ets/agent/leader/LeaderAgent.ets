@@ -52,6 +52,8 @@ interface LeaderTurnState {
   round: number;
   semantic: boolean;
   planning: boolean;
+  currentRoundAllDataSucceeded: boolean;
+  currentRoundRequiresPlanning: boolean;
   pendingDataTools: Map<string, LeaderPendingDataTask>;
   dataTaskIds: string[];
   expectedOutputSchema: string;
@@ -253,6 +255,8 @@ export class LeaderAgent extends MessageDrivenAgent {
       round: 1,
       semantic: false,
       planning: false,
+      currentRoundAllDataSucceeded: false,
+      currentRoundRequiresPlanning: false,
       pendingDataTools: new Map<string, LeaderPendingDataTask>(),
       dataTaskIds: [],
       expectedOutputSchema: '',
@@ -507,6 +511,22 @@ export class LeaderAgent extends MessageDrivenAgent {
     const dataTaskIds: string[] = this.decisionDataTaskIds(state, decision.dataTasks);
     let uiTaskId: string = state.inputTaskId + ':round-' + state.round.toString() + ':virtual';
     if (dataTaskIds.length > 0) {
+      let calendarReadFirst: boolean = false;
+      let mapsSearchNeedsDetails: boolean = false;
+      for (let index = 0; index < decision.dataTasks.length; index++) {
+        calendarReadFirst = calendarReadFirst ||
+          decision.dataTasks[index].toolId === 'calendar.events.search';
+        mapsSearchNeedsDetails = mapsSearchNeedsDetails ||
+          (decision.dataTasks[index].toolId === 'maps.place.search' &&
+            state.input.text.indexOf('placeId') >= 0 &&
+            (state.input.text.indexOf('详情') >= 0 || state.input.text.indexOf('details') >= 0));
+      }
+      state.currentRoundAllDataSucceeded = true;
+      state.currentRoundRequiresPlanning =
+        decision.reasonCode === 'dependency_requires_next_round' ||
+        (state.input.text.indexOf('之后') >= 0 && state.input.text.indexOf('再') >= 0) ||
+        mapsSearchNeedsDetails ||
+        (calendarReadFirst && decision.uiIntent.purpose.indexOf('calendar.event.') === 0);
       uiTaskId = state.uiTaskId;
       for (let index = 0; index < dataTaskIds.length; index++) {
         state.dataTaskIds.push(dataTaskIds[index]);
@@ -696,12 +716,18 @@ export class LeaderAgent extends MessageDrivenAgent {
     state.pendingDataTools.delete(message.taskId);
     state.observations.push(digest);
     state.turnObservations.push(digest);
+    state.currentRoundAllDataSucceeded =
+      state.currentRoundAllDataSucceeded && digest.status === 'success';
     state.observations = this.boundedObservations(state.observations as Object[]);
     if (state.pendingDataTools.size > 0) {
       return;
     }
     if (state.pendingActionDecision !== null &&
       this.pendingActionUsesVirtualEntries(state.pendingActionDecision)) {
+      this.publishObservedFallback(this.inputMessage(state), state);
+      return;
+    }
+    if (state.currentRoundAllDataSucceeded && !state.currentRoundRequiresPlanning) {
       this.publishObservedFallback(this.inputMessage(state), state);
       return;
     }

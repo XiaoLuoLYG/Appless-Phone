@@ -104,10 +104,10 @@ const realC20SearchDataFirstLog = `
   [AIPhone][MultiAgentInput] conversation=c20 turn=search-1 task=input-1
   [AIPhone][MultiAgentDataTask] conversation=c20 turn=search-1 task=data-1 round=1 tool=hotel.search predecessor=none path=none target=none binding=false
   [AIPhone][RollingGoHotelRequest] operation=searchHotels
+  [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=loop_surface_1785047086609 status=calling_tool components=2
   [AIPhone][RollingGoHotelResponse] operation=searchHotels provider=RollingGo status=success sources=1
   [AIPhone][MultiAgentDataResult] conversation=c20 turn=search-1 task=data-1 tool=hotel.search status=success sources=1 error=false
   [AIPhone][MultiAgentUiTask] conversation=c20 turn=search-1 task=ui-1 dataTasks=data-1
-  [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=loop_surface_1785047086609 status=calling_tool components=2
   [AIPhone][MultiAgentUiResult] conversation=c20 turn=search-1 task=ui-1 surface=loop_surface_1785047086609 state=skeleton
   [AIPhone][HtmlHomeDocument] source=tool kind=hotel chars=45859 blocks=10
   [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=loop_surface_1785047086609 status=ready components=2
@@ -457,11 +457,13 @@ test('accepts paired C20 HiLog records without counting the second channel twice
 });
 
 test('rejects uncorrelated, duplicate, missing, and raw-http C20 hotel search evidence', () => {
-  const provider = [
-    '  [AIPhone][RollingGoHotelRequest] operation=searchHotels\n',
-    '  [AIPhone][RollingGoHotelResponse] operation=searchHotels provider=RollingGo status=success sources=1\n'
-  ].join('');
-  const withoutProvider = realC20SearchDataFirstLog.replace(provider, '');
+  const providerRequest = '  [AIPhone][RollingGoHotelRequest] operation=searchHotels\n';
+  const providerResponse =
+    '  [AIPhone][RollingGoHotelResponse] operation=searchHotels provider=RollingGo status=success sources=1\n';
+  const provider = providerRequest + providerResponse;
+  const withoutProvider = realC20SearchDataFirstLog
+    .replace(providerRequest, '')
+    .replace(providerResponse, '');
   const staleProvider = withoutProvider.replace(
     '  [AIPhone][MultiAgentInput] conversation=c20 turn=search-1 task=input-1\n',
     '  [AIPhone][MultiAgentInput] conversation=c20 turn=search-1 task=input-1\n' + provider
@@ -487,7 +489,10 @@ test('rejects uncorrelated, duplicate, missing, and raw-http C20 hotel search ev
     duplicateProvider,
     realC20SearchDataFirstLog.replace('  [AIPhone][HtmlHomeDocument] source=tool kind=hotel chars=45859 blocks=10\n', ''),
     duplicateDocument,
-    realC20SearchDataFirstLog.replace(provider, '  com.example.aiphonedemo/NETSTACK RespCode:200 method:POST\n')
+    withoutProvider.replace(
+      '  [AIPhone][MultiAgentDataResult]',
+      '  com.example.aiphonedemo/NETSTACK RespCode:200 method:POST\n  [AIPhone][MultiAgentDataResult]'
+    )
   ].forEach((logs) => assert.equal(hotelMultiAgentSearchEvidence(logs).ok, false));
 });
 
