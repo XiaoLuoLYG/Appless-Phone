@@ -1883,7 +1883,7 @@ export default function toolGatewayClientTest() {
       }
     });
 
-    it('turns a model-requested Monitor create into a zero-call confirmation preview', 0, async () => {
+    it('turns initial Monitor create routes into zero-call confirmation previews', 0, async () => {
       const genericClient = new NoCallFirecrawlGenericMcpClient();
       const client = new FirecrawlMcpClient(genericClient);
       try {
@@ -1897,21 +1897,23 @@ export default function toolGatewayClientTest() {
           goal: '监控新版本'
         };
 
-        const result = await callToolGateway(
-          defaultToolGatewayUrl(),
-          'web.monitor.create',
-          '监控这个发布页面',
-          'surface_firecrawl_monitor_preview',
-          'model_tool_request',
-          noop,
-          null,
-          args
-        );
-        const rendered = genericToolResults(result.surface);
-
-        expect(rendered.length).assertEqual(1);
-        expect(rendered[0].status).assertEqual('confirm_required');
-        expect(JSON.stringify(rendered[0].actions).indexOf('web.monitor.create.confirm')).assertLarger(-1);
+        const actionIds: string[] = ['model_tool_request', 'web.monitor.create'];
+        for (let index = 0; index < actionIds.length; index++) {
+          const result = await callToolGateway(
+            defaultToolGatewayUrl(),
+            'web.monitor.create',
+            '监控这个发布页面',
+            'surface_firecrawl_monitor_preview',
+            actionIds[index],
+            noop,
+            null,
+            args
+          );
+          const rendered = genericToolResults(result.surface);
+          expect(rendered.length).assertEqual(1);
+          expect(rendered[0].status).assertEqual('confirm_required');
+          expect(JSON.stringify(rendered[0].actions).indexOf('web.monitor.create.confirm')).assertLarger(-1);
+        }
         expect(genericClient.preflightCount).assertEqual(0);
         expect(genericClient.callCount).assertEqual(0);
       } finally {

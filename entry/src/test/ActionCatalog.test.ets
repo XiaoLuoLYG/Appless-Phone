@@ -56,6 +56,7 @@ class FakeToolDefinitionLookup implements ToolDefinitionLookup {
       toolId === 'maps.route.open' || toolId === 'calendar.event.create' ||
       toolId === 'luckin.order.preview' || toolId === 'payment.send' ||
       toolId === 'payment.account.setup' || toolId === 'whatsapp.message.send' ||
+      toolId === 'web.monitor.create' ||
       toolId === 'luckin.order.create' || toolId === 'whatsapp.message.send.confirm' ||
       toolId === 'payment.confirm' || toolId === 'payment.capture' ||
       toolId === 'ride.order.create' || toolId === 'memory.update') {
@@ -356,7 +357,8 @@ export default function actionCatalogTest() {
         'luckin.order.preview',
         'payment.send',
         'payment.account.setup',
-        'whatsapp.message.send'
+        'whatsapp.message.send',
+        'web.monitor.create'
       ];
       const denied: string[] = [
         'luckin.order.create',

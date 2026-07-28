@@ -1817,6 +1817,18 @@ export default function registeredPageActionMigrationTest() {
       }
     });
 
+    it('resolves Firecrawl Monitor create into a preview action', 0, () => {
+      const prompt = '每天检查 https://example.com/releases 是否发布新版本，先让我确认';
+      const create = resolveVirtualRegisteredPageAction('web.monitor.create', prompt);
+
+      expect(create === null).assertFalse();
+      expect(JSON.stringify((create as A2uiAction).args)).assertEqual(
+        '{"pages":["https://example.com/releases"],"goal":"' + prompt +
+        '","scheduleText":"daily"}'
+      );
+      expect(resolveVirtualRegisteredPageAction('web.monitor.create', '')).assertNull();
+    });
+
     it('requires positive provider completion evidence for every external Wave 4 write', 0, async () => {
       const actionIds: string[] = [
         'luckin.order.create',

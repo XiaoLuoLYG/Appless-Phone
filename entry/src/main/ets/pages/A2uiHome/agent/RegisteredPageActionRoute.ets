@@ -8,6 +8,7 @@ import {
   ToolDefinition,
   actionAgentToolDefinitions,
   calendarEventRequiredFields,
+  firecrawlHttpUrlOf,
   mapsRouteInputFromPrompt,
   normalizedCalendarArgsForPrompt,
   toolDefinitionForToolId
@@ -94,6 +95,13 @@ interface GmailDraftVirtualArgs {
   to: string[];
   subject: string;
   body: string;
+}
+
+interface WebMonitorVirtualArgs {
+  pages?: string[];
+  queries?: string[];
+  goal: string;
+  scheduleText: string;
 }
 
 function virtualAction(actionId: string, inputText: string, args: Object): A2uiAction {
@@ -537,6 +545,37 @@ export function resolveVirtualRegisteredPageAction(
     const action = virtualAction(actionId, inputText.trim(), args as Object);
     action.label = '确认创建日程';
     return action;
+  }
+  if (actionId === 'web.monitor.create') {
+    const goal = inputText.trim();
+    if (goal.length === 0) {
+      return null;
+    }
+    const lower = goal.toLowerCase();
+    const scheduleText = goal.indexOf('每小时') >= 0 || goal.indexOf('每个小时') >= 0 ||
+      lower.indexOf('hourly') >= 0 ? 'hourly' :
+      (goal.indexOf('每周') >= 0 || goal.indexOf('每星期') >= 0 ||
+        lower.indexOf('weekly') >= 0 ? 'weekly' : 'daily');
+    const matches = goal.match(/https?:\/\/[^\s，。；、）】》]+/gi);
+    if (matches === null) {
+      const queryArgs: WebMonitorVirtualArgs = { queries: [goal], goal, scheduleText };
+      return virtualAction(actionId, goal, queryArgs as Object);
+    }
+    const pages: string[] = [];
+    for (let index = 0; index < matches.length && pages.length < 5; index++) {
+      const page = firecrawlHttpUrlOf(matches[index]);
+      if (page.length === 0) {
+        return null;
+      }
+      if (pages.indexOf(page) < 0) {
+        pages.push(page);
+      }
+    }
+    if (pages.length === 0 || matches.length > 5) {
+      return null;
+    }
+    const pageArgs: WebMonitorVirtualArgs = { pages, goal, scheduleText };
+    return virtualAction(actionId, goal, pageArgs as Object);
   }
   return null;
 }

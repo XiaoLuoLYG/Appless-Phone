@@ -14521,8 +14521,8 @@ async function callLocalFirecrawlTool(
     apiKey: localProviderConfig.firecrawlApiKey,
     mcpUrl: localProviderConfig.firecrawlMcpUrl
   };
-  const adapterActionId = toolId === 'web.monitor.create' && actionId === 'model_tool_request' ?
-    '' : actionId;
+  const adapterActionId = toolId === 'web.monitor.create' &&
+    (actionId === 'model_tool_request' || actionId === 'web.monitor.create') ? '' : actionId;
   let output: FirecrawlToolOutput;
   try {
     output = await firecrawlMcpClient.execute(

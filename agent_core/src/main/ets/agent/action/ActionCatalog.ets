@@ -18,7 +18,8 @@ const ACTION_INTENT_IDS: string[] = [
   'social.post.preview',
   'payment.send',
   'payment.account.setup',
-  'whatsapp.message.send'
+  'whatsapp.message.send',
+  'web.monitor.create'
 ];
 
 interface ActionDefinitionFingerprintMaterial {
