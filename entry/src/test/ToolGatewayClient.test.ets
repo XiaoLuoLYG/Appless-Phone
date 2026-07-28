@@ -10,6 +10,7 @@ import {
   DataResult,
   DataSource,
   FlightStructuredData,
+  FoodQuery,
   FoodStructuredData,
   HotelSearchResult,
   TrainStructuredData,
@@ -61,6 +62,7 @@ import {
   foodStructuredDataResult,
   foodStructuredDataResultFromProviders,
   foodDistanceMeters,
+  foodSearchScopeForTest,
   foodProviderProgressRows,
   foodRecordFromBaiduPlace,
   foodRecordsFromLuckinMcpTool,
@@ -631,6 +633,23 @@ export default function toolGatewayClientTest() {
       expect(isRegisteredToolId('flight.search')).assertTrue();
       expect(isRegisteredToolId('food.search')).assertTrue();
       expect(isRegisteredToolId('social.reply.send')).assertFalse();
+    });
+
+    it('keeps a structured food task scoped ahead of a following train task', 0, () => {
+      const scope: FoodQuery = foodSearchScopeForTest(
+        '帮我查上海虹桥站附近的餐厅，再查明天北京到上海的高铁',
+        looseObject('{"originQuery":"上海虹桥站","place":"上海虹桥站","placeType":"station","countryCode":"CN"}')
+      );
+      expect(scope.place).assertEqual('上海虹桥站');
+      expect(scope.keyword).assertEqual('餐厅');
+    });
+
+    it('trims a following task when food search falls back to the original prompt', 0, () => {
+      const scope: FoodQuery = foodSearchScopeForTest(
+        '帮我查上海虹桥站附近的新疆菜，再查明天北京到上海的高铁'
+      );
+      expect(scope.place).assertEqual('上海虹桥站');
+      expect(scope.keyword).assertEqual('新疆菜');
     });
 
     it('fails closed when a legacy social reply draft lacks a selected real item', 0, async () => {

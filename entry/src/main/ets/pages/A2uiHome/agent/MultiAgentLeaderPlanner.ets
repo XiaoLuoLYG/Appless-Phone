@@ -5,12 +5,14 @@ import {
   InputUserPayload,
   LeaderActionIntent,
   LeaderDataTaskInputNormalizer,
+  LeaderDataTaskStreamListener,
   LeaderDecision,
   LeaderDecisionDataTask,
   LeaderPersonaMetadata,
   LeaderPlanner,
   LeaderPlanningSignal,
   LeaderPlanningContext,
+  LeaderStreamedDataTask,
   LeaderRoundAction,
   LeaderSkillMetadata,
   LeaderToolMetadata,
@@ -26,7 +28,10 @@ import {
   leaderIsDataCapability,
   leaderSameRoundDependencyConsumerTaskToolIds,
   leaderSameRoundDependencyProducerTaskToolIds,
-  leaderTasksHaveSameRoundDependency
+  leaderTasksHaveSameRoundDependency,
+  StreamingLeaderToolParser,
+  ModelContentListener,
+  aiLogInfo
 } from '@loop/agent-core';
 import { HotelLocalDateProvider, hotelSearchPlanningContract } from './HotelLeaderPlanner';
 
@@ -63,9 +68,17 @@ const REQUEST_SCOPE_CONTRACT: string =
   'mail or email. Explicit multi-domain requests remain valid and should keep independent tasks in the same round. ' +
   'Before returning JSON, silently scope-check every requestedCapabilityId, Data task, allowed tool, and Action ' +
   'against that closed set; do not output the check.';
-const LEADER_SYSTEM_PROMPT: string = 'Return exactly one JSON object and nothing else. ' +
+const STREAMING_DATA_TASK_CONTRACT: string =
+  'Streaming Data task contract: Keep the top-level fields in this exact order: personaId, skillId, ' +
+  'requestedCapabilityIds, roundAction, dataTasks, then the remaining decision fields. For roundAction execute, ' +
+  'wrap every complete object inside dataTasks with an unquoted <appless_tool> opening tag immediately before {' +
+  ' and an unquoted </appless_tool> closing tag immediately after }. Close each tag as soon as that one task ' +
+  'object is complete, then continue with the comma, next task, uiIntent, and outer JSON. Removing only these tags ' +
+  'must leave one valid LeaderDecision JSON object. For answer or clarify, use dataTasks:[] and emit no tags.';
+const LEADER_SYSTEM_PROMPT: string = 'Return exactly one LeaderDecision document and nothing else. ' +
   'Do not include Thought, markdown, or code fences. ' + ANSWER_FIELD_RULE + ' ' + REASON_CODE_FIELD_RULE + ' ' +
-  CONTINUATION_MODE_FIELD_RULE + ' ' + REQUEST_SCOPE_CONTRACT + ' ' + FULL_DECISION_CONTRACT;
+  CONTINUATION_MODE_FIELD_RULE + ' ' + REQUEST_SCOPE_CONTRACT + ' ' + FULL_DECISION_CONTRACT + ' ' +
+  STREAMING_DATA_TASK_CONTRACT;
 const REPAIR_INSTRUCTION: string = 'Correction: previous decision rejected by strict schema. ' +
   'Return one corrected decision matching the schema exactly. ' + FULL_DECISION_CONTRACT;
 const COMPLETED_TOOL_REUSE_ERROR: string = 'LEADER_COMPLETED_TOOL_REUSE';
@@ -225,6 +238,17 @@ interface LeaderRepairScope {
   roundAction: LeaderRoundAction;
 }
 
+interface LeaderStreamHeader {
+  personaId: string;
+  skillId: string;
+  requestedCapabilityIds: string[];
+}
+
+interface LeaderStreamingCompletion {
+  output: string;
+  streamedTaskCount: number;
+}
+
 export class MultiAgentLeaderPlanner implements LeaderPlanner {
   private readonly model: LocalModel;
   private readonly currentLocalDate: HotelLocalDateProvider;
@@ -252,7 +276,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     context: LeaderPlanningContext,
     round: number = 1,
     signal?: LeaderPlanningSignal,
-    trustedCurrentLocalDate?: string
+    trustedCurrentLocalDate?: string,
+    onDataTask?: LeaderDataTaskStreamListener
   ): Promise<LeaderDecision> {
     if (!Number.isInteger(round) || round < 1 || round > 3) {
       throw new Error('LEADER_ROUND_LIMIT');
@@ -260,7 +285,18 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     const currentLocalDate: string = trustedCurrentLocalDate === undefined ?
       this.currentLocalDate() : trustedCurrentLocalDate;
     const prompt: string = this.prompt(message, input, context, round, currentLocalDate);
-    const output: string = await this.completeBounded(prompt);
+    const initialCompletion: LeaderStreamingCompletion = await this.completeStreamingBounded(
+      prompt,
+      message,
+      input,
+      context,
+      round,
+      currentLocalDate,
+      onDataTask,
+      'initial'
+    );
+    const output: string = initialCompletion.output;
+    const streamedTaskCount: number = initialCompletion.streamedTaskCount;
     let sameRoundProducerTaskToolIds: string[] = [];
     let sameRoundConsumerTaskToolIds: string[] = [];
     let rejectedDecision: LeaderDecision | null = null;
@@ -306,6 +342,11 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       decision.normalizationCurrentLocalDate = currentLocalDate;
       return decision;
     } catch (error) {
+      if (streamedTaskCount > 0) {
+        const streamedFailure: Error = error instanceof Error ? error :
+          new Error('Leader streamed decision failed strict validation.');
+        throw streamedFailure;
+      }
       if (error instanceof Error && error.message === SAME_ROUND_DEPENDENCY_ERROR) {
         throw error;
       }
@@ -477,7 +518,21 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
           'It must preserve requestedCapabilityIds exactly and must not introduce any new Data or Action capability.' :
         '\nThe corrected decision must preserve all three frozen sets exactly and must not move a ' +
           'capability between Data and actionIntent positions.';
-      const repaired: string = await this.completeBounded(prompt + '\n' + correction);
+      const skillRepair: boolean = error instanceof Error &&
+        error.message === SKILL_CAPABILITY_ERROR && rejectedDecision !== null;
+      const repaired: string = skillRepair ?
+        (await this.completeStreamingBounded(
+          prompt + '\n' + correction,
+          message,
+          input,
+          context,
+          round,
+          currentLocalDate,
+          onDataTask,
+          'skill_repair',
+          rejectedDecision as LeaderDecision
+        )).output :
+        await this.completeBounded(prompt + '\n' + correction);
       try {
         const repairedScope: LeaderRepairScope | null = this.repairScope(repaired);
         if (repairedScope === null || (actionOwnedRepair ?
@@ -596,18 +651,23 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       return false;
     }
     for (let index = 0; index < original.dataTasks.length; index++) {
-      const first: LeaderDecisionDataTask = original.dataTasks[index];
-      const second: LeaderDecisionDataTask = repaired.dataTasks[index];
-      if (first.localId !== second.localId ||
-        first.goal !== second.goal ||
-        first.toolId !== second.toolId ||
-        first.required !== second.required ||
-        !this.sameStrings(first.allowedToolIds, second.allowedToolIds) ||
-        !this.sameJsonValue(first.input, second.input)) {
+      if (!this.sameDataTask(original.dataTasks[index], repaired.dataTasks[index])) {
         return false;
       }
     }
     return true;
+  }
+
+  private sameDataTask(
+    first: LeaderDecisionDataTask,
+    second: LeaderDecisionDataTask
+  ): boolean {
+    return first.localId === second.localId &&
+      first.goal === second.goal &&
+      first.toolId === second.toolId &&
+      first.required === second.required &&
+      this.sameStrings(first.allowedToolIds, second.allowedToolIds) &&
+      this.sameJsonValue(first.input, second.input);
   }
 
   private sameJsonValue(
@@ -883,12 +943,12 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
   private rawDecisionObject(
     output: string
   ): Record<string, Object | string | number | boolean | null | undefined> | null {
-    const trimmed: string = output.trim();
-    if (!trimmed.startsWith('{') || !trimmed.endsWith('}') ||
-      this.hasDuplicateObjectKeys(trimmed)) {
-      return null;
-    }
     try {
+      const trimmed: string = this.withoutToolTags(output).trim();
+      if (!trimmed.startsWith('{') || !trimmed.endsWith('}') ||
+        this.hasDuplicateObjectKeys(trimmed)) {
+        return null;
+      }
       const parsed: Object = JSON.parse(trimmed) as Object;
       if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
         return null;
@@ -926,11 +986,224 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     }
   }
 
-  private completeBounded(prompt: string): Promise<string> {
+  private async completeStreamingBounded(
+    prompt: string,
+    message: AgentMessage,
+    input: InputUserPayload,
+    context: LeaderPlanningContext,
+    round: number,
+    currentLocalDate: string,
+    onDataTask: LeaderDataTaskStreamListener | undefined,
+    phase: string,
+    expectedSkillRepair?: LeaderDecision
+  ): Promise<LeaderStreamingCompletion> {
+    const streamParser: StreamingLeaderToolParser = new StreamingLeaderToolParser();
+    const streamedLocalIds: Set<string> = new Set<string>();
+    const streamStartMs: number = Date.now();
+    let sawModelDelta: boolean = false;
+    let streamingDisabled: boolean = false;
+    let streamedTaskCount: number = 0;
+    const consumeModelDelta: ModelContentListener = (delta: string): void => {
+      sawModelDelta = true;
+      const bodies: string[] = streamParser.feed(delta);
+      if (onDataTask === undefined || streamingDisabled) {
+        return;
+      }
+      for (let index: number = 0; index < bodies.length; index++) {
+        const streamed: LeaderStreamedDataTask | null = this.streamedDataTask(
+          streamParser.textWithoutTagsSoFar(),
+          bodies[index],
+          message,
+          input,
+          context,
+          round,
+          currentLocalDate
+        );
+        if (streamed === null || (expectedSkillRepair !== undefined &&
+          !this.matchesSkillRepairStream(expectedSkillRepair, streamed, streamedTaskCount))) {
+          streamingDisabled = true;
+          return;
+        }
+        if (streamedLocalIds.has(streamed.task.localId)) {
+          throw new Error('Leader streamed duplicate Data task localId.');
+        }
+        streamedLocalIds.add(streamed.task.localId);
+        onDataTask(streamed);
+        streamedTaskCount++;
+        aiLogInfo(
+          '[AIPhone][ModelToolCallReady] toolId=' + streamed.task.toolId +
+          ' localId=' + streamed.task.localId +
+          ' inputChars=' + JSON.stringify(streamed.task.input).length.toString() +
+          ' callIndex=' + streamedTaskCount.toString() +
+          ' phase=' + phase +
+          ' elapsedMs=' + (Date.now() - streamStartMs).toString()
+        );
+      }
+    };
+    const modelOutput: string = await this.completeBounded(prompt, consumeModelDelta);
+    if (!sawModelDelta) {
+      consumeModelDelta(modelOutput);
+    }
+    return {
+      output: streamParser.finish(),
+      streamedTaskCount
+    };
+  }
+
+  private matchesSkillRepairStream(
+    original: LeaderDecision,
+    streamed: LeaderStreamedDataTask,
+    taskIndex: number
+  ): boolean {
+    return original.personaId === streamed.personaId &&
+      this.sameStrings(original.requestedCapabilityIds, streamed.requestedCapabilityIds) &&
+      taskIndex < original.dataTasks.length &&
+      this.sameDataTask(original.dataTasks[taskIndex], streamed.task);
+  }
+
+  private completeBounded(prompt: string, onContent?: ModelContentListener): Promise<string> {
     if (prompt.length > MAX_LEADER_PROMPT_CHARS) {
       throw new Error('LEADER_PROMPT_LIMIT');
     }
-    return this.model.complete(prompt, undefined, LEADER_SYSTEM_PROMPT);
+    return this.model.complete(prompt, undefined, LEADER_SYSTEM_PROMPT, onContent);
+  }
+
+  private streamedDataTask(
+    outputWithoutTags: string,
+    body: string,
+    message: AgentMessage,
+    input: InputUserPayload,
+    context: LeaderPlanningContext,
+    round: number,
+    currentLocalDate: string
+  ): LeaderStreamedDataTask | null {
+    try {
+      const header: LeaderStreamHeader | null = this.streamHeader(outputWithoutTags, context);
+      if (header === null || this.streamingUnsafeCapabilities(header.requestedCapabilityIds, context)) {
+        return null;
+      }
+      const trimmedBody: string = body.trim();
+      if (!trimmedBody.startsWith('{') || !trimmedBody.endsWith('}') ||
+        this.hasDuplicateObjectKeys(trimmedBody)) {
+        return null;
+      }
+      const parsedTask: Object = JSON.parse(trimmedBody) as Object;
+      const task: LeaderDecisionDataTask = this.dataTasks([parsedTask], context)[0];
+      if (header.requestedCapabilityIds.indexOf(task.toolId) < 0) {
+        return null;
+      }
+      for (let index: number = 0; index < task.allowedToolIds.length; index++) {
+        if (header.requestedCapabilityIds.indexOf(task.allowedToolIds[index]) < 0) {
+          return null;
+        }
+      }
+      const partialDecision: LeaderDecision = {
+        personaId: header.personaId,
+        skillId: header.skillId,
+        requestedCapabilityIds: header.requestedCapabilityIds.slice(),
+        roundAction: 'execute',
+        dataTasks: [task],
+        uiIntent: {
+          purpose: 'streaming-data-task',
+          preferredDensity: 'comfortable',
+          requiredSections: []
+        },
+        reasonCode: 'host_execute'
+      };
+      this.rejectSkillCapabilityViolation(partialDecision, context);
+      this.rejectExplicitMapsSelection(input, partialDecision);
+      this.rejectCompletedToolReuse(
+        partialDecision,
+        this.currentTurnCompletedToolIds(message, input, context, round)
+      );
+      this.rejectUnboundLaterTool(
+        input,
+        partialDecision,
+        this.currentTurnDependencyObservations(message, input, round),
+        round
+      );
+      this.validateDecisionInputs(input, partialDecision, currentLocalDate);
+      return {
+        personaId: header.personaId,
+        skillId: header.skillId,
+        requestedCapabilityIds: header.requestedCapabilityIds.slice(),
+        task
+      };
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  private streamHeader(
+    outputWithoutTags: string,
+    context: LeaderPlanningContext
+  ): LeaderStreamHeader | null {
+    const dataTasksKeyIndex: number = outputWithoutTags.indexOf('"dataTasks"');
+    if (dataTasksKeyIndex < 0) {
+      return null;
+    }
+    const arrayStart: number = outputWithoutTags.indexOf('[', dataTasksKeyIndex);
+    if (arrayStart < 0) {
+      return null;
+    }
+    const headerJson: string = outputWithoutTags.substring(0, arrayStart + 1) + ']}';
+    if (this.hasDuplicateObjectKeys(headerJson)) {
+      return null;
+    }
+    const parsed: Object = JSON.parse(headerJson) as Object;
+    if (parsed === null || Array.isArray(parsed) ||
+      Object.keys(parsed).join(',') !==
+        'personaId,skillId,requestedCapabilityIds,roundAction,dataTasks') {
+      return null;
+    }
+    const values = parsed as Record<string, Object | string | number | boolean | null | undefined>;
+    const personaId = values['personaId'];
+    const skillId = values['skillId'];
+    const roundAction = values['roundAction'];
+    const rawRequested = values['requestedCapabilityIds'];
+    const rawTasks = values['dataTasks'];
+    if (typeof personaId !== 'string' || personaId.trim().length === 0 ||
+      typeof skillId !== 'string' || roundAction !== 'execute' ||
+      !Array.isArray(rawRequested) || !Array.isArray(rawTasks) || rawTasks.length !== 0 ||
+      !this.validPersonaSkill(context, personaId, skillId)) {
+      return null;
+    }
+    if ((context.lockedPersonaId !== undefined || context.lockedSkillId !== undefined) &&
+      (personaId !== context.lockedPersonaId || skillId !== context.lockedSkillId)) {
+      return null;
+    }
+    return {
+      personaId,
+      skillId,
+      requestedCapabilityIds: this.requestedCapabilities(rawRequested as Object[], context)
+    };
+  }
+
+  private streamingUnsafeCapabilities(
+    requestedCapabilityIds: string[],
+    context: LeaderPlanningContext
+  ): boolean {
+    if (requestedCapabilityIds.indexOf('media.video.search') >= 0 &&
+      requestedCapabilityIds.indexOf('youtube.video.search') >= 0) {
+      return true;
+    }
+    const tasks: LeaderDecisionDataTask[] = [];
+    for (let index: number = 0; index < requestedCapabilityIds.length; index++) {
+      const toolId: string = requestedCapabilityIds[index];
+      if (!leaderIsDataCapability(context, toolId)) {
+        continue;
+      }
+      const scopeTask: LeaderDecisionDataTask = {
+        localId: 'stream-scope-' + index.toString(),
+        goal: toolId,
+        allowedToolIds: [toolId],
+        toolId,
+        input: new Object(),
+        required: true
+      };
+      tasks.push(scopeTask);
+    }
+    return leaderTasksHaveSameRoundDependency(tasks);
   }
 
   private rejectOverlappingVideoTools(decision: LeaderDecision): void {
@@ -1351,7 +1624,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
   }
 
   private parseDecision(output: string, context: LeaderPlanningContext): LeaderDecision {
-    let trimmed: string = output.trim();
+    let trimmed: string = this.withoutToolTags(output).trim();
     if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
       throw new Error('Leader planner requires exactly one JSON object.');
     }
@@ -1373,6 +1646,12 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       throw new Error('Leader planner JSON contains duplicate object keys.');
     }
     return this.decision(parsed, context);
+  }
+
+  private withoutToolTags(output: string): string {
+    const parser: StreamingLeaderToolParser = new StreamingLeaderToolParser();
+    parser.feed(output);
+    return parser.finish();
   }
 
   private hasDuplicateObjectKeys(json: string): boolean {
@@ -1449,7 +1728,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       }) + '\nEvery later-round decision must preserve this exact personaId and skillId.';
     const result: string = [
       'You are the Appless Leader Agent.',
-      'Return exactly one LeaderDecision JSON object.',
+      'Return exactly one LeaderDecision document.',
       REQUEST_SCOPE_CONTRACT,
       'LeaderDecision schema: {"personaId":"string","skillId":"string",' +
         '"requestedCapabilityIds":["registered tool or action ID"],' +
@@ -1460,6 +1739,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         '"purpose":"string","preferredDensity":"string","requiredSections":["string"]},' +
         '"actionIntent":{"goal":"string","allowedActionIds":["string"]} optional,' +
         '"answer":"required non-empty string for answer|clarify; omit for execute"}.',
+      STREAMING_DATA_TASK_CONTRACT,
       ANSWER_FIELD_RULE,
       REASON_CODE_FIELD_RULE,
       CONTINUATION_MODE_FIELD_RULE,

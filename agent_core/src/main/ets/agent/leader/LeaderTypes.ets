@@ -113,6 +113,15 @@ export type LeaderCurrentLocalDateProvider = () => string;
 export type LeaderPlannerResult = LeaderPlan | LeaderDecision;
 export type LeaderPlanningSignal = () => boolean;
 
+export interface LeaderStreamedDataTask {
+  personaId: string;
+  skillId: string;
+  requestedCapabilityIds: string[];
+  task: LeaderDecisionDataTask;
+}
+
+export type LeaderDataTaskStreamListener = (streamed: LeaderStreamedDataTask) => void;
+
 export interface LeaderPlanner {
   plan(
     message: AgentMessage,
@@ -120,6 +129,7 @@ export interface LeaderPlanner {
     context: LeaderPlanningContext,
     round?: number,
     signal?: LeaderPlanningSignal,
-    currentLocalDate?: string
+    currentLocalDate?: string,
+    onDataTask?: LeaderDataTaskStreamListener
   ): Promise<LeaderPlannerResult>;
 }

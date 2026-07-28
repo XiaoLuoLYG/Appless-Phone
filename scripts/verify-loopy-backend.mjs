@@ -483,8 +483,8 @@ function hasBoundedLeaderModelCalls(source) {
     prompt.includes("throw new Error('LEADER_TOOL_CATALOG_LIMIT')") &&
     bounded.includes('prompt.length > MAX_LEADER_PROMPT_CHARS') &&
     bounded.includes("throw new Error('LEADER_PROMPT_LIMIT')") &&
-    bounded.includes('return this.model.complete(prompt, undefined, LEADER_SYSTEM_PROMPT)') &&
-    plan.includes('await this.completeBounded(prompt)') &&
+    bounded.includes('return this.model.complete(prompt, undefined, LEADER_SYSTEM_PROMPT, onContent)') &&
+    plan.includes('await this.completeStreamingBounded(') &&
     plan.includes('await this.completeBounded(prompt +') &&
     plan.includes('correction') &&
     modelCalls.length === 1;
@@ -541,10 +541,15 @@ function hasCorrelatedMultiAgentRuntime(source) {
 function hasLeaderObserveReplan(source) {
   const planning = executableDeclarationBody(source, 'private startPlanning(');
   const observation = executableDeclarationBody(source, 'private handleSemanticObservation(');
+  const advance = executableDeclarationBody(source, 'private advanceAfterSemanticDataRound(');
+  const replans = (body) =>
+    /state\.round\s*\+\+\s*;/.test(body) &&
+    /this\.startPlanning\s*\(\s*this\.inputMessage\s*\(\s*state\s*\)\s*,\s*state\.input\s*,\s*state\s*\)\s*;/.test(body);
   return /this\.planner\.plan\s*\(/.test(planning) &&
     /state\.turnObservations\.push\s*\(\s*digest\s*\)\s*;/.test(observation) &&
-    /state\.round\s*\+\+\s*;/.test(observation) &&
-    /this\.startPlanning\s*\(\s*this\.inputMessage\s*\(\s*state\s*\)\s*,\s*state\.input\s*,\s*state\s*\)\s*;/.test(observation);
+    (replans(observation) ||
+      (/this\.advanceAfterSemanticDataRound\s*\(\s*state\s*\)\s*;/.test(observation) &&
+        replans(advance)));
 }
 
 function hasValidatedUiA2uiWrite(source) {
@@ -1416,8 +1421,8 @@ function verifySourceContracts() {
   assert(
     !hasBoundedLeaderModelCalls(
       canaryLeaderPlanner.replace(
-        'await this.completeBounded(prompt)',
-        'await this.model.complete(prompt)'
+        'await this.completeStreamingBounded(',
+        'await this.model.complete('
       )
     ),
     'verifier rejects an initial model call that bypasses the prompt bound'

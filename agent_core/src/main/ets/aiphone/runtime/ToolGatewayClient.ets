@@ -1382,7 +1382,7 @@ interface AmapLocationResolution {
   city: string;
 }
 
-interface FoodQuery {
+export interface FoodQuery {
   place: string;
   keyword: string;
 }
@@ -7057,16 +7057,81 @@ function extractFoodQuery(source: string): FoodQuery {
   };
 }
 
+function extractFoodPresetKeyword(source: string): string {
+  const preset = /椰子鸡|椰子|火锅|烧烤|咖啡|奶茶|晚餐|午餐|早餐|快餐|餐厅|饭店|美食/u.exec(source);
+  return preset === null ? '' : preset[0];
+}
+
 function extractFoodKeyword(source: string): string {
   const query = extractFoodQuery(source);
   if (query.keyword.length > 0) {
     return query.keyword;
   }
-  const preset = /椰子鸡|椰子|火锅|烧烤|咖啡|奶茶|晚餐|午餐|早餐|快餐|餐厅|饭店|美食/u.exec(source);
-  if (preset !== null) {
-    return preset[0];
+  const preset = extractFoodPresetKeyword(source);
+  if (preset.length > 0) {
+    return preset;
   }
   return '餐饮';
+}
+
+function firstFoodArgText(raw: ToolArgRecord, keys: string[]): string {
+  for (let index = 0; index < keys.length; index++) {
+    const value = textOf(raw[keys[index]]).trim();
+    if (value.length > 0) {
+      return value;
+    }
+  }
+  return '';
+}
+
+function trimFoodKeywordAtTaskBoundary(keyword: string): string {
+  const boundary = /(?:，|,|。|；|;)\s*(?:再|然后|同时|并且|另外|还要|接着)/u.exec(keyword);
+  if (boundary === null) {
+    return keyword.trim();
+  }
+  return keyword.substring(0, boundary.index).trim();
+}
+
+function resolveFoodSearchScope(prompt: string, args: Object | null): FoodQuery {
+  const promptQuery = extractFoodQuery(prompt);
+  if (args === null) {
+    return {
+      place: promptQuery.place,
+      keyword: trimFoodKeywordAtTaskBoundary(extractFoodKeyword(prompt))
+    };
+  }
+
+  const raw = args as ToolArgRecord;
+  const explicitPlace = firstFoodArgText(raw, ['place', 'location']);
+  const explicitKeyword = firstFoodArgText(raw, ['keyword', 'category', 'foodType', 'food_type']);
+  const scopedSource = firstFoodArgText(raw, ['query', 'prompt']);
+  const scopedQuery = extractFoodQuery(scopedSource);
+  let place = explicitPlace.length > 0 ? explicitPlace : scopedQuery.place;
+  let keyword = explicitKeyword.length > 0 ? explicitKeyword : trimFoodKeywordAtTaskBoundary(scopedQuery.keyword);
+
+  if (place.length === 0) {
+    place = promptQuery.place;
+  }
+  if (keyword.length === 0) {
+    keyword = extractFoodPresetKeyword(scopedSource);
+  }
+  if (keyword.length === 0) {
+    keyword = extractFoodPresetKeyword(prompt);
+  }
+  if (keyword.length === 0) {
+    keyword = trimFoodKeywordAtTaskBoundary(promptQuery.keyword);
+  }
+  if (keyword.length === 0) {
+    keyword = '餐饮';
+  }
+  return {
+    place: place,
+    keyword: keyword
+  };
+}
+
+export function foodSearchScopeForTest(prompt: string, args: Object | null = null): FoodQuery {
+  return resolveFoodSearchScope(prompt, args);
 }
 
 function normalizeFoodSearchKeyword(value: string): string {
@@ -10392,24 +10457,31 @@ async function callStructuredFoodTool(
   const key = localProviderConfig.amapKey;
   const preferences = foodPreferenceArgs(args);
 
-  const query = extractFoodQuery(prompt);
+  const query = resolveFoodSearchScope(prompt, args);
+  const keyword = query.keyword;
+  const scopedPrompt = query.place.length > 0 ? query.place + '附近的' + keyword : keyword;
   const preflightResults: FoodProviderResult[] = [];
   const provenanceResults: FoodProviderResult[] = [];
   let locationSource = 'none';
-  let location = parseCoordinatePair(prompt);
+  let location = parseCoordinatePair(query.place);
   if (location.length > 0) {
-    locationSource = 'prompt_coords';
-  } else if (query.place.length > 0 && key.length > 0) {
-    try {
-      const resolved = await resolveFoodSearchLocation(query.place, key);
-      location = resolved.location;
-      locationSource = resolved.locationSource;
-      provenanceResults.push({
-        provider: '高德', foods: [], error: '', attempted: true, succeeded: true, operation: 'geocode'
-      });
-    } catch (error) {
-      preflightResults.push(emptyProviderResult('高德', '地点解析失败：' + describeThrown(error), true, 'geocode'));
-      locationSource = 'geocode_error';
+    locationSource = 'tool_args_coords';
+  } else {
+    location = parseCoordinatePair(prompt);
+    if (location.length > 0) {
+      locationSource = 'prompt_coords';
+    } else if (query.place.length > 0 && key.length > 0) {
+      try {
+        const resolved = await resolveFoodSearchLocation(query.place, key);
+        location = resolved.location;
+        locationSource = resolved.locationSource;
+        provenanceResults.push({
+          provider: '高德', foods: [], error: '', attempted: true, succeeded: true, operation: 'geocode'
+        });
+      } catch (error) {
+        preflightResults.push(emptyProviderResult('高德', '地点解析失败：' + describeThrown(error), true, 'geocode'));
+        locationSource = 'geocode_error';
+      }
     }
   }
   if (location.length === 0) {
@@ -10418,8 +10490,6 @@ async function callStructuredFoodTool(
       locationSource = 'rawfile_default';
     }
   }
-  const keyword = extractFoodKeyword(prompt);
-
   const adapters: FoodProviderAdapter[] = [
     new AmapFoodProvider(),
     new TencentMapFoodProvider(),
@@ -10430,10 +10500,10 @@ async function callStructuredFoodTool(
   if (localProviderConfig.googleMapsApiKey.length > 0) {
     adapters.push(new GoogleMapsFoodProvider());
   }
-  if (shouldQueryMcDonalds(prompt, keyword)) {
+  if (shouldQueryMcDonalds(scopedPrompt, keyword)) {
     adapters.push(new McDonaldsMcpFoodProvider());
   }
-  if (shouldQueryLuckin(prompt, keyword)) {
+  if (shouldQueryLuckin(scopedPrompt, keyword)) {
     adapters.push(new LuckinMcpFoodProvider());
   }
   const providerNames: string[] = [];
@@ -10457,7 +10527,7 @@ async function callStructuredFoodTool(
   }
   const tasks: Promise<FoodProviderResult>[] = [];
   for (let index = 0; index < adapters.length; index++) {
-    tasks.push(safeFoodProviderSearch(adapters[index], prompt, query, keyword, location, locationSource));
+    tasks.push(safeFoodProviderSearch(adapters[index], scopedPrompt, query, keyword, location, locationSource));
   }
   const streamed = await streamFoodProviderResultsWithPartials(tasks, providerResults, (snapshot: FoodProviderPartialSnapshot) => {
     aiLogInfo('[AIPhone][LocalToolFoodPartial] provider=' + snapshot.provider +
@@ -10491,12 +10561,14 @@ async function callStructuredFoodTool(
 }
 
 async function callLocalFoodSearch(prompt: string, surfaceId: string, emitJsonl: LocalA2uiEmitter | null = null, args: Object | null = null): Promise<string> {
+  const scope = resolveFoodSearchScope(prompt, args);
+  const scopedPrompt = scope.place.length > 0 ? scope.place + '附近的' + scope.keyword : scope.keyword;
   let foodPartialCache: A2uiPartialUpdateCache | null = null;
   const result = await callStructuredFoodTool(prompt, args, (providerNames: string[], snapshot: FoodProviderPartialSnapshot) => {
     if (emitJsonl === null) {
       return;
     }
-    const planned = foodPartialA2ui(surfaceId, prompt, providerNames, snapshot, foodPartialCache);
+    const planned = foodPartialA2ui(surfaceId, scopedPrompt, providerNames, snapshot, foodPartialCache);
     foodPartialCache = planned.cache;
     aiLogInfo('[AIPhone][LocalToolFoodPartialEmit] envelopes=' + planned.emittedEnvelopeCount.toString() +
       ' components=' + (planned.componentsUpdated ? 'true' : 'false') +

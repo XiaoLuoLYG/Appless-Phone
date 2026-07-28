@@ -7,6 +7,7 @@ export { AgentMessageReader, LinkedMessageBus } from './src/main/ets/agent/messa
 export { MessageDrivenAgent } from './src/main/ets/agent/MessageDrivenAgent';
 export { LeaderAgent } from './src/main/ets/agent/leader/LeaderAgent';
 export * from './src/main/ets/agent/leader/LeaderTypes';
+export { StreamingLeaderToolParser } from './src/main/ets/agent/leader/StreamingLeaderToolParser';
 export {
   leaderInputHasEntityAuthority,
   leaderSameRoundDependencyConsumerTasksLackEntityInput,
@@ -61,7 +62,8 @@ export {
   createConfiguredLoopToolRegistry,
   createLoopToolRegistry
 } from './src/main/ets/agent/ToolRegistry';
-export { LocalModel } from './src/main/ets/model/LocalModel';
+export { LocalModel, ModelContentListener } from './src/main/ets/model/LocalModel';
+export { ChatCompletionSseParser } from './src/main/ets/model/ChatCompletionSseParser';
 export { LlmProvider } from './src/main/ets/model/LlmProvider';
 export { ScriptedLocalModel } from './src/main/ets/model/ScriptedLocalModel';
 export { ScriptedA2uiModel, buildTaskCardComponents } from './src/main/ets/a2ui/ScriptedA2uiModel';

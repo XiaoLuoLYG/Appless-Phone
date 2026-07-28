@@ -13,6 +13,7 @@ import {
   InputUserPayload,
   LeaderCurrentLocalDateProvider,
   LeaderDataTask,
+  LeaderStreamedDataTask,
   LeaderDataTaskInputNormalizer,
   LeaderDecision,
   LeaderDecisionDataTask,
@@ -41,6 +42,7 @@ import {
   leaderIsDataCapability,
   leaderIsExplicitActionOwner
 } from './LeaderCapabilityOwnership';
+import { aiLogInfo } from '../../aiphone/runtime/AiphoneLogger';
 
 interface LeaderTurnState {
   conversationId: string;
@@ -55,7 +57,10 @@ interface LeaderTurnState {
   currentRoundAllDataSucceeded: boolean;
   currentRoundRequiresPlanning: boolean;
   currentRoundAllowsUnboundContinuation: boolean;
+  decisionFinalized: boolean;
+  planningObservationCount: number;
   pendingDataTools: Map<string, LeaderPendingDataTask>;
+  streamedDataTasks: Map<string, LeaderDecisionDataTask>;
   dataTaskIds: string[];
   expectedOutputSchema: string;
   uiIntent: string;
@@ -259,7 +264,10 @@ export class LeaderAgent extends MessageDrivenAgent {
       currentRoundAllDataSucceeded: false,
       currentRoundRequiresPlanning: false,
       currentRoundAllowsUnboundContinuation: false,
+      decisionFinalized: false,
+      planningObservationCount: 0,
       pendingDataTools: new Map<string, LeaderPendingDataTask>(),
+      streamedDataTasks: new Map<string, LeaderDecisionDataTask>(),
       dataTaskIds: [],
       expectedOutputSchema: '',
       uiIntent: '',
@@ -296,6 +304,13 @@ export class LeaderAgent extends MessageDrivenAgent {
       return;
     }
     state.planning = true;
+    state.decisionFinalized = false;
+    state.currentRoundAllDataSucceeded = true;
+    state.currentRoundRequiresPlanning = false;
+    state.currentRoundAllowsUnboundContinuation = false;
+    // Results from tasks streamed by this planner call still belong to its current round.
+    state.planningObservationCount = state.turnObservations.length;
+    state.streamedDataTasks.clear();
     let trustedCurrentLocalDate: string = '';
     try {
       trustedCurrentLocalDate = this.currentLocalDate();
@@ -330,7 +345,10 @@ export class LeaderAgent extends MessageDrivenAgent {
           planningContext,
           state.round,
           planningSignal,
-          trustedCurrentLocalDate
+          trustedCurrentLocalDate,
+          (streamed: LeaderStreamedDataTask): void => {
+            this.handleStreamedDataTask(message, state, streamed, trustedCurrentLocalDate);
+          }
         ),
         timeoutSignal
       ])
@@ -457,7 +475,8 @@ export class LeaderAgent extends MessageDrivenAgent {
       this.publishError(message, 'LEADER_TASK_INPUT_INVALID', detail);
       return;
     }
-    if (this.reusesCompletedDataTool(state, decision)) {
+    const planningObservations: ObservationDigest[] = this.planningBaseObservations(state);
+    if (this.reusesCompletedDataTool(decision, planningObservations)) {
       this.finishTurn(state);
       this.publishError(
         message,
@@ -466,7 +485,7 @@ export class LeaderAgent extends MessageDrivenAgent {
       );
       return;
     }
-    if (this.hasUnboundLaterDataTask(state, decision)) {
+    if (this.hasUnboundLaterDataTask(state, decision, planningObservations)) {
       this.finishTurn(state);
       this.publishError(
         message,
@@ -475,8 +494,18 @@ export class LeaderAgent extends MessageDrivenAgent {
       );
       return;
     }
+    if (!this.streamedTasksMatchDecision(state, decision)) {
+      this.finishTurn(state);
+      this.publishError(
+        message,
+        'LEADER_STREAM_DECISION_MISMATCH',
+        'Streamed Data tasks do not match the final Leader decision'
+      );
+      return;
+    }
     // Three bounded rounds stay below UiAgent's retained pending-data window.
-    if (state.dataTaskIds.length + decision.dataTasks.length >
+    const additionalTaskCount: number = decision.dataTasks.length - state.streamedDataTasks.size;
+    if (state.dataTaskIds.length + additionalTaskCount >
       MAX_LEADER_DATA_TASKS_PER_TURN) {
       this.finishTurn(state);
       this.publishError(
@@ -513,7 +542,6 @@ export class LeaderAgent extends MessageDrivenAgent {
     const dataTaskIds: string[] = this.decisionDataTaskIds(state, decision.dataTasks);
     let uiTaskId: string = state.inputTaskId + ':round-' + state.round.toString() + ':virtual';
     if (dataTaskIds.length > 0) {
-      state.currentRoundAllDataSucceeded = true;
       state.currentRoundRequiresPlanning =
         decision.reasonCode === 'dependency_requires_next_round' ||
         decision.reasonCode === 'sequence_requires_next_round';
@@ -521,7 +549,9 @@ export class LeaderAgent extends MessageDrivenAgent {
         decision.reasonCode === 'sequence_requires_next_round';
       uiTaskId = state.uiTaskId;
       for (let index = 0; index < dataTaskIds.length; index++) {
-        state.dataTaskIds.push(dataTaskIds[index]);
+        if (state.dataTaskIds.indexOf(dataTaskIds[index]) < 0) {
+          state.dataTaskIds.push(dataTaskIds[index]);
+        }
       }
       if (state.expectedOutputSchema.length === 0) {
         const first: LeaderDecisionDataTask = decision.dataTasks[0];
@@ -533,7 +563,9 @@ export class LeaderAgent extends MessageDrivenAgent {
       }
     }
     for (let index = 0; index < decision.dataTasks.length; index++) {
-      this.publishDecisionDataTask(message, state, decision.dataTasks[index]);
+      if (!state.streamedDataTasks.has(decision.dataTasks[index].localId)) {
+        this.publishDecisionDataTask(message, state, decision.dataTasks[index]);
+      }
     }
     if (decision.actionIntent !== undefined && dataTaskIds.length === 0) {
       state.virtualActionTaskId = uiTaskId;
@@ -545,6 +577,125 @@ export class LeaderAgent extends MessageDrivenAgent {
         dataTaskIds.length === 0
       );
     }
+    state.decisionFinalized = true;
+    if (decision.dataTasks.length > 0) {
+      this.advanceAfterSemanticDataRound(state);
+    }
+  }
+
+  private handleStreamedDataTask(
+    message: AgentMessage,
+    state: LeaderTurnState,
+    streamed: LeaderStreamedDataTask,
+    trustedCurrentLocalDate: string
+  ): void {
+    if (state.terminal || !state.planning || state.decisionFinalized) {
+      throw new Error('Leader streamed Data task arrived outside active planning.');
+    }
+    if (state.streamedDataTasks.has(streamed.task.localId)) {
+      throw new Error('Leader streamed duplicate Data task localId.');
+    }
+    if (!this.validDecisionPersonaSkill(streamed.personaId, streamed.skillId) ||
+      !this.validRequestedCapabilityIds(streamed.requestedCapabilityIds) ||
+      !this.validDecisionTasks([streamed.task])) {
+      throw new Error('Leader streamed Data task violates its exact capability contract.');
+    }
+    if (state.personaId.length > 0 &&
+      (state.personaId !== streamed.personaId || state.skillId !== streamed.skillId)) {
+      throw new Error('LEADER_PERSONA_SKILL_SWITCH');
+    }
+    if (streamed.requestedCapabilityIds.indexOf(streamed.task.toolId) < 0) {
+      throw new Error('Leader streamed Data task is outside requested capabilities.');
+    }
+    for (let index: number = 0; index < streamed.task.allowedToolIds.length; index++) {
+      if (streamed.requestedCapabilityIds.indexOf(streamed.task.allowedToolIds[index]) < 0) {
+        throw new Error('Leader streamed Data task allowlist is outside requested capabilities.');
+      }
+    }
+    const partialDecision: LeaderDecision = {
+      personaId: streamed.personaId,
+      skillId: streamed.skillId,
+      requestedCapabilityIds: streamed.requestedCapabilityIds.slice(),
+      roundAction: 'execute',
+      dataTasks: [streamed.task],
+      uiIntent: {
+        purpose: 'streaming-data-task',
+        preferredDensity: 'comfortable',
+        requiredSections: []
+      },
+      normalizationCurrentLocalDate: trustedCurrentLocalDate,
+      reasonCode: 'host_execute'
+    };
+    if (!this.decisionWithinSelectedSkill(partialDecision)) {
+      throw new Error('LEADER_SKILL_CAPABILITY_VIOLATION');
+    }
+    this.normalizeDecisionInputs(state.input, partialDecision, trustedCurrentLocalDate);
+    const planningObservations: ObservationDigest[] = this.planningBaseObservations(state);
+    if (this.reusesCompletedDataTool(partialDecision, planningObservations) ||
+      this.hasUnboundLaterDataTask(state, partialDecision, planningObservations)) {
+      throw new Error('Leader streamed Data task is not valid for this round.');
+    }
+    const streamedTasks: LeaderDecisionDataTask[] =
+      Array.from(state.streamedDataTasks.values()).concat(partialDecision.dataTasks);
+    if (leaderTasksHaveSameRoundDependency(streamedTasks)) {
+      throw new Error('LEADER_SAME_ROUND_DEPENDENCY');
+    }
+    if (state.dataTaskIds.length + 1 > MAX_LEADER_DATA_TASKS_PER_TURN ||
+      state.streamedDataTasks.size + 1 > MAX_LEADER_DATA_TASKS_PER_ROUND) {
+      throw new Error('LEADER_DATA_TASK_LIMIT');
+    }
+
+    const task: LeaderDecisionDataTask = partialDecision.dataTasks[0];
+    const taskId: string = state.inputTaskId + ':round-' + state.round.toString() + ':' + task.localId;
+    state.semantic = true;
+    state.personaId = streamed.personaId;
+    state.skillId = streamed.skillId;
+    state.streamedDataTasks.set(task.localId, task);
+    state.dataTaskIds.push(taskId);
+    if (state.expectedOutputSchema.length === 0) {
+      state.expectedOutputSchema = (this.toolMetadata(task.toolId) as LeaderToolMetadata).outputSchema;
+    }
+    aiLogInfo(
+      '[AIPhone][LeaderStreamToolDispatch] toolId=' + task.toolId +
+      ' localId=' + task.localId +
+      ' taskId=' + taskId +
+      ' round=' + state.round.toString()
+    );
+    this.publishDecisionDataTask(message, state, task);
+  }
+
+  private streamedTasksMatchDecision(state: LeaderTurnState, decision: LeaderDecision): boolean {
+    if (state.streamedDataTasks.size === 0) {
+      return true;
+    }
+    if (state.streamedDataTasks.size > decision.dataTasks.length) {
+      return false;
+    }
+    const localIds: string[] = Array.from(state.streamedDataTasks.keys());
+    for (let index: number = 0; index < localIds.length; index++) {
+      const streamed: LeaderDecisionDataTask =
+        state.streamedDataTasks.get(localIds[index]) as LeaderDecisionDataTask;
+      let matched: LeaderDecisionDataTask | null = null;
+      for (let taskIndex: number = 0; taskIndex < decision.dataTasks.length; taskIndex++) {
+        if (decision.dataTasks[taskIndex].localId === localIds[index]) {
+          matched = decision.dataTasks[taskIndex];
+          break;
+        }
+      }
+      if (matched === null || streamed.goal !== matched.goal ||
+        streamed.toolId !== matched.toolId || streamed.required !== matched.required ||
+        streamed.allowedToolIds.join('\n') !== matched.allowedToolIds.join('\n')) {
+        return false;
+      }
+      try {
+        if (JSON.stringify(streamed.input) !== JSON.stringify(matched.input)) {
+          return false;
+        }
+      } catch (_error) {
+        return false;
+      }
+    }
+    return true;
   }
 
   private normalizeSameRoundDependency(decision: LeaderDecision): boolean {
@@ -597,8 +748,16 @@ export class LeaderAgent extends MessageDrivenAgent {
     }
   }
 
-  private hasUnboundLaterDataTask(state: LeaderTurnState, decision: LeaderDecision): boolean {
-    if (decision.roundAction !== 'execute' || state.turnObservations.length === 0 ||
+  private planningBaseObservations(state: LeaderTurnState): ObservationDigest[] {
+    return state.turnObservations.slice(0, state.planningObservationCount);
+  }
+
+  private hasUnboundLaterDataTask(
+    state: LeaderTurnState,
+    decision: LeaderDecision,
+    observations: ObservationDigest[]
+  ): boolean {
+    if (decision.roundAction !== 'execute' || observations.length === 0 ||
       decision.dataTasks.length === 0 ||
       state.input.orderedContinuationAuthorized === true) {
       return false;
@@ -607,7 +766,7 @@ export class LeaderAgent extends MessageDrivenAgent {
       if (!leaderInputHasEntityAuthority(
         decision.dataTasks[index].toolId,
         decision.dataTasks[index].input,
-        state.turnObservations
+        observations
       )) {
         return true;
       }
@@ -615,13 +774,16 @@ export class LeaderAgent extends MessageDrivenAgent {
     return false;
   }
 
-  private reusesCompletedDataTool(state: LeaderTurnState, decision: LeaderDecision): boolean {
-    if (decision.roundAction !== 'execute' || state.turnObservations.length === 0) {
+  private reusesCompletedDataTool(
+    decision: LeaderDecision,
+    observations: ObservationDigest[]
+  ): boolean {
+    if (decision.roundAction !== 'execute' || observations.length === 0) {
       return false;
     }
     const completedToolIds: Set<string> = new Set<string>();
-    for (let index = 0; index < state.turnObservations.length; index++) {
-      const observation: ObservationDigest = state.turnObservations[index];
+    for (let index = 0; index < observations.length; index++) {
+      const observation: ObservationDigest = observations[index];
       const terminal: boolean = observation.status === 'success' || observation.status === 'partial' ||
         observation.status === 'empty' || observation.status === 'error';
       if (terminal && leaderIsDataCapability(this.planningContext, observation.toolId)) {
@@ -711,7 +873,12 @@ export class LeaderAgent extends MessageDrivenAgent {
     state.currentRoundAllDataSucceeded =
       state.currentRoundAllDataSucceeded && digest.status === 'success';
     state.observations = this.boundedObservations(state.observations as Object[]);
-    if (state.pendingDataTools.size > 0) {
+    this.advanceAfterSemanticDataRound(state);
+  }
+
+  private advanceAfterSemanticDataRound(state: LeaderTurnState): void {
+    if (state.terminal || state.planning || !state.decisionFinalized ||
+      state.pendingDataTools.size > 0) {
       return;
     }
     if (state.pendingActionDecision !== null &&
