@@ -118,6 +118,7 @@ import {
   successfulDataResult,
   trainStructuredDataA2ui,
   trainDataResultA2ui,
+  resolveTrainSearchInput,
   trainStructuredDataResult,
   travelStructuredDataA2ui,
   travelStructuredDataResult,
@@ -650,6 +651,19 @@ export default function toolGatewayClientTest() {
       );
       expect(scope.place).assertEqual('上海虹桥站');
       expect(scope.keyword).assertEqual('新疆菜');
+    });
+
+    it('prefers normalized train args when the original query uses a dotted date', 0, () => {
+      const input = resolveTrainSearchInput(
+        '查秋岗花园附近餐厅，再查8.1深圳到上海的高铁',
+        looseObject('{"query":"查秋岗花园附近餐厅，再查8.1深圳到上海的高铁",' +
+          '"origin":"深圳","destination":"上海","date":"2026-08-01"}')
+      );
+
+      expect(input.source).assertEqual('查秋岗花园附近餐厅，再查8.1深圳到上海的高铁');
+      expect(input.origin).assertEqual('深圳');
+      expect(input.destination).assertEqual('上海');
+      expect(input.date).assertEqual('2026-08-01');
     });
 
     it('fails closed when a legacy social reply draft lacks a selected real item', 0, async () => {

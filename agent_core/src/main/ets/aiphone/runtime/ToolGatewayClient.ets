@@ -1578,6 +1578,13 @@ type ToolArgRecord = Record<string, ToolArgValue>;
 type PaymentToolArgValue = ToolArgValue;
 type PaymentToolArgRecord = ToolArgRecord;
 
+export interface TrainSearchInput {
+  source: string;
+  origin: string;
+  destination: string;
+  date: string;
+}
+
 interface RideRouteArgs {
   origin?: ToolArgValue;
   from?: ToolArgValue;
@@ -2138,6 +2145,41 @@ function textOf(value: Object | string | number | boolean | null | undefined): s
     return value.toString();
   }
   return JSON.stringify(value);
+}
+
+function trainArgText(args: ToolArgRecord, keys: string[]): string {
+  for (let index = 0; index < keys.length; index++) {
+    const value = textOf(args[keys[index]]).trim();
+    if (value.length > 0) {
+      return value;
+    }
+  }
+  const nested = args['args'];
+  if (nested === null || nested === undefined || typeof nested !== 'object' || Array.isArray(nested)) {
+    return '';
+  }
+  const nestedArgs = nested as ToolArgRecord;
+  for (let index = 0; index < keys.length; index++) {
+    const value = textOf(nestedArgs[keys[index]]).trim();
+    if (value.length > 0) {
+      return value;
+    }
+  }
+  return '';
+}
+
+export function resolveTrainSearchInput(prompt: string, args: Object | null): TrainSearchInput {
+  const values: ToolArgRecord = args === null || Array.isArray(args) ? {} : args as ToolArgRecord;
+  const query = trainArgText(values, ['query', 'prompt']);
+  const source = query.length > 0 ? query : prompt;
+  const rawDate = trainArgText(values, ['date', 'departureDate', 'travelDate']);
+  const structuredDate = rawDate.length > 0 ? calendarDateFromPrompt(rawDate) : '';
+  return {
+    source,
+    origin: trainArgText(values, ['origin', 'from', 'fromStation']),
+    destination: trainArgText(values, ['destination', 'to', 'toStation']),
+    date: structuredDate.length > 0 ? structuredDate : calendarDateFromPrompt(source)
+  };
 }
 
 function pad2(value: number): string {
@@ -10593,9 +10635,10 @@ function trainErrorData(title: string, body: string): TrainStructuredData {
   return { title: title, body: body, summary: body, trains: [] };
 }
 
-async function callStructuredTrainTool(prompt: string): Promise<DataResult> {
-  const source = prompt;
-  const date = calendarDateFromPrompt(source);
+async function callStructuredTrainTool(prompt: string, args: Object | null = null): Promise<DataResult> {
+  const request = resolveTrainSearchInput(prompt, args);
+  const source = request.source;
+  const date = request.date;
   if (date.length === 0) {
     const message = '查询 12306 余票需要明确的出发地、目的地和日期。';
     return structuredErrorWithData(
@@ -10613,7 +10656,8 @@ async function callStructuredTrainTool(prompt: string): Promise<DataResult> {
       'TRAIN_STATION_LOAD_ERROR', message, true, [], [message]
     );
   }
-  const routeNames = extractRouteNames(source, stations.names);
+  const routeNames = request.origin.length > 0 && request.destination.length > 0 ?
+    [request.origin, request.destination] : extractRouteNames(source, stations.names);
   const departAfter = calendarTimeFromPrompt(source);
   if (routeNames.length < 2) {
     const message = '查询 12306 余票需要明确的出发地、目的地和日期。';
@@ -10780,8 +10824,8 @@ export function trainDataResultA2ui(surfaceId: string, result: DataResult): stri
   return trainStructuredDataA2ui(surfaceId, data);
 }
 
-async function callLocalTrainSearch(prompt: string, surfaceId: string): Promise<string> {
-  return trainDataResultA2ui(surfaceId, await callStructuredTrainTool(prompt));
+async function callLocalTrainSearch(prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+  return trainDataResultA2ui(surfaceId, await callStructuredTrainTool(prompt, args));
 }
 
 interface DynamicPromptArgs {
@@ -15417,7 +15461,7 @@ export async function callStructuredTool(
     return callStructuredTravelTool(prompt);
   }
   if (toolId === 'train.search') {
-    return callStructuredTrainTool(prompt);
+    return callStructuredTrainTool(prompt, args);
   }
   if (toolId === 'flight.search') {
     return callStructuredFlightTool(prompt);
@@ -15643,7 +15687,7 @@ async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: st
     return callLocalFlightSearch(prompt, surfaceId);
   }
   if (toolId === 'train.search') {
-    return callLocalTrainSearch(prompt, surfaceId);
+    return callLocalTrainSearch(prompt, surfaceId, args);
   }
   if (toolId === 'food.search') {
     return callLocalFoodSearch(prompt, surfaceId, emitJsonl, args);
