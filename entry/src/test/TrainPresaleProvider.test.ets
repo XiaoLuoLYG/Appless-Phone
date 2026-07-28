@@ -1,5 +1,6 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
+  build12306PresaleRangeUrl,
   extractExactTrainCode,
   parseFutureTrainForTravelDate,
   parseFutureTrainMetadata,
@@ -28,6 +29,11 @@ export default function trainPresaleProviderTest() {
         expect(range.today).assertEqual('2026-07-22');
         expect(range.lastSaleDate).assertEqual('2026-08-05');
       }
+    });
+
+    it('bypasses the HTTP cache for the time-sensitive presale range', 0, () => {
+      expect(build12306PresaleRangeUrl(1785206400000))
+        .assertEqual('https://hzfw.12306.cn/zgzfw/zgzfw/init?_=1785206400000');
     });
 
     it('selects only an exact official train code', 0, () => {

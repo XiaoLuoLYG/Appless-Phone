@@ -4480,6 +4480,10 @@ export function parsePresaleRange(payload: string): PresaleRange | undefined {
   }
 }
 
+export function build12306PresaleRangeUrl(now: number = Date.now()): string {
+  return 'https://hzfw.12306.cn/zgzfw/zgzfw/init?_=' + now.toString();
+}
+
 export function extractExactTrainCode(text: string): string {
   const match = /(?:^|[^A-Z0-9])([GDCZTKYLSP]\d{1,5})(?:次|$|[^A-Z0-9])/i.exec(text);
   if (match !== null) {
@@ -5337,7 +5341,7 @@ export async function select12306DebugTrain(
       return emptyTrainPresaleDebugSelection(
         'mismatch', '调试查询中的车站名称与官方车站代码不匹配，请重新查询。');
     }
-    const presaleResponse = await requestText('https://hzfw.12306.cn/zgzfw/zgzfw/init', userAgentHeaders());
+    const presaleResponse = await requestText(build12306PresaleRangeUrl(), userAgentHeaders());
     if (presaleResponse.code < 200 || presaleResponse.code >= 300) {
       return emptyTrainPresaleDebugSelection(
         'provider_error', '12306 预售范围查询返回 HTTP ' + presaleResponse.code.toString() + '。');
@@ -10544,7 +10548,7 @@ async function callStructuredTrainTool(prompt: string): Promise<DataResult> {
     init = await requestText('https://kyfw.12306.cn/otn/leftTicket/init', userAgentHeaders());
     const cookieHeader = cookieHeaderFromRaw(init.cookies + '\n' + init.headers);
     aiLogInfo('[AIPhone][LocalTool12306Request] from=' + fromName + '(' + fromCode + ') to=' + toName + '(' + toCode + ') date=' + date + ' initCode=' + init.code.toString() + ' cookieChars=' + cookieHeader.length.toString() + ' headerChars=' + init.headers.length.toString());
-    const presaleResponse = await requestText('https://hzfw.12306.cn/zgzfw/zgzfw/init', userAgentHeaders());
+    const presaleResponse = await requestText(build12306PresaleRangeUrl(), userAgentHeaders());
     const range = presaleResponse.code >= 200 && presaleResponse.code < 300 ?
       parsePresaleRange(presaleResponse.text) : undefined;
     const searchPath = selectTrainSearchPath(source, date, range);
