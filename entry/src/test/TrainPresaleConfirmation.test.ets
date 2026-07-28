@@ -88,7 +88,7 @@ function validInput(): TrainPresaleConfirmationInput {
     fromCode: 'VNP',
     toName: '上海虹桥',
     toCode: 'AOH',
-    saleAt: '2026-08-06T12:45:00+08:00',
+    saleAt: '2026-07-23T12:45:00+08:00',
     passengerNames: [' 张三 '],
     seatPriority: '二等座',
     unpaidOrderAuthorized: true,
@@ -215,7 +215,7 @@ export default function trainPresaleConfirmationTest() {
       expect(findMatchingTrainPresaleTask([reservation, otherRoute, exact, awaitingPayment], validInput())?.taskId)
         .assertEqual('awaiting-payment');
       const changedSaleTime = validInput();
-      changedSaleTime.saleAt = '2026-08-06T13:00:00+08:00';
+      changedSaleTime.saleAt = '2026-07-23T13:00:00+08:00';
       expect(findMatchingTrainPresaleTask([exact], changedSaleTime)).assertEqual(undefined);
       exact.state = 'cancelled';
       expect(findMatchingTrainPresaleTask([exact], validInput())).assertEqual(undefined);

@@ -161,7 +161,7 @@ export function validateTrainPresaleTrip(
     fromName.length === 0 || toName.length === 0 ||
     !/^[A-Z]{3}$/.test(fromCode) || !/^[A-Z]{3}$/.test(toCode) ||
     fromName === toName || fromCode === toCode || !salePattern.test(saleAt) ||
-    saleAt.substring(0, 10) !== travelDate || isNaN(saleTime) || isNaN(nowTime)) {
+    saleAt.substring(0, 10) > travelDate || isNaN(saleTime) || isNaN(nowTime)) {
     return { error: '车次、日期、路线或开售时间无效，请重新查询。', trip: undefined };
   }
   if (saleTime <= nowTime) {

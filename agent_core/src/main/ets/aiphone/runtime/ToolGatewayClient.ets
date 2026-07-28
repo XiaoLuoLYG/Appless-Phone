@@ -4526,7 +4526,7 @@ export function buildPresaleTrainData(
   const code = extractExactTrainCode(trainCode);
   if (date.length === 0 || code.length === 0 || from.length === 0 || fromCode.length === 0 || to.length === 0 || toCode.length === 0 ||
     !isOfficialTime(depart) || !isOfficialTime(arrive) || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+08:00$/.test(saleAt) ||
-    saleAt.substring(0, 10) !== date || price <= 0) {
+    saleAt.substring(0, 10) >= date || price <= 0) {
     return undefined;
   }
   return {

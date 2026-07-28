@@ -44,7 +44,7 @@ export default function trainPresaleSearchTest() {
         'AOH',
         '06:30',
         '11:24',
-        '2026-08-06T12:45:00+08:00',
+        '2026-07-23T12:45:00+08:00',
         553
       );
       expect(train === undefined).assertFalse();
@@ -54,7 +54,7 @@ export default function trainPresaleSearchTest() {
         expect(train.from).assertEqual('北京南');
         expect(train.to).assertEqual('上海虹桥');
         expect(train.saleState).assertEqual('presale');
-        expect(train.saleAt).assertEqual('2026-08-06T12:45:00+08:00');
+        expect(train.saleAt).assertEqual('2026-07-23T12:45:00+08:00');
         expect(train.price).assertEqual('553');
         const bookingUrl = train.bookingUrl;
         expect(bookingUrl === undefined).assertFalse();
