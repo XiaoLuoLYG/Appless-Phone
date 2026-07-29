@@ -219,6 +219,7 @@ const GMAIL_DRAFT_APPLY_DECISION: string = '{"personaId":"work_companion","skill
   '"allowedActionIds":["gmail.draft.apply"]},"reasonCode":"gmail_draft_apply"}';
 const CALENDAR_UPDATE_SEARCH_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
   '"requestedCapabilityIds":["calendar.events.search"],"roundAction":"execute",' +
+  '"continuationMode":"dependency",' +
   '"dataTasks":[{"localId":"calendar-search","goal":"find the exact current event",' +
   '"allowedToolIds":["calendar.events.search"],"toolId":"calendar.events.search",' +
   '"input":{"query":"产品评审","eventId":"model-forged",' +
@@ -227,6 +228,7 @@ const CALENDAR_UPDATE_SEARCH_DECISION: string = '{"personaId":"work_companion","
   '"requiredSections":["events","review"]},"reasonCode":"calendar_update_read_first"}';
 const CALENDAR_UPDATE_ACTION_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
   '"requestedCapabilityIds":["calendar.events.search","calendar.event.update"],"roundAction":"execute",' +
+  '"continuationMode":"dependency",' +
   '"dataTasks":[{"localId":"calendar-search","goal":"find the exact current event",' +
   '"allowedToolIds":["calendar.events.search"],"toolId":"calendar.events.search",' +
   '"input":{"query":"产品评审","eventId":"model-forged",' +
@@ -238,6 +240,7 @@ const CALENDAR_UPDATE_ACTION_DECISION: string = '{"personaId":"work_companion","
 const CALENDAR_UPDATE_PREMATURE_ACTION_MISMATCH_DECISION: string =
   '{"personaId":"work_companion","skillId":"",' +
   '"requestedCapabilityIds":["calendar.events.search"],"roundAction":"execute",' +
+  '"continuationMode":"dependency",' +
   '"dataTasks":[{"localId":"calendar-search","goal":"find the exact current event",' +
   '"allowedToolIds":["calendar.events.search"],"toolId":"calendar.events.search",' +
   '"input":{"query":"产品评审","timeMin":"2026-07-31T00:00:00+08:00",' +
@@ -248,6 +251,7 @@ const CALENDAR_UPDATE_PREMATURE_ACTION_MISMATCH_DECISION: string =
 const CALENDAR_UPDATE_REPAIRED_SEARCH_DECISION: string =
   '{"personaId":"work_companion","skillId":"",' +
   '"requestedCapabilityIds":["calendar.events.search"],"roundAction":"execute",' +
+  '"continuationMode":"dependency",' +
   '"dataTasks":[{"localId":"calendar-search","goal":"find the exact current event",' +
   '"allowedToolIds":["calendar.events.search"],"toolId":"calendar.events.search",' +
   '"input":{"query":"产品评审","timeMin":"2026-07-31T00:00:00+08:00",' +
@@ -277,6 +281,7 @@ const CALENDAR_UPDATE_DONE_DECISION: string = '{"personaId":"work_companion","sk
   '"reasonCode":"calendar_update_review_ready"}';
 const CALENDAR_DELETE_SEARCH_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
   '"requestedCapabilityIds":["calendar.events.search"],"roundAction":"execute",' +
+  '"continuationMode":"dependency",' +
   '"dataTasks":[{"localId":"calendar-delete-search","goal":"find the exact event before delete",' +
   '"allowedToolIds":["calendar.events.search"],"toolId":"calendar.events.search",' +
   '"input":{"query":"forged title","eventId":"model-forged",' +

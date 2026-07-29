@@ -2093,8 +2093,10 @@ export default function leaderAgentTest() {
       firstTask.input = JSON.parse('{"query":"伦敦国王十字车站"}') as Object;
       const secondTask = semanticDataTask('place-details', 'maps.place.details');
       secondTask.input = JSON.parse('{"placeId":"entity-1"}') as Object;
+      const firstDecision = semanticDecision([firstTask]);
+      firstDecision.reasonCode = 'dependency_requires_next_round';
       const planner = new RoundScriptedPlanner([
-        semanticDecision([firstTask]),
+        firstDecision,
         semanticDecision([secondTask])
       ]);
       const bus = new LinkedMessageBus();
@@ -2106,7 +2108,7 @@ export default function leaderAgentTest() {
         'conversation-hotel',
         'turn-1',
         'input-1',
-        '先用 Google Maps 搜索伦敦国王十字车站，再用搜索结果的真实 placeId 查询地点详情'
+        '请用 Google Maps 找到伦敦国王十字车站并展示完整地点信息'
       ));
       expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
       const search = await receive(observer);
@@ -2152,11 +2154,13 @@ export default function leaderAgentTest() {
       observer.close();
     });
 
-    it('allows an explicitly serial later Data tool without an entity binding', 0, async () => {
+    it('allows a model-declared serial later Data tool without an entity binding', 0, async () => {
       const firstTask = semanticDataTask('hotel', 'hotel.search');
       const secondTask = semanticDataTask('media', 'media.aggregate.search');
+      const firstDecision = semanticDecision([firstTask]);
+      firstDecision.reasonCode = 'sequence_requires_next_round';
       const planner = new RoundScriptedPlanner([
-        semanticDecision([firstTask]),
+        firstDecision,
         semanticDecision([secondTask])
       ]);
       const bus = new LinkedMessageBus();
@@ -2168,7 +2172,7 @@ export default function leaderAgentTest() {
         'conversation-serial',
         'turn-serial',
         'input-serial',
-        '查一下现在的时间，查好时间之后帮我打车，再在明天的这个时间新建会议'
+        '按我要求的顺序完成酒店查询和新闻检索'
       ));
       expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
       const hotelTask = await receive(observer);

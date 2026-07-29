@@ -42,9 +42,15 @@ const ACTION_INTENT_KEYS: string = 'allowedActionIds,goal';
 const ANSWER_FIELD_RULE: string = 'For roundAction answer or clarify, include answer as a non-empty string. ' +
   'For roundAction execute, omit answer.';
 const REASON_CODE_FIELD_RULE: string = 'Omit reasonCode. The host creates deterministic diagnostic reason metadata.';
+const CONTINUATION_MODE_FIELD_RULE: string =
+  'Include continuationMode as exactly "complete", "dependency", or "sequence". Use dependency when another ' +
+  'planning round must consume real output from this round, sequence when the user explicitly ordered another ' +
+  'capability after this round, and complete when no further planning round is required. Answer and clarify use ' +
+  'complete. A sequence decision contains exactly the current Data task and no actionIntent.';
 const FULL_DECISION_CONTRACT: string =
   'Every decision, including a correction or repair, must include personaId, skillId, requestedCapabilityIds, ' +
-  'roundAction, dataTasks, and uiIntent. For answer or clarify, set dataTasks to [] and include a non-empty answer. ' +
+  'roundAction, continuationMode, dataTasks, and uiIntent. For answer or clarify, set continuationMode to complete, ' +
+  'set dataTasks to [], and include a non-empty answer. ' +
   'uiIntent must contain exactly purpose, preferredDensity, and requiredSections. Choose purpose, preferredDensity, ' +
   'and requiredSections from the current user request and real recentObservations when present; never omit them.';
 const REQUEST_SCOPE_CONTRACT: string =
@@ -59,7 +65,7 @@ const REQUEST_SCOPE_CONTRACT: string =
   'against that closed set; do not output the check.';
 const LEADER_SYSTEM_PROMPT: string = 'Return exactly one JSON object and nothing else. ' +
   'Do not include Thought, markdown, or code fences. ' + ANSWER_FIELD_RULE + ' ' + REASON_CODE_FIELD_RULE + ' ' +
-  REQUEST_SCOPE_CONTRACT + ' ' + FULL_DECISION_CONTRACT;
+  CONTINUATION_MODE_FIELD_RULE + ' ' + REQUEST_SCOPE_CONTRACT + ' ' + FULL_DECISION_CONTRACT;
 const REPAIR_INSTRUCTION: string = 'Correction: previous decision rejected by strict schema. ' +
   'Return one corrected decision matching the schema exactly. ' + FULL_DECISION_CONTRACT;
 const COMPLETED_TOOL_REUSE_ERROR: string = 'LEADER_COMPLETED_TOOL_REUSE';
@@ -199,10 +205,12 @@ const DATA_SCOPE_CONTRACT: string =
   'Put multiple independent sources in the same round. After round 1, every Data task input must contain an ' +
   'exact entity reference from a successful or partial earlier current-turn observation.';
 const EXPLICIT_SERIAL_SEQUENCE_CONTRACT: string =
-  'Explicit sequence contract: when the user explicitly orders distinct capabilities with 之后 followed by 再, ' +
-  'execute exactly the first not-yet-completed capability in this round. Defer every later Data task and Action ' +
-  'to later planning rounds in the same user-declared order. This explicit order is allowed even when the next ' +
-  'capability does not consume an entity ID from the prior result.';
+  'Explicit sequence contract: infer whether the user explicitly ordered distinct capabilities sequentially. ' +
+  'Execute exactly the first not-yet-completed capability, set continuationMode to sequence while another ordered ' +
+  'step remains, and defer every later Data task and Action to later planning rounds in the requested order. ' +
+  'When Context.orderedContinuationAuthorized is true, the host has authorized the next ordered capability ' +
+  'even when it ' +
+  'does not consume an entity ID from the prior result.';
 
 interface JsonContainerFrame {
   object: boolean;
@@ -258,7 +266,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     let rejectedDecision: LeaderDecision | null = null;
     try {
       const decision: LeaderDecision = this.parseDecision(output, context);
-      this.normalizeExplicitSerialDecision(input, decision);
+      this.normalizeModelContinuationDecision(decision);
       this.normalizeIncompleteSerialCalendarCreate(
         message, input, decision, currentLocalDate, round
       );
@@ -313,7 +321,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         );
         try {
           const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
-          this.normalizeExplicitSerialDecision(input, repairedDecision);
+          this.normalizeModelContinuationDecision(repairedDecision);
           if (rejectedDecision === null ||
             !this.explicitMapsSelectionOnlyRepair(rejectedDecision, repairedDecision)) {
             throw new Error(EXPLICIT_MAPS_SELECTION_ERROR);
@@ -355,7 +363,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
             throw new Error(PREMATURE_CALENDAR_UPDATE_ACTION_ERROR);
           }
           const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
-          this.normalizeExplicitSerialDecision(input, repairedDecision);
+          this.normalizeModelContinuationDecision(repairedDecision);
           this.rejectSkillCapabilityViolation(repairedDecision, context);
           this.rejectOverlappingVideoTools(repairedDecision);
           this.rejectExplicitMapsSelection(input, repairedDecision);
@@ -393,7 +401,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
             throw new Error(PREMATURE_MAPS_DETAILS_ERROR);
           }
           const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
-          this.normalizeExplicitSerialDecision(input, repairedDecision);
+          this.normalizeModelContinuationDecision(repairedDecision);
           this.rejectSkillCapabilityViolation(repairedDecision, context);
           this.rejectOverlappingVideoTools(repairedDecision);
           this.rejectExplicitMapsSelection(input, repairedDecision);
@@ -478,7 +486,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
           throw new Error(REPAIR_SCOPE_INVALID_ERROR);
         }
         const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
-        this.normalizeExplicitSerialDecision(input, repairedDecision);
+        this.normalizeModelContinuationDecision(repairedDecision);
         if (error instanceof Error && error.message === SKILL_CAPABILITY_ERROR &&
           (rejectedDecision === null || !this.skillOnlyRepair(rejectedDecision, repairedDecision))) {
           throw new Error(SKILL_CAPABILITY_ERROR);
@@ -1191,7 +1199,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     round: number
   ): void {
     if (round <= 1 || decision.roundAction !== 'execute' ||
-      this.explicitSerialRequest(input.text)) {
+      input.orderedContinuationAuthorized === true) {
       return;
     }
     for (let index = 0; index < decision.dataTasks.length; index++) {
@@ -1205,15 +1213,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     }
   }
 
-  private explicitSerialRequest(text: string): boolean {
-    return text.indexOf('之后') >= 0 && text.indexOf('再') >= 0;
-  }
-
-  private normalizeExplicitSerialDecision(
-    input: InputUserPayload,
-    decision: LeaderDecision
-  ): void {
-    if (!this.explicitSerialRequest(input.text) ||
+  private normalizeModelContinuationDecision(decision: LeaderDecision): void {
+    if (decision.reasonCode !== 'sequence_requires_next_round' ||
       decision.roundAction !== 'execute' ||
       decision.dataTasks.length === 0 ||
       (decision.dataTasks.length === 1 && decision.actionIntent === undefined)) {
@@ -1235,7 +1236,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     currentLocalDate: string,
     round: number
   ): void {
-    if (!this.explicitSerialRequest(input.text) ||
+    if (input.orderedContinuationAuthorized !== true ||
       decision.roundAction !== 'execute' ||
       decision.dataTasks.length !== 0 ||
       decision.actionIntent === undefined ||
@@ -1452,7 +1453,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       REQUEST_SCOPE_CONTRACT,
       'LeaderDecision schema: {"personaId":"string","skillId":"string",' +
         '"requestedCapabilityIds":["registered tool or action ID"],' +
-        '"roundAction":"execute|answer|clarify","dataTasks":[' +
+        '"roundAction":"execute|answer|clarify","continuationMode":"complete|dependency|sequence",' +
+        '"dataTasks":[' +
         '{"localId":"string","goal":"string","allowedToolIds":["string"],' +
         '"toolId":"string","input":{},"required":true}],"uiIntent":{' +
         '"purpose":"string","preferredDensity":"string","requiredSections":["string"]},' +
@@ -1460,6 +1462,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         '"answer":"required non-empty string for answer|clarify; omit for execute"}.',
       ANSWER_FIELD_RULE,
       REASON_CODE_FIELD_RULE,
+      CONTINUATION_MODE_FIELD_RULE,
       'Select one persona and at most one active skill.',
       'If skillId is non-empty, every requested Data tool and Action ID must be listed in that skill toolIds. ' +
         'Use skillId="" when no single active skill declares the complete requested capability set.',
@@ -1591,7 +1594,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       throw new Error('Leader decision contains missing or unknown fields.');
     }
     const decisionKeys: string = Object.keys(parsed)
-      .filter((key: string): boolean => key !== 'reasonCode')
+      .filter((key: string): boolean => key !== 'reasonCode' && key !== 'continuationMode')
       .sort()
       .join(',');
     if (DECISION_KEYS.indexOf(decisionKeys) < 0) {
@@ -1605,6 +1608,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     const rawTasks = values['dataTasks'];
     const rawUiIntent = values['uiIntent'];
     const reasonCode = values['reasonCode'];
+    const continuationMode = values['continuationMode'];
     const rawRequestedCapabilities = values['requestedCapabilityIds'];
     if (typeof personaId !== 'string' || personaId.trim().length === 0 ||
       typeof skillId !== 'string' ||
@@ -1613,7 +1617,9 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       !Array.isArray(rawRequestedCapabilities) ||
       rawUiIntent === null || typeof rawUiIntent !== 'object' || Array.isArray(rawUiIntent) ||
       (reasonCode !== undefined &&
-        (typeof reasonCode !== 'string' || reasonCode.trim().length === 0))) {
+        (typeof reasonCode !== 'string' || reasonCode.trim().length === 0)) ||
+      (continuationMode !== undefined && continuationMode !== 'complete' &&
+        continuationMode !== 'dependency' && continuationMode !== 'sequence')) {
       throw new Error('Leader decision fields are malformed.');
     }
     if ((context.lockedPersonaId !== undefined || context.lockedSkillId !== undefined) &&
@@ -1638,6 +1644,10 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       (selectedAction !== 'execute' && tasks.length !== 0)) {
       throw new Error('Leader round action does not match its Data tasks.');
     }
+    if (continuationMode !== undefined && continuationMode !== 'complete' &&
+      (selectedAction !== 'execute' || tasks.length === 0)) {
+      throw new Error('Leader continuation requires a current Data task.');
+    }
     if (selectedAction === 'execute' &&
       !this.requestedCapabilitiesMatchExecution(requestedCapabilityIds, tasks, actionIntent)) {
       throw new Error('Leader requested capabilities do not exactly match its execution plan.');
@@ -1659,7 +1669,9 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       roundAction: selectedAction,
       dataTasks: tasks,
       uiIntent,
-      reasonCode: this.hostReasonCode(selectedAction)
+      reasonCode: continuationMode === 'dependency' ? 'dependency_requires_next_round' :
+        continuationMode === 'sequence' ? 'sequence_requires_next_round' :
+          this.hostReasonCode(selectedAction)
     };
     if (typeof answerValue === 'string') {
       decision.answer = answerValue;

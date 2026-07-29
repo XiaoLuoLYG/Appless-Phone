@@ -55,6 +55,7 @@ export interface UserInputPayload {
   previousPersonaId?: string;
   currentSurfaceSummary?: CurrentSurfaceSummary;
   recentObservations?: ObservationDigest[];
+  orderedContinuationAuthorized?: boolean;
 }
 
 export type TurnResultStatus = 'success' | 'partial' | 'empty' | 'error' | 'canceled';

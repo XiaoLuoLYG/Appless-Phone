@@ -148,6 +148,10 @@ const EXPLICIT_GOOGLE_MAPS_DECISION: string =
   '"input":{"query":"伦敦国王十字车站附近的中餐"},"required":true}],' +
   '"uiIntent":{"purpose":"展示 Google Maps 地点","preferredDensity":"comfortable",' +
   '"requiredSections":["places"]}}';
+const PLANNING_INCOMPLETE_GOOGLE_MAPS_DECISION: string = EXPLICIT_GOOGLE_MAPS_DECISION.replace(
+  '"roundAction":"execute",',
+  '"roundAction":"execute","continuationMode":"dependency",'
+);
 const DEVICE_C04_FOOD_DECISION: string =
   '{"personaId":"food_companion","skillId":"","requestedCapabilityIds":["food.search"],' +
   '"roundAction":"execute","dataTasks":[{"localId":"search_chinese_restaurant_near_kings_cross",' +
@@ -255,7 +259,7 @@ const EXPLICIT_SERIAL_QUERY_WITH_DURATION: string =
 const EXPLICIT_SERIAL_FIRST_DECISION: string =
   '{"personaId":"travel_companion","skillId":"",' +
   '"requestedCapabilityIds":["time","ride.estimate","calendar.event.create"],' +
-  '"roundAction":"execute","dataTasks":[' +
+  '"roundAction":"execute","continuationMode":"sequence","dataTasks":[' +
   '{"localId":"time","goal":"查询当前时间","allowedToolIds":["time"],' +
   '"toolId":"time","input":{},"required":true},' +
   '{"localId":"ride","goal":"查询打车费用","allowedToolIds":["ride.estimate"],' +
@@ -267,7 +271,7 @@ const EXPLICIT_SERIAL_FIRST_DECISION: string =
 const EXPLICIT_SERIAL_SECOND_DECISION: string =
   '{"personaId":"travel_companion","skillId":"",' +
   '"requestedCapabilityIds":["ride.estimate","calendar.event.create"],' +
-  '"roundAction":"execute","dataTasks":[' +
+  '"roundAction":"execute","continuationMode":"sequence","dataTasks":[' +
   '{"localId":"ride","goal":"查询打车费用","allowedToolIds":["ride.estimate"],' +
   '"toolId":"ride.estimate","input":{"origin":"华为坂田基地","destination":"秋岗花园",' +
   '"city":"深圳"},"required":true}],"uiIntent":{"purpose":"串行执行请求",' +
@@ -276,7 +280,8 @@ const EXPLICIT_SERIAL_SECOND_DECISION: string =
   '"allowedActionIds":["calendar.event.create"]}}';
 const EXPLICIT_SERIAL_THIRD_DECISION: string =
   '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["calendar.event.create"],"roundAction":"execute","dataTasks":[],' +
+  '"requestedCapabilityIds":["calendar.event.create"],"roundAction":"execute",' +
+  '"continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"创建明天同一时间的会议日程","preferredDensity":"comfortable",' +
   '"requiredSections":["calendar"]},"actionIntent":{"goal":"创建明天同一时间的会议日程",' +
   '"allowedActionIds":["calendar.event.create"]}}';
@@ -596,10 +601,10 @@ class TerminalRepairPromptAwareModel implements LocalModel {
     }
     const hasMandatoryFields: boolean = prompt.indexOf(
       'including a correction or repair, must include personaId, skillId, requestedCapabilityIds, ' +
-        'roundAction, dataTasks, and uiIntent'
+        'roundAction, continuationMode, dataTasks, and uiIntent'
     ) >= 0;
     const hasTerminalShape: boolean = prompt.indexOf(
-      'For answer or clarify, set dataTasks to [] and include a non-empty answer.'
+      'For answer or clarify, set continuationMode to complete, set dataTasks to [], and include a non-empty answer.'
     ) >= 0;
     const hasModelOwnedUi: boolean = prompt.indexOf(
       'Choose purpose, preferredDensity, and requiredSections'
@@ -1678,6 +1683,19 @@ export default function multiAgentLeaderPlannerTest() {
       expect(decision.dataTasks[0].toolId).assertEqual('maps.place.search');
       expect(model.prompts.length).assertEqual(2);
       expect(model.prompts[1].indexOf('LEADER_PREMATURE_MAPS_DETAILS') >= 0).assertTrue();
+    });
+
+    it('continues planning when the Leader model says the current tool round is incomplete', 0, async () => {
+      const model = new QueueLocalModel([PLANNING_INCOMPLETE_GOOGLE_MAPS_DECISION]);
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: '请用 Google Maps 找到伦敦国王十字车站并展示完整地点信息' },
+        planningContext(),
+        1,
+        (): boolean => true
+      );
+
+      expect(decision.reasonCode).assertEqual('dependency_requires_next_round');
     });
 
     it('keeps tool scope closed while preserving an explicitly requested parallel domain', 0, async () => {
@@ -2874,6 +2892,7 @@ export default function multiAgentLeaderPlannerTest() {
           inputMessage(),
           {
             text: EXPLICIT_SERIAL_QUERY,
+            orderedContinuationAuthorized: true,
             recentObservations: [{
               taskId: 'input-1:round-1:time',
               toolId: 'time',
@@ -2891,6 +2910,7 @@ export default function multiAgentLeaderPlannerTest() {
           inputMessage(),
           {
             text: EXPLICIT_SERIAL_QUERY,
+            orderedContinuationAuthorized: true,
             recentObservations: [{
               taskId: 'input-1:round-1:time',
               toolId: 'time',
@@ -2929,6 +2949,7 @@ export default function multiAgentLeaderPlannerTest() {
           inputMessage(),
           {
             text: EXPLICIT_SERIAL_QUERY_WITH_DURATION,
+            orderedContinuationAuthorized: true,
             recentObservations: [{
               taskId: 'input-1:round-1:time',
               toolId: 'time',

@@ -54,6 +54,7 @@ interface LeaderTurnState {
   planning: boolean;
   currentRoundAllDataSucceeded: boolean;
   currentRoundRequiresPlanning: boolean;
+  currentRoundAllowsUnboundContinuation: boolean;
   pendingDataTools: Map<string, LeaderPendingDataTask>;
   dataTaskIds: string[];
   expectedOutputSchema: string;
@@ -257,6 +258,7 @@ export class LeaderAgent extends MessageDrivenAgent {
       planning: false,
       currentRoundAllDataSucceeded: false,
       currentRoundRequiresPlanning: false,
+      currentRoundAllowsUnboundContinuation: false,
       pendingDataTools: new Map<string, LeaderPendingDataTask>(),
       dataTaskIds: [],
       expectedOutputSchema: '',
@@ -511,22 +513,12 @@ export class LeaderAgent extends MessageDrivenAgent {
     const dataTaskIds: string[] = this.decisionDataTaskIds(state, decision.dataTasks);
     let uiTaskId: string = state.inputTaskId + ':round-' + state.round.toString() + ':virtual';
     if (dataTaskIds.length > 0) {
-      let calendarReadFirst: boolean = false;
-      let mapsSearchNeedsDetails: boolean = false;
-      for (let index = 0; index < decision.dataTasks.length; index++) {
-        calendarReadFirst = calendarReadFirst ||
-          decision.dataTasks[index].toolId === 'calendar.events.search';
-        mapsSearchNeedsDetails = mapsSearchNeedsDetails ||
-          (decision.dataTasks[index].toolId === 'maps.place.search' &&
-            state.input.text.indexOf('placeId') >= 0 &&
-            (state.input.text.indexOf('详情') >= 0 || state.input.text.indexOf('details') >= 0));
-      }
       state.currentRoundAllDataSucceeded = true;
       state.currentRoundRequiresPlanning =
         decision.reasonCode === 'dependency_requires_next_round' ||
-        (state.input.text.indexOf('之后') >= 0 && state.input.text.indexOf('再') >= 0) ||
-        mapsSearchNeedsDetails ||
-        (calendarReadFirst && decision.uiIntent.purpose.indexOf('calendar.event.') === 0);
+        decision.reasonCode === 'sequence_requires_next_round';
+      state.currentRoundAllowsUnboundContinuation =
+        decision.reasonCode === 'sequence_requires_next_round';
       uiTaskId = state.uiTaskId;
       for (let index = 0; index < dataTaskIds.length; index++) {
         state.dataTaskIds.push(dataTaskIds[index]);
@@ -608,7 +600,7 @@ export class LeaderAgent extends MessageDrivenAgent {
   private hasUnboundLaterDataTask(state: LeaderTurnState, decision: LeaderDecision): boolean {
     if (decision.roundAction !== 'execute' || state.turnObservations.length === 0 ||
       decision.dataTasks.length === 0 ||
-      (state.input.text.indexOf('之后') >= 0 && state.input.text.indexOf('再') >= 0)) {
+      state.input.orderedContinuationAuthorized === true) {
       return false;
     }
     for (let index = 0; index < decision.dataTasks.length; index++) {
@@ -742,7 +734,11 @@ export class LeaderAgent extends MessageDrivenAgent {
       return;
     }
     state.round++;
-    state.input = this.inputWithObservations(state.input, state.observations);
+    state.input = this.inputWithObservations(
+      state.input,
+      state.observations,
+      state.currentRoundAllDataSucceeded && state.currentRoundAllowsUnboundContinuation
+    );
     this.startPlanning(this.inputMessage(state), state.input, state);
   }
 
@@ -867,14 +863,16 @@ export class LeaderAgent extends MessageDrivenAgent {
 
   private inputWithObservations(
     input: InputUserPayload,
-    observations: ObservationDigest[]
+    observations: ObservationDigest[],
+    orderedContinuationAuthorized: boolean
   ): InputUserPayload {
     return {
       text: input.text,
       recentMessages: input.recentMessages,
       previousPersonaId: input.previousPersonaId,
       currentSurfaceSummary: input.currentSurfaceSummary,
-      recentObservations: this.boundedObservations(observations as Object[])
+      recentObservations: this.boundedObservations(observations as Object[]),
+      orderedContinuationAuthorized
     };
   }
 
