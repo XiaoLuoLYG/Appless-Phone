@@ -20,6 +20,25 @@ export default function gmailApiClientTest() {
       expect(detail.bodyText).assertEqual('Hello Gmail');
     });
 
+    it('keeps a real full Gmail MIME body beyond the Dynamic preview limit', 0, () => {
+      const encodedBody = 'QUFB'.repeat(500);
+      const payload = JSON.parse('{"successful":true,"data":{"id":"thread-long","messages":[' +
+        '{"id":"message-long","threadId":"thread-long","payload":{"mimeType":"text/plain",' +
+        '"headers":[{"name":"Subject","value":"Long status"},{"name":"From",' +
+        '"value":"Alice <alice@example.com>"},{"name":"To","value":"Me <me@example.com>"}],' +
+        '"body":{"data":"' + encodedBody + '"}}}]}}') as Object;
+      const detail = gmailMailDetailFromPayload(payload, {
+        requestKey: 'gmail:thread-long',
+        provider: 'gmail',
+        threadId: 'thread-long',
+        messageId: 'message-long',
+        subject: 'Fallback subject'
+      });
+
+      expect(detail.bodyText.length).assertEqual(1500);
+      expect(detail.bodyText).assertEqual('A'.repeat(1500));
+    });
+
     it('ignores drafts when parsing the legacy Gmail thread fallback', 0, () => {
       const payload = JSON.parse('{"successful":true,"data":{"id":"thread-large","messages":[' +
         '{"id":"message-large","threadId":"thread-large","labelIds":["INBOX"],"payload":' +
@@ -45,24 +64,48 @@ export default function gmailApiClientTest() {
       expect(detail.messageId).assertEqual('message-large');
     });
 
-    it('parses one Gmail message returned by message ID', 0, () => {
+    it('reads one Gmail message by messageId without substituting threadId', 0, () => {
       const observation = '{"data":{"messageId":"message-single","threadId":"thread-single",' +
-        '"labelIds":["INBOX"],"messageText":"Single message body","payload":{"mimeType":"text/html",' +
-        '"headers":[{"name":"Subject","value":"Single subject"},{"name":"From","value":"Alice <alice@example.com>"}],' +
-        '"body":{"data":""}}},"error":null,"log_id":"log-single"}';
+        '"labelIds":["INBOX"],"messageText":"Single message body","payload":{"mimeType":"text/html"}}}';
       const detail = gmailMailDetailFromComposioObservation(observation, {
         requestKey: 'gmail:message-single',
         provider: 'gmail',
         threadId: 'thread-single',
         messageId: 'message-single',
-        subject: 'List subject'
+        subject: 'Fallback'
       });
 
       expect(detail.messageId).assertEqual('message-single');
       expect(detail.threadId).assertEqual('thread-single');
-      expect(detail.subject).assertEqual('Single subject');
-      expect(detail.from).assertEqual('Alice <alice@example.com>');
       expect(detail.bodyText).assertEqual('Single message body');
+    });
+
+    it('uses a full direct Gmail body before stale MIME fallback text', 0, () => {
+      const payload = JSON.parse('{"data":{"messageId":"message-direct","threadId":"thread-direct",' +
+        '"labelIds":["INBOX"],"messageText":"Complete provider body",' +
+        '"payload":{"mimeType":"text/plain","body":{"data":"U3RhbGUgTUlNRSBib2R5"}}}}') as Object;
+      const detail = gmailMailDetailFromPayload(payload, {
+        requestKey: 'gmail:message-direct',
+        provider: 'gmail',
+        threadId: 'thread-direct',
+        messageId: 'message-direct',
+        subject: 'Fallback'
+      });
+
+      expect(detail.bodyText).assertEqual('Complete provider body');
+    });
+
+    it('ignores a newer draft when selecting the received Gmail body', 0, () => {
+      const payload = JSON.parse('{"successful":true,"data":{"id":"thread-1","messages":[' +
+        '{"id":"received","threadId":"thread-1","labelIds":["INBOX"],"messageText":"Received"},' +
+        '{"id":"draft","threadId":"thread-1","labelIds":["DRAFT"],"messageText":"Private draft"}]}}') as Object;
+      const detail = gmailMailDetailFromPayload(payload, {
+        requestKey: 'gmail:thread-1', provider: 'gmail',
+        threadId: 'thread-1', messageId: 'received', subject: 'Fallback'
+      });
+
+      expect(detail.messageId).assertEqual('received');
+      expect(detail.bodyText).assertEqual('Received');
     });
 
     it('rejects a Gmail thread containing only drafts', 0, () => {

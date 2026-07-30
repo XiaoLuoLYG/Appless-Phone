@@ -1,10 +1,17 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
   googleMapsDirectionsUrl,
+  mapsDataResultA2ui,
   mapsFoodRecordFromResult,
+  mapsPlaceDetailsProviderResultFromPayload,
+  mapsPlaceProviderFailure,
+  mapsPlaceSearchProviderResultFromPayload,
+  mapsRouteInputFromPrompt,
   mapsRouteResult,
+  mapsStructuredDataResult,
   mapsTextSearchBody,
-  mapsTextSearchResultsFromPayload
+  mapsTextSearchResultsFromPayload,
+  MapsStructuredData
 } from '@loop/agent-core';
 
 export default function mapsApiClientTest() {
@@ -25,6 +32,67 @@ export default function mapsApiClientTest() {
       expect(JSON.stringify(results[0].rows).indexOf('"label":"Map Location","value":"22.609878,114.029506"')).assertLarger(-1);
     });
 
+    it('keeps real place IDs and sources in structured search and detail results', 0, () => {
+      const searchPayload = '{"places":[{"id":"place-123","displayName":{"text":"Coffee Lab"},"formattedAddress":"深圳市龙岗区坂田","rating":4.6,"googleMapsUri":"https://maps.google.com/?cid=123","location":{"latitude":22.609878,"longitude":114.029506}}]}';
+      const detailPayload = '{"id":"place-123","displayName":{"text":"Coffee Lab"},"formattedAddress":"深圳市龙岗区坂田","rating":4.6,"googleMapsUri":"https://maps.google.com/?cid=123","location":{"latitude":22.609878,"longitude":114.029506}}';
+      const search = mapsStructuredDataResult(
+        'maps.place.search',
+        mapsPlaceSearchProviderResultFromPayload(searchPayload, '深圳咖啡')
+      );
+      const details = mapsStructuredDataResult(
+        'maps.place.details',
+        mapsPlaceDetailsProviderResultFromPayload(detailPayload)
+      );
+      const searchData = search.data as MapsStructuredData;
+      const detailData = details.data as MapsStructuredData;
+
+      expect(search.status).assertEqual('success');
+      expect(search.outputSchema).assertEqual('places');
+      expect(searchData.places[0].placeId).assertEqual('place-123');
+      expect(searchData.entityRefs.join(',')).assertEqual('place-123');
+      expect(details.status).assertEqual('success');
+      expect(details.outputSchema).assertEqual('place');
+      expect(detailData.places[0].placeId).assertEqual('place-123');
+      expect(detailData.entityRefs.join(',')).assertEqual('place-123');
+      expect(search.sources[0].provider).assertEqual('Google Places API');
+      expect(details.sources[0].operation).assertEqual('details');
+      expect(JSON.stringify(search.data).indexOf('updateComponents')).assertEqual(-1);
+      expect(JSON.stringify(search.data).indexOf('createSurface')).assertEqual(-1);
+    });
+
+    it('distinguishes successful empty Maps results from provider errors', 0, () => {
+      const empty = mapsStructuredDataResult(
+        'maps.place.search',
+        mapsPlaceSearchProviderResultFromPayload('{"places":[]}', '没有这个地点')
+      );
+      const failed = mapsStructuredDataResult(
+        'maps.place.details',
+        mapsPlaceProviderFailure('maps.place.details', 'Google Places denied the request.')
+      );
+
+      expect(empty.status).assertEqual('empty');
+      expect((empty.data as MapsStructuredData).places.length).assertEqual(0);
+      expect((empty.data as MapsStructuredData).entityRefs.length).assertEqual(0);
+      expect(mapsDataResultA2ui('surface_maps_empty', empty).indexOf('没有这个地点')).assertLarger(-1);
+      expect(failed.status).assertEqual('error');
+      expect((failed.data as MapsStructuredData).entityRefs.length).assertEqual(0);
+      expect(failed.error?.code).assertEqual('MAPS_PROVIDER_ERROR');
+      expect(failed.error?.message).assertEqual('Google Places denied the request.');
+    });
+
+    it('renders the same structured Maps records without provider work or changed IDs', 0, () => {
+      const payload = '{"places":[{"id":"place-render-1","displayName":{"text":"Renderer Cafe"},"formattedAddress":"King Cross","googleMapsUri":"https://maps.google.com/?cid=render"}]}';
+      const result = mapsStructuredDataResult(
+        'maps.place.search',
+        mapsPlaceSearchProviderResultFromPayload(payload, 'King Cross Chinese food')
+      );
+      const jsonl = mapsDataResultA2ui('surface_maps_structured', result);
+
+      expect(jsonl.indexOf('place-render-1')).assertLarger(-1);
+      expect(jsonl.indexOf('Renderer Cafe')).assertLarger(-1);
+      expect(JSON.stringify(result.data).indexOf('updateComponents')).assertEqual(-1);
+    });
+
     it('maps Google Places results into food records with food coordinate order', 0, () => {
       const payload = '{"places":[{"id":"place-123","displayName":{"text":"Coffee Lab"},"formattedAddress":"深圳市龙岗区坂田","rating":4.6,"location":{"latitude":22.609878,"longitude":114.029506}}]}';
       const food = mapsFoodRecordFromResult(mapsTextSearchResultsFromPayload(payload, '深圳咖啡')[0]);
@@ -43,6 +111,17 @@ export default function mapsApiClientTest() {
       expect(url.indexOf('travelmode=driving')).assertLarger(-1);
       expect(url.indexOf('dir_action=navigate')).assertLarger(-1);
       expect(googleMapsDirectionsUrl(JSON.parse('{"origin":"深圳北站"}') as Object)).assertEqual('');
+    });
+
+    it('removes composed route suffixes without changing the exact endpoints', 0, () => {
+      const route = mapsRouteInputFromPrompt(
+        '帮我用 Google Maps 查询从深圳北站到深圳湾口岸的驾车路线并发起导航'
+      );
+
+      expect(route === null).assertFalse();
+      expect(JSON.stringify(route)).assertEqual(
+        '{"origin":"深圳北站","destination":"深圳湾口岸","travelMode":"driving","navigate":true}'
+      );
     });
 
     it('returns a real Maps URL action without falling back to Places', 0, () => {

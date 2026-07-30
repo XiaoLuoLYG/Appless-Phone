@@ -77,6 +77,7 @@ interface SearchToolSchema {
   tool_slug?: string;
   description?: string;
   input_schema?: Object;
+  output_schema?: Object;
 }
 
 interface SearchResponse {
@@ -90,6 +91,7 @@ interface SearchCandidate {
   toolSlug: string;
   description: string;
   inputSchema: string;
+  outputSchema: string;
 }
 
 interface SearchObservation {
@@ -477,7 +479,8 @@ export class ComposioSessionClient {
       candidates.push({
         toolSlug: normalized,
         description: (schema?.description ?? '').substring(0, MAX_SEARCH_DESCRIPTION_CHARS),
-        inputSchema: this.searchSchemaText(schema?.input_schema)
+        inputSchema: this.searchSchemaText(schema?.input_schema),
+        outputSchema: this.searchSchemaText(schema?.output_schema)
       });
     });
     if (candidates.length === 0) {

@@ -32,11 +32,13 @@ interface HtmlPaymentCapturePayload {
 interface HtmlMailReplyPayload {
   requestKey?: HtmlHomePolicyValue;
   provider?: HtmlHomePolicyValue;
+  accountLabel?: HtmlHomePolicyValue;
   threadId?: HtmlHomePolicyValue;
   messageId?: HtmlHomePolicyValue;
   to?: HtmlHomePolicyValue;
   subject?: HtmlHomePolicyValue;
   body?: HtmlHomePolicyValue;
+  replyMode?: HtmlHomePolicyValue;
 }
 
 interface HtmlMailCalendarPayload {
@@ -44,12 +46,6 @@ interface HtmlMailCalendarPayload {
   provider?: HtmlHomePolicyValue;
   threadId?: HtmlHomePolicyValue;
   messageId?: HtmlHomePolicyValue;
-}
-
-interface HtmlCalendarDeletePayload {
-  eventId?: HtmlHomePolicyValue;
-  calendarId?: HtmlHomePolicyValue;
-  confirmed?: HtmlHomePolicyValue;
 }
 
 interface LuckinPreviewArgs {
@@ -62,13 +58,6 @@ interface LuckinPreviewArgs {
   locationSource?: HtmlHomePolicyValue;
 }
 
-interface LuckinCreateArgs {
-  deptId?: HtmlHomePolicyValue;
-  productId?: HtmlHomePolicyValue;
-  skuCode?: HtmlHomePolicyValue;
-  location?: HtmlHomePolicyValue;
-}
-
 interface LuckinPaymentArgs {
   orderId?: HtmlHomePolicyValue;
   payOrderUrl?: HtmlHomePolicyValue;
@@ -76,6 +65,9 @@ interface LuckinPaymentArgs {
 }
 
 export function isHtmlHomeActionAllowed(document: HtmlHomeDocument, action: A2uiAction): boolean {
+  if (action.id === 'hotel.book') {
+    return false;
+  }
   if (isHtmlHomeActionAllowedInDocument(document, action)) {
     return true;
   }
@@ -102,9 +94,6 @@ function isHtmlHomeActionAllowedInDocument(document: HtmlHomeDocument, action: A
     return hasBlockKind(document, 'flight-option');
   }
   if (action.id === 'payment.account.save' && paymentAccountSaveAllowed(document, action)) {
-    return true;
-  }
-  if (action.id === 'calendar.event.delete.confirm' && calendarDeleteConfirmAllowed(document, action)) {
     return true;
   }
   for (let index = 0; index < document.actions.length; index++) {
@@ -142,37 +131,8 @@ function isHtmlHomeActionAllowedInDocument(document: HtmlHomeDocument, action: A
   if (luckinPreviewAllowed(document, action)) {
     return true;
   }
-  if (luckinCreateAllowed(document, action)) {
-    return true;
-  }
   if (luckinPaymentPageAllowed(document, action)) {
     return true;
-  }
-  return false;
-}
-
-function calendarDeleteConfirmAllowed(document: HtmlHomeDocument, action: A2uiAction): boolean {
-  if (action.kind !== 'prompt' || action.args === undefined) {
-    return false;
-  }
-  const args = action.args as HtmlCalendarDeletePayload;
-  const eventId = policyText(args.eventId).trim();
-  if (eventId.length === 0 || args.confirmed !== true) {
-    return false;
-  }
-  for (let blockIndex = 0; blockIndex < document.blocks.length; blockIndex++) {
-    const block = document.blocks[blockIndex];
-    const calendarBlock = policyText(block.toolId).indexOf('calendar.') === 0 ||
-      policyText(block.source).indexOf('Google Calendar') >= 0;
-    if (!calendarBlock) {
-      continue;
-    }
-    for (let rowIndex = 0; rowIndex < block.rows.length; rowIndex++) {
-      if (policyText(block.rows[rowIndex].label).trim() === 'Event ID' &&
-        policyText(block.rows[rowIndex].value).trim() === eventId) {
-        return true;
-      }
-    }
   }
   return false;
 }
@@ -226,24 +186,32 @@ function mailReplySubmissionAllowed(block: HtmlHomeBlock, action: A2uiAction): b
     return false;
   }
   let detailKey = '';
+  let detailExpected: HtmlMailReplyPayload | null = null;
   let expected: HtmlMailReplyPayload | null = null;
   for (let index = 0; index < block.actions.length; index++) {
     const candidate = block.actions[index];
     if (candidate.id === 'html_mail_detail_read') {
       detailKey = candidate.prompt;
+      if (candidate.args !== undefined) {
+        detailExpected = candidate.args as HtmlMailReplyPayload;
+      }
     }
     if ((candidate.id === 'mail.ai.reply.draft' || candidate.id === 'gmail.ai.reply.draft') &&
       candidate.args !== undefined) {
       expected = candidate.args as HtmlMailReplyPayload;
     }
   }
-  if (expected === null || detailKey.length === 0 || action.prompt !== detailKey ||
+  if (detailExpected === null || expected === null || detailKey.length === 0 || action.prompt !== detailKey ||
     policyText(actual.requestKey) !== detailKey) {
     return false;
   }
-  return matchesOptionalMailIdentity(actual.provider, expected.provider) &&
-    matchesOptionalMailIdentity(actual.threadId, expected.threadId) &&
-    matchesOptionalMailIdentity(actual.messageId, expected.messageId);
+  return matchesRequiredMailIdentity(actual.provider, detailExpected.provider) &&
+    matchesRequiredMailIdentity(actual.threadId, detailExpected.threadId) &&
+    matchesRequiredMailIdentity(actual.messageId, detailExpected.messageId) &&
+    matchesOptionalMailIdentity(actual.accountLabel, expected.accountLabel) &&
+    matchesOptionalMailIdentity(actual.subject, expected.subject) &&
+    matchesOptionalMailIdentity(actual.replyMode, expected.replyMode) &&
+    policyStringList(actual.to).join('\n') === policyStringList(expected.to).join('\n');
 }
 
 function mailReplyAiGenerateAllowed(block: HtmlHomeBlock, action: A2uiAction): boolean {
@@ -278,6 +246,11 @@ function mailReplyAiGenerateAllowed(block: HtmlHomeBlock, action: A2uiAction): b
 function matchesOptionalMailIdentity(actual: HtmlHomePolicyValue, expected: HtmlHomePolicyValue): boolean {
   const expectedText = policyText(expected).trim();
   return expectedText.length === 0 || policyText(actual).trim() === expectedText;
+}
+
+function matchesRequiredMailIdentity(actual: HtmlHomePolicyValue, expected: HtmlHomePolicyValue): boolean {
+  const expectedText = policyText(expected).trim();
+  return expectedText.length > 0 && policyText(actual).trim() === expectedText;
 }
 
 function sameAction(expected: HtmlHomeAction, actual: A2uiAction): boolean {
@@ -476,43 +449,6 @@ function luckinPreviewAllowed(document: HtmlHomeDocument, action: A2uiAction): b
     return true;
   }
   return policyText(args.locationSource).trim() === 'refresh';
-}
-
-function luckinCreateAllowed(document: HtmlHomeDocument, action: A2uiAction): boolean {
-  if (document.kind !== 'luckin' || action.id !== 'luckin.order.create') {
-    return false;
-  }
-  if (!hasLuckinConfirmOrderBlock(document)) {
-    return false;
-  }
-  if (action.args === undefined) {
-    return false;
-  }
-  const args = action.args as LuckinCreateArgs;
-  const deptId = policyText(args.deptId).trim();
-  const productId = policyText(args.productId).trim();
-  const skuCode = policyText(args.skuCode).trim();
-  if (deptId.length === 0 || productId.length === 0 || skuCode.length === 0) {
-    return false;
-  }
-  for (let blockIndex = 0; blockIndex < document.blocks.length; blockIndex++) {
-    const block = document.blocks[blockIndex];
-    if (policyText(block.title).indexOf('确认瑞幸订单') < 0) {
-      continue;
-    }
-    for (let actionIndex = 0; actionIndex < block.actions.length; actionIndex++) {
-      const expected = block.actions[actionIndex];
-      if (expected.id !== 'luckin.order.create' || expected.args === undefined) {
-        continue;
-      }
-      const expectedArgs = expected.args as LuckinCreateArgs;
-      if (policyText(expectedArgs.deptId).trim() === deptId &&
-        policyText(expectedArgs.productId).trim() === productId) {
-        return true;
-      }
-    }
-  }
-  return false;
 }
 
 function policyText(value: HtmlHomePolicyValue): string {

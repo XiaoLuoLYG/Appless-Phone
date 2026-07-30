@@ -1,0 +1,1111 @@
+import { newSurfaceId } from '../../a2ui/A2uiProtocol';
+import {
+  ActionPlanReadyPayload,
+  WorkflowRunArgs
+} from '../action/ActionAgentTypes';
+import { ActionOffer, ActionOffersReadyPayload } from '../action/ActionOfferTypes';
+import { JsonValue } from '../action/ActionPlanTypes';
+import { cloneJsonValue } from '../action/JsonPointer';
+import { CreateDataTaskPayload } from '../data/DataAgentTypes';
+import { MessageDrivenAgent } from '../MessageDrivenAgent';
+import {
+  AgentMessage,
+  AgentMessageType,
+  TaskErrorPayload
+} from '../message/AgentMessage';
+import { DataResult } from '../message/DataResult';
+import { LinkedMessageBus } from '../message/LinkedMessageBus';
+import {
+  CreateUiTaskPayload,
+  UiRenderResult,
+  UiRenderResultPayload,
+  UiRenderState,
+  UiSurfaceWriteLease,
+  UiSurfaceWriter,
+  UiTaskRenderer
+} from './UiAgentTypes';
+
+// Retain only recent terminal turn identities; older provider payloads are never retained.
+const TERMINATED_TURN_LIMIT: number = 128;
+// A terminal UI may aggregate several bounded parallel rounds; retain enough
+// exact task-owned entries for the whole Leader turn without retaining history.
+const PENDING_DATA_LIMIT: number = 32;
+const WORKFLOW_RUN_ACTION_ID: string = 'workflow.run';
+
+function containsWorkflowRun(value: JsonValue): boolean {
+  if (typeof value === 'string') {
+    return value === WORKFLOW_RUN_ACTION_ID;
+  }
+  if (value === null || typeof value !== 'object') {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    const items = value as JsonValue[];
+    for (let index = 0; index < items.length; index++) {
+      if (containsWorkflowRun(items[index])) {
+        return true;
+      }
+    }
+    return false;
+  }
+  const record = value as Record<string, JsonValue | undefined>;
+  const keys = Object.keys(value);
+  for (let index = 0; index < keys.length; index++) {
+    const nested = record[keys[index]];
+    if (nested !== undefined && containsWorkflowRun(nested)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+interface PendingDataEntry {
+  data?: DataResult;
+  offers?: ActionOffer[];
+  offerSourceToolId?: string;
+  errorMessage?: string;
+  invalidCode: string;
+  invalidMessage: string;
+}
+
+interface UiTurnContext {
+  conversationId: string;
+  turnId: string;
+  surfaceId: string;
+  uiTaskId: string;
+  uiTask?: CreateUiTaskPayload;
+  pendingDataByTaskId: Map<string, PendingDataEntry>;
+  pendingDataOrder: string[];
+  canceled: boolean;
+  generation: number;
+  skeletonWritten: boolean;
+  resultWritten: boolean;
+  terminalRenderStarted: boolean;
+  finalUiTaskReceived: boolean;
+  renderedDataTaskIds: string[];
+  operationChain: Promise<void>;
+  queuedMessages: Map<number, AgentMessage>;
+  nextOperationId: number;
+}
+
+class ContextSurfaceWriteLease implements UiSurfaceWriteLease {
+  private readonly context: UiTurnContext;
+  private readonly generation: number;
+
+  constructor(context: UiTurnContext) {
+    this.context = context;
+    this.generation = context.generation;
+  }
+
+  isActive(): boolean {
+    return !this.context.canceled && this.context.generation === this.generation;
+  }
+}
+
+export class UiAgent extends MessageDrivenAgent {
+  private readonly bus: LinkedMessageBus;
+  private readonly renderer: UiTaskRenderer;
+  private readonly writer: UiSurfaceWriter;
+  private readonly contexts: Map<string, UiTurnContext> = new Map<string, UiTurnContext>();
+  private readonly terminated: Set<string> = new Set<string>();
+  private readonly terminatedOrder: string[] = [];
+  private surfaceSuffix: number = 0;
+
+  constructor(bus: LinkedMessageBus, renderer: UiTaskRenderer, writer: UiSurfaceWriter) {
+    super(bus);
+    this.bus = bus;
+    this.renderer = renderer;
+    this.writer = writer;
+  }
+
+  stop(): void {
+    super.stop();
+    this.contexts.forEach((context: UiTurnContext) => {
+      this.invalidateContext(context);
+    });
+    this.contexts.clear();
+    this.terminated.clear();
+    this.terminatedOrder.splice(0, this.terminatedOrder.length);
+  }
+
+  surfaceReplaced(conversationId: string, turnId: string, surfaceId: string): void {
+    const key: string = this.turnKey(conversationId, turnId);
+    const context: UiTurnContext | undefined = this.contexts.get(key);
+    if (context === undefined || context.surfaceId !== surfaceId) {
+      return;
+    }
+    this.invalidateContext(context);
+    this.terminate(key);
+    this.contexts.delete(key);
+  }
+
+  protected accepts(message: AgentMessage): boolean {
+    return message.type === AgentMessageType.TASK_CREATE_UI ||
+      message.type === AgentMessageType.TASK_CREATE_DATA ||
+      message.type === AgentMessageType.TASK_RESULT_DATA ||
+      message.type === AgentMessageType.ACTION_OFFERS_READY ||
+      message.type === AgentMessageType.TASK_ERROR ||
+      message.type === AgentMessageType.ACTION_PLAN_READY ||
+      message.type === AgentMessageType.ACTION_PROGRESS ||
+      message.type === AgentMessageType.ACTION_RESULT ||
+      message.type === AgentMessageType.TURN_CANCEL;
+  }
+
+  protected async process(message: AgentMessage): Promise<void> {
+    const key: string = this.turnKey(message.conversationId, message.turnId);
+    if (message.type === AgentMessageType.TURN_CANCEL) {
+      const context: UiTurnContext | undefined = this.contexts.get(key);
+      if (context !== undefined) {
+        this.invalidateContext(context);
+      }
+      this.terminate(key);
+      this.contexts.delete(key);
+      return;
+    }
+    if (this.terminated.has(key)) {
+      return;
+    }
+    if (message.type === AgentMessageType.TASK_CREATE_UI) {
+      const task: CreateUiTaskPayload | null = this.uiTask(message.payload, message.taskId);
+      if (task === null) {
+        this.publishInputError(message, 'UI_TASK_INVALID', 'UI task payload is malformed');
+        return;
+      }
+      const context: UiTurnContext = this.contextFor(message, key);
+      this.enqueue(message, key, context);
+      return;
+    }
+    if (message.type === AgentMessageType.TASK_CREATE_DATA) {
+      const task: CreateDataTaskPayload | null = this.semanticDataTask(message.payload, message.taskId);
+      if (task === null || this.uiTaskIdForDataTask(task) === '') {
+        return;
+      }
+      const context: UiTurnContext = this.contextFor(message, key);
+      this.enqueue(message, key, context);
+      return;
+    }
+    if (message.type === AgentMessageType.TASK_RESULT_DATA ||
+      message.type === AgentMessageType.ACTION_OFFERS_READY ||
+      message.type === AgentMessageType.TASK_ERROR) {
+      const current: UiTurnContext | undefined = this.contexts.get(key);
+      const context: UiTurnContext = current === undefined ? this.contextFor(message, key) : current;
+      this.enqueue(message, key, context);
+      return;
+    }
+    const context: UiTurnContext | undefined = this.contexts.get(key);
+    if (context !== undefined) {
+      this.enqueue(message, key, context);
+    }
+  }
+
+  private enqueue(message: AgentMessage, key: string, context: UiTurnContext): void {
+    const operationId: number = context.nextOperationId;
+    context.nextOperationId++;
+    context.queuedMessages.set(operationId, message);
+    context.operationChain = context.operationChain.then(async () => {
+      const queued: AgentMessage | undefined = context.queuedMessages.get(operationId);
+      context.queuedMessages.delete(operationId);
+      if (queued === undefined || !this.isActive(key, context)) {
+        return;
+      }
+      try {
+        await this.runOperation(queued, key, context);
+      } catch (error) {
+        this.failRender(queued, key, context, error as Object);
+      }
+    });
+  }
+
+  private async runOperation(
+    message: AgentMessage,
+    key: string,
+    context: UiTurnContext
+  ): Promise<void> {
+    if (message.type === AgentMessageType.TASK_CREATE_UI) {
+      const task: CreateUiTaskPayload | null = this.uiTask(message.payload, message.taskId);
+      if (task !== null) {
+        await this.handleUiTask(message, task, key, context);
+      }
+      return;
+    }
+    if (message.type === AgentMessageType.TASK_CREATE_DATA) {
+      const task: CreateDataTaskPayload | null = this.semanticDataTask(message.payload, message.taskId);
+      if (task !== null) {
+        await this.handleDataTask(message, task, key, context);
+      }
+      return;
+    }
+    if (message.type === AgentMessageType.TASK_RESULT_DATA) {
+      await this.handleDataResult(message, key, context);
+      return;
+    }
+    if (message.type === AgentMessageType.ACTION_OFFERS_READY) {
+      await this.handleOffersReady(message, key, context);
+      return;
+    }
+    if (message.type === AgentMessageType.TASK_ERROR) {
+      await this.handleTaskError(message, key, context);
+      return;
+    }
+    await this.handleActionStatus(message, key, context);
+  }
+
+  private async handleUiTask(
+    message: AgentMessage,
+    task: CreateUiTaskPayload,
+    key: string,
+    context: UiTurnContext
+  ): Promise<void> {
+    if (context.canceled || context.resultWritten) {
+      return;
+    }
+    if (context.uiTask !== undefined) {
+      if (!this.validFinalUiTask(context.uiTask, task)) {
+        return;
+      }
+      context.uiTask = task;
+      context.finalUiTaskReceived = true;
+      await this.maybeRenderData(context, key);
+      return;
+    }
+    if (context.skeletonWritten) {
+      return;
+    }
+    context.finalUiTaskReceived = true;
+    await this.startUiTask(task, key, context);
+  }
+
+  private async handleDataTask(
+    message: AgentMessage,
+    task: CreateDataTaskPayload,
+    key: string,
+    context: UiTurnContext
+  ): Promise<void> {
+    if (context.canceled || context.resultWritten || context.finalUiTaskReceived) {
+      return;
+    }
+    const uiTaskId: string = this.uiTaskIdForDataTask(task);
+    if (uiTaskId.length === 0) {
+      return;
+    }
+    if (context.uiTask === undefined) {
+      const provisional: CreateUiTaskPayload = {
+        taskId: uiTaskId,
+        dataTaskIds: [message.taskId],
+        skillId: task.skillId,
+        intent: task.goal,
+        expectedOutputSchema: task.outputSchema
+      };
+      await this.startUiTask(provisional, key, context);
+      return;
+    }
+    if (context.uiTask.taskId !== uiTaskId ||
+      context.uiTask.skillId !== task.skillId ||
+      context.uiTask.dataTaskIds.indexOf(message.taskId) >= 0) {
+      return;
+    }
+    context.uiTask = {
+      taskId: context.uiTask.taskId,
+      dataTaskIds: context.uiTask.dataTaskIds.concat([message.taskId]),
+      skillId: context.uiTask.skillId,
+      intent: context.uiTask.intent,
+      expectedOutputSchema: context.uiTask.expectedOutputSchema
+    };
+    await this.maybeRenderData(context, key);
+  }
+
+  private async startUiTask(
+    task: CreateUiTaskPayload,
+    key: string,
+    context: UiTurnContext
+  ): Promise<void> {
+    context.uiTask = task;
+    context.uiTaskId = task.taskId;
+    const rendered: UiRenderResult = await this.renderer.skeleton(task, context.surfaceId);
+    if (!this.isActive(key, context)) {
+      return;
+    }
+    this.validateRenderedJsonl(rendered, false);
+    await this.writer.write(
+      context.turnId,
+      context.surfaceId,
+      rendered.jsonl,
+      new ContextSurfaceWriteLease(context)
+    );
+    if (!this.isActive(key, context)) {
+      return;
+    }
+    context.skeletonWritten = true;
+    if (context.finalUiTaskReceived) {
+      this.publishUiResult(context, 'skeleton');
+    }
+    for (let index = 0; index < task.dataTaskIds.length; index++) {
+      const pending = context.pendingDataByTaskId.get(task.dataTaskIds[index]);
+      if (pending !== undefined && pending.invalidCode.length > 0) {
+        this.publishOwnedDataError(
+          context,
+          task.dataTaskIds[index],
+          pending.invalidCode,
+          pending.invalidMessage
+        );
+      }
+    }
+    await this.maybeRenderData(context, key);
+  }
+
+  private async handleDataResult(message: AgentMessage, key: string, context: UiTurnContext): Promise<void> {
+    if (context.uiTask !== undefined && !this.ownsDataTask(context.uiTask, message.taskId)) {
+      return;
+    }
+    if (context.canceled || context.resultWritten || context.terminalRenderStarted) {
+      return;
+    }
+    const data: DataResult | null = this.dataResult(message.payload);
+    if (data === null) {
+      this.rememberPendingInvalidData(
+        context,
+        message.taskId,
+        'UI_DATA_INVALID',
+        'Data result payload is malformed'
+      );
+      if (context.uiTask !== undefined) {
+        this.publishOwnedDataError(
+          context,
+          message.taskId,
+          'UI_DATA_INVALID',
+          'Data result payload is malformed'
+        );
+      }
+      return;
+    }
+    if (context.uiTask !== undefined && context.uiTask.dataTaskIds.length === 1 &&
+      data.outputSchema !== context.uiTask.expectedOutputSchema) {
+      this.publishOwnedDataError(
+        context,
+        message.taskId,
+        'UI_DATA_SCHEMA_MISMATCH',
+        'Data result schema does not match UI task'
+      );
+      return;
+    }
+    this.rememberPendingData(context, message.taskId, data);
+    await this.maybeRenderData(context, key);
+  }
+
+  private async handleOffersReady(
+    message: AgentMessage,
+    key: string,
+    context: UiTurnContext
+  ): Promise<void> {
+    if (context.uiTask !== undefined && !this.ownsDataTask(context.uiTask, message.taskId)) {
+      return;
+    }
+    const ready = this.offersReady(message.payload, message.taskId);
+    if (ready === null) {
+      return;
+    }
+    this.rememberPendingOffers(
+      context,
+      message.taskId,
+      ready.sourceToolId,
+      ready.offers
+    );
+    await this.maybeRenderData(context, key);
+  }
+
+  private async maybeRenderData(context: UiTurnContext, key: string): Promise<void> {
+    const task = context.uiTask;
+    if (task === undefined || !context.skeletonWritten) {
+      return;
+    }
+    let terminalCount: number = 0;
+    while (terminalCount < task.dataTaskIds.length) {
+      const pending = context.pendingDataByTaskId.get(task.dataTaskIds[terminalCount]);
+      if (pending === undefined ||
+        (pending.errorMessage === undefined &&
+          (pending.data === undefined || pending.offers === undefined ||
+            pending.offerSourceToolId !== pending.data.toolId))) {
+        break;
+      }
+      terminalCount++;
+    }
+    const allTerminal: boolean = terminalCount === task.dataTaskIds.length;
+    let renderCount: number = terminalCount;
+    if (!allTerminal) {
+      const incompleteRound: number = this.dataTaskRound(task.dataTaskIds[terminalCount]);
+      if (incompleteRound < 1) {
+        return;
+      }
+      while (renderCount > 0 &&
+        this.dataTaskRound(task.dataTaskIds[renderCount - 1]) === incompleteRound) {
+        renderCount--;
+      }
+    }
+    const data: DataResult[] = [];
+    const offers: ActionOffer[] = [];
+    const errors: string[] = [];
+    const readyTaskIds: string[] = [];
+    for (let index = 0; index < renderCount; index++) {
+      const pending = context.pendingDataByTaskId.get(task.dataTaskIds[index]) as PendingDataEntry;
+      readyTaskIds.push(task.dataTaskIds[index]);
+      if (pending.errorMessage !== undefined) {
+        errors.push(pending.errorMessage);
+        continue;
+      }
+      if (pending.data !== undefined && pending.offers !== undefined) {
+        data.push(pending.data);
+        for (let offerIndex = 0; offerIndex < pending.offers.length; offerIndex++) {
+          offers.push(pending.offers[offerIndex]);
+        }
+      }
+    }
+    if (data.length === 0) {
+      if (context.finalUiTaskReceived && allTerminal) {
+        await this.renderDataError(context, key, errors[0]);
+      }
+      return;
+    }
+    const unchanged: boolean =
+      readyTaskIds.join(',') === context.renderedDataTaskIds.join(',');
+    if (unchanged) {
+      if (context.finalUiTaskReceived && allTerminal) {
+        this.finishRenderedData(context);
+      }
+      return;
+    }
+    await this.renderData(
+      context,
+      key,
+      data,
+      offers,
+      readyTaskIds,
+      context.finalUiTaskReceived && allTerminal
+    );
+  }
+
+  private dataTaskRound(taskId: string): number {
+    const marker: string = ':round-';
+    const markerIndex: number = taskId.lastIndexOf(marker);
+    if (markerIndex < 0) {
+      return -1;
+    }
+    const roundEnd: number = taskId.indexOf(':', markerIndex + marker.length);
+    if (roundEnd < 0) {
+      return -1;
+    }
+    const round: number = Number(taskId.substring(markerIndex + marker.length, roundEnd));
+    return Number.isInteger(round) && round > 0 ? round : -1;
+  }
+
+  private async renderData(
+    context: UiTurnContext,
+    key: string,
+    data: DataResult[],
+    offers: ActionOffer[],
+    readyTaskIds: string[],
+    terminal: boolean
+  ): Promise<void> {
+    const task: CreateUiTaskPayload | undefined = context.uiTask;
+    if (task === undefined || !context.skeletonWritten || context.resultWritten ||
+      context.terminalRenderStarted) {
+      return;
+    }
+    if (task.dataTaskIds.length === 1 && data[0].outputSchema !== task.expectedOutputSchema) {
+      this.publishOwnedDataError(
+        context,
+        task.dataTaskIds[0],
+        'UI_DATA_SCHEMA_MISMATCH',
+        'Data result schema does not match UI task'
+      );
+      return;
+    }
+    context.terminalRenderStarted = terminal;
+    const rendered: UiRenderResult =
+      await this.renderer.result(task, data, offers, context.surfaceId);
+    if (!this.isActive(key, context)) {
+      return;
+    }
+    this.validateRenderedJsonl(rendered, false);
+    await this.writer.write(
+      context.turnId,
+      context.surfaceId,
+      rendered.jsonl,
+      new ContextSurfaceWriteLease(context)
+    );
+    if (!this.isActive(key, context)) {
+      return;
+    }
+    context.renderedDataTaskIds = readyTaskIds.slice();
+    if (terminal) {
+      this.finishRenderedData(context);
+    }
+  }
+
+  private finishRenderedData(context: UiTurnContext): void {
+    context.terminalRenderStarted = true;
+    context.resultWritten = true;
+    this.publishUiResult(context, 'result');
+    this.clearPendingPayloads(context);
+  }
+
+  private async handleTaskError(message: AgentMessage, key: string, context: UiTurnContext): Promise<void> {
+    if (context.canceled || context.resultWritten ||
+      context.terminalRenderStarted ||
+      (context.uiTask !== undefined && !this.ownsDataTask(context.uiTask, message.taskId))) {
+      return;
+    }
+    const errorMessage: string | null = this.taskErrorMessage(message.payload);
+    if (errorMessage === null) {
+      if (context.uiTask !== undefined) {
+        this.publishOwnedDataError(
+          context,
+          message.taskId,
+          'UI_DATA_ERROR_INVALID',
+          'Data error payload is malformed'
+        );
+      }
+      return;
+    }
+    this.rememberPendingError(context, message.taskId, errorMessage);
+    await this.maybeRenderData(context, key);
+  }
+
+  private async renderDataError(context: UiTurnContext, key: string, message: string): Promise<void> {
+    if (context.uiTask === undefined || context.resultWritten || context.terminalRenderStarted) {
+      return;
+    }
+    context.terminalRenderStarted = true;
+    const rendered: UiRenderResult =
+      await this.renderer.error(context.uiTask, message, context.surfaceId);
+    if (!this.isActive(key, context)) {
+      return;
+    }
+    this.validateRenderedJsonl(rendered, false);
+    await this.writer.write(
+      context.turnId,
+      context.surfaceId,
+      rendered.jsonl,
+      new ContextSurfaceWriteLease(context)
+    );
+    if (!this.isActive(key, context)) {
+      return;
+    }
+    context.resultWritten = true;
+    this.publishUiResult(context, 'error');
+    this.clearPendingPayloads(context);
+  }
+
+  private async handleActionStatus(message: AgentMessage, key: string, context: UiTurnContext): Promise<void> {
+    if (context.canceled || !context.skeletonWritten ||
+      this.payloadSurfaceId(message.payload) !== context.surfaceId) {
+      return;
+    }
+    let ready: ActionPlanReadyPayload | null = null;
+    if (message.type === AgentMessageType.ACTION_PLAN_READY) {
+      ready = this.actionPlanReady(message, context);
+      if (ready === null) {
+        return;
+      }
+    }
+    const statusPayload: Object = ready === null ? message.payload : ready;
+    const rendered: UiRenderResult =
+      await this.renderer.actionStatus(statusPayload, context.surfaceId);
+    if (!this.isActive(key, context)) {
+      return;
+    }
+    this.validateRenderedJsonl(rendered, ready !== null);
+    await this.writer.write(
+      context.turnId,
+      context.surfaceId,
+      rendered.jsonl,
+      new ContextSurfaceWriteLease(context)
+    );
+    if (!this.isActive(key, context)) {
+      return;
+    }
+    this.publishUiResult(context, 'action');
+  }
+
+  private rememberPendingData(context: UiTurnContext, taskId: string, data: DataResult): void {
+    const current: PendingDataEntry | undefined = context.pendingDataByTaskId.get(taskId);
+    if (current !== undefined &&
+      (current.data !== undefined || current.errorMessage !== undefined)) {
+      return;
+    }
+    const entry: PendingDataEntry = {
+      data,
+      offers: current === undefined ? undefined : current.offers,
+      offerSourceToolId: current === undefined ? undefined : current.offerSourceToolId,
+      errorMessage: current === undefined ? undefined : current.errorMessage,
+      invalidCode: '',
+      invalidMessage: ''
+    };
+    this.rememberPendingEntry(context, taskId, entry);
+  }
+
+  private rememberPendingInvalidData(
+    context: UiTurnContext,
+    taskId: string,
+    code: string,
+    message: string
+  ): void {
+    const current: PendingDataEntry | undefined = context.pendingDataByTaskId.get(taskId);
+    if (current !== undefined &&
+      (current.data !== undefined || current.errorMessage !== undefined)) {
+      return;
+    }
+    const entry: PendingDataEntry = {
+      offers: current === undefined ? undefined : current.offers,
+      offerSourceToolId: current === undefined ? undefined : current.offerSourceToolId,
+      errorMessage: current === undefined ? undefined : current.errorMessage,
+      invalidCode: code,
+      invalidMessage: message
+    };
+    this.rememberPendingEntry(context, taskId, entry);
+  }
+
+  private rememberPendingOffers(
+    context: UiTurnContext,
+    taskId: string,
+    sourceToolId: string,
+    offers: ActionOffer[]
+  ): void {
+    const current: PendingDataEntry | undefined = context.pendingDataByTaskId.get(taskId);
+    if (current !== undefined && current.errorMessage !== undefined) {
+      return;
+    }
+    if (current !== undefined && current.offers !== undefined &&
+      (current.data === undefined || current.offerSourceToolId === current.data.toolId)) {
+      return;
+    }
+    const entry: PendingDataEntry = {
+      data: current === undefined ? undefined : current.data,
+      offers: offers.slice(),
+      offerSourceToolId: sourceToolId,
+      errorMessage: current === undefined ? undefined : current.errorMessage,
+      invalidCode: current === undefined ? '' : current.invalidCode,
+      invalidMessage: current === undefined ? '' : current.invalidMessage
+    };
+    this.rememberPendingEntry(context, taskId, entry);
+  }
+
+  private rememberPendingError(context: UiTurnContext, taskId: string, message: string): void {
+    const current = context.pendingDataByTaskId.get(taskId);
+    if (current !== undefined &&
+      (current.data !== undefined || current.errorMessage !== undefined)) {
+      return;
+    }
+    this.rememberPendingEntry(context, taskId, {
+      errorMessage: message,
+      invalidCode: '',
+      invalidMessage: ''
+    });
+  }
+
+  private rememberPendingEntry(context: UiTurnContext, taskId: string, entry: PendingDataEntry): void {
+    if (!context.pendingDataByTaskId.has(taskId)) {
+      context.pendingDataOrder.push(taskId);
+    }
+    context.pendingDataByTaskId.set(taskId, entry);
+    while (context.uiTask === undefined && context.pendingDataOrder.length > PENDING_DATA_LIMIT) {
+      const oldest: string | undefined = context.pendingDataOrder.shift();
+      if (oldest !== undefined) {
+        context.pendingDataByTaskId.delete(oldest);
+      }
+    }
+  }
+
+  private publishOwnedDataError(
+    context: UiTurnContext,
+    dataTaskId: string,
+    code: string,
+    message: string
+  ): void {
+    const task: CreateUiTaskPayload | undefined = context.uiTask;
+    if (task === undefined || !this.ownsDataTask(task, dataTaskId)) {
+      return;
+    }
+    const payload: TaskErrorPayload = { code, message };
+    this.bus.publish({
+      type: AgentMessageType.TASK_ERROR,
+      conversationId: context.conversationId,
+      turnId: context.turnId,
+      taskId: dataTaskId,
+      payload
+    });
+  }
+
+  private contextFor(message: AgentMessage, key: string): UiTurnContext {
+    const current: UiTurnContext | undefined = this.contexts.get(key);
+    if (current !== undefined) {
+      return current;
+    }
+    const created: UiTurnContext = {
+      conversationId: message.conversationId,
+      turnId: message.turnId,
+      surfaceId: this.uniqueSurfaceId(),
+      uiTaskId: '',
+      pendingDataByTaskId: new Map<string, PendingDataEntry>(),
+      pendingDataOrder: [],
+      canceled: false,
+      generation: 0,
+      skeletonWritten: false,
+      resultWritten: false,
+      terminalRenderStarted: false,
+      finalUiTaskReceived: false,
+      renderedDataTaskIds: [],
+      operationChain: Promise.resolve(),
+      queuedMessages: new Map<number, AgentMessage>(),
+      nextOperationId: 0
+    };
+    this.contexts.set(key, created);
+    return created;
+  }
+
+  private isActive(key: string, context: UiTurnContext): boolean {
+    return !context.canceled && !this.terminated.has(key) && this.contexts.get(key) === context;
+  }
+
+  private terminate(key: string): void {
+    if (this.terminated.has(key)) {
+      return;
+    }
+    this.terminated.add(key);
+    this.terminatedOrder.push(key);
+    if (this.terminatedOrder.length > TERMINATED_TURN_LIMIT) {
+      const oldest: string | undefined = this.terminatedOrder.shift();
+      if (oldest !== undefined) {
+        this.terminated.delete(oldest);
+      }
+    }
+  }
+
+  private uniqueSurfaceId(): string {
+    const base: string = newSurfaceId();
+    let candidate: string = base;
+    while (this.surfaceInUse(candidate)) {
+      this.surfaceSuffix++;
+      candidate = `${base}_${this.surfaceSuffix}`;
+    }
+    return candidate;
+  }
+
+  private surfaceInUse(surfaceId: string): boolean {
+    let found: boolean = false;
+    this.contexts.forEach((context: UiTurnContext) => {
+      if (context.surfaceId === surfaceId) {
+        found = true;
+      }
+    });
+    return found;
+  }
+
+  private uiTask(payload: Object, taskId: string): CreateUiTaskPayload | null {
+    if (payload === null || typeof payload !== 'object') {
+      return null;
+    }
+    const values = payload as Record<string, Object | string | number | boolean | null | undefined>;
+    const payloadTaskId = values['taskId'];
+    const dataTaskIds = values['dataTaskIds'];
+    const personaId = values['personaId'];
+    const skillId = values['skillId'];
+    const intent = values['intent'];
+    const expectedOutputSchema = values['expectedOutputSchema'];
+    if (typeof payloadTaskId !== 'string' || payloadTaskId !== taskId ||
+      !Array.isArray(dataTaskIds) || !this.validDataTaskIds(dataTaskIds as Object[], taskId) ||
+      (personaId !== undefined && (typeof personaId !== 'string' || personaId.trim().length === 0)) ||
+      typeof skillId !== 'string' ||
+      typeof intent !== 'string' || intent.trim().length === 0 ||
+      typeof expectedOutputSchema !== 'string' || expectedOutputSchema.trim().length === 0) {
+      return null;
+    }
+    return payload as CreateUiTaskPayload;
+  }
+
+  private validFinalUiTask(
+    current: CreateUiTaskPayload,
+    next: CreateUiTaskPayload
+  ): boolean {
+    if (current.taskId !== next.taskId ||
+      current.skillId !== next.skillId ||
+      current.expectedOutputSchema !== next.expectedOutputSchema ||
+      (current.personaId !== undefined && current.personaId !== next.personaId) ||
+      current.dataTaskIds.length !== next.dataTaskIds.length) {
+      return false;
+    }
+    for (let index = 0; index < current.dataTaskIds.length; index++) {
+      if (current.dataTaskIds[index] !== next.dataTaskIds[index]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private semanticDataTask(payload: Object, taskId: string): CreateDataTaskPayload | null {
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+      return null;
+    }
+    const task = payload as CreateDataTaskPayload;
+    return task.taskId === taskId &&
+      typeof task.roundId === 'string' && task.roundId.trim().length > 0 &&
+      typeof task.skillId === 'string' &&
+      typeof task.goal === 'string' && task.goal.trim().length > 0 &&
+      Array.isArray(task.allowedToolIds) && task.allowedToolIds.length > 0 &&
+      typeof task.toolId === 'string' && task.toolId.trim().length > 0 &&
+      typeof task.outputSchema === 'string' && task.outputSchema.trim().length > 0 &&
+      task.args !== null && typeof task.args === 'object' && !Array.isArray(task.args) &&
+      typeof task.required === 'boolean' ? task : null;
+  }
+
+  private uiTaskIdForDataTask(task: CreateDataTaskPayload): string {
+    const marker: string = ':round-';
+    const markerIndex: number = task.taskId.lastIndexOf(marker);
+    if (markerIndex <= 0) {
+      return '';
+    }
+    const roundEnd: number = task.taskId.indexOf(':', markerIndex + marker.length);
+    if (roundEnd < 0) {
+      return '';
+    }
+    const roundText: string = task.taskId.substring(markerIndex + marker.length, roundEnd);
+    const round: number = Number(roundText);
+    if (!Number.isInteger(round) || round < 1 ||
+      !task.roundId.endsWith(marker + roundText)) {
+      return '';
+    }
+    return task.taskId.substring(0, markerIndex) + ':ui';
+  }
+
+  private validDataTaskIds(dataTaskIds: Object[], uiTaskId: string): boolean {
+    if (dataTaskIds.length === 0) {
+      return false;
+    }
+    const ids: Set<string> = new Set<string>();
+    for (let index = 0; index < dataTaskIds.length; index++) {
+      const taskId = dataTaskIds[index];
+      if (typeof taskId !== 'string' || taskId.trim().length === 0 ||
+        taskId === uiTaskId || ids.has(taskId)) {
+        return false;
+      }
+      ids.add(taskId);
+    }
+    return true;
+  }
+
+  private ownsDataTask(task: CreateUiTaskPayload, dataTaskId: string): boolean {
+    return task.dataTaskIds.indexOf(dataTaskId) >= 0;
+  }
+
+  private offersReady(payload: Object, taskId: string): ActionOffersReadyPayload | null {
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+      return null;
+    }
+    const ready = payload as ActionOffersReadyPayload;
+    if (Object.keys(payload).sort().join(',') !== 'dataTaskId,offers,sourceToolId' ||
+      ready.dataTaskId !== taskId || typeof ready.sourceToolId !== 'string' ||
+      ready.sourceToolId.trim().length === 0 || !Array.isArray(ready.offers)) {
+      return null;
+    }
+    const cloned = cloneJsonValue(ready.offers as Object);
+    if (!cloned.ok || !Array.isArray(cloned.value)) {
+      return null;
+    }
+    const offers = cloned.value as ActionOffer[];
+    for (let index = 0; index < offers.length; index++) {
+      const offer = offers[index];
+      if (offer === null || typeof offer !== 'object' ||
+        Object.keys(offer).sort().join(',') !== 'actionId,args,label,offerId,variant' ||
+        typeof offer.offerId !== 'string' || offer.offerId.trim().length === 0 ||
+        typeof offer.actionId !== 'string' || offer.actionId.trim().length === 0 ||
+        typeof offer.label !== 'string' || offer.label.trim().length === 0 ||
+        typeof offer.variant !== 'string' || offer.variant.trim().length === 0 ||
+        offer.args === null || typeof offer.args !== 'object' || Array.isArray(offer.args)) {
+        return null;
+      }
+    }
+    return {
+      dataTaskId: ready.dataTaskId,
+      sourceToolId: ready.sourceToolId,
+      offers
+    };
+  }
+
+  private dataResult(payload: Object): DataResult | null {
+    if (payload === null || typeof payload !== 'object') {
+      return null;
+    }
+    const values = payload as Record<string, Object | string | number | boolean | null | undefined>;
+    const toolId = values['toolId'];
+    const outputSchema = values['outputSchema'];
+    const status = values['status'];
+    const sources = values['sources'];
+    const data = values['data'];
+    const warnings = values['warnings'];
+    const validStatus: boolean = status === 'success' || status === 'partial' ||
+      status === 'empty' || status === 'error';
+    if (typeof toolId !== 'string' || toolId.trim().length === 0 ||
+      typeof outputSchema !== 'string' || outputSchema.trim().length === 0 ||
+      !validStatus || !Array.isArray(sources) || data === null || typeof data !== 'object' ||
+      !Array.isArray(warnings)) {
+      return null;
+    }
+    return payload as DataResult;
+  }
+
+  private taskErrorMessage(payload: Object): string | null {
+    if (payload === null || typeof payload !== 'object') {
+      return null;
+    }
+    const values = payload as Record<string, Object | string | number | boolean | null | undefined>;
+    const message = values['message'];
+    return typeof message === 'string' && message.trim().length > 0 ? message : null;
+  }
+
+  private payloadSurfaceId(payload: Object): string {
+    if (payload === null || typeof payload !== 'object') {
+      return '';
+    }
+    const values = payload as Record<string, Object | string | number | boolean | null | undefined>;
+    const surfaceId: Object | string | number | boolean | null | undefined = values['surfaceId'];
+    return typeof surfaceId === 'string' ? surfaceId : '';
+  }
+
+  private publishUiResult(context: UiTurnContext, state: UiRenderState): void {
+    const payload: UiRenderResultPayload = {
+      surfaceId: context.surfaceId,
+      state
+    };
+    this.bus.publish({
+      type: AgentMessageType.TASK_RESULT_UI,
+      conversationId: context.conversationId,
+      turnId: context.turnId,
+      taskId: context.uiTaskId,
+      payload
+    });
+  }
+
+  private publishInputError(message: AgentMessage, code: string, detail: string): void {
+    const payload: TaskErrorPayload = {
+      code,
+      message: detail
+    };
+    this.bus.publish({
+      type: AgentMessageType.TASK_ERROR,
+      conversationId: message.conversationId,
+      turnId: message.turnId,
+      taskId: message.taskId,
+      payload
+    });
+  }
+
+  private failRender(message: AgentMessage, key: string, context: UiTurnContext, error: Object): void {
+    if (!this.isActive(key, context)) {
+      return;
+    }
+    this.invalidateContext(context);
+    this.terminate(key);
+    this.contexts.delete(key);
+    this.publishInputError(
+      {
+        type: message.type,
+        conversationId: message.conversationId,
+        turnId: message.turnId,
+        taskId: context.uiTaskId.length === 0 ? message.taskId : context.uiTaskId,
+        payload: message.payload
+      },
+      'UI_RENDER_FAILED',
+      error instanceof Error ? error.message : `${error}`
+    );
+  }
+
+  private clearPendingPayloads(context: UiTurnContext): void {
+    context.uiTask = undefined;
+    this.clearPendingData(context);
+  }
+
+  private clearPendingData(context: UiTurnContext): void {
+    context.pendingDataByTaskId.clear();
+    context.pendingDataOrder.splice(0, context.pendingDataOrder.length);
+  }
+
+  private invalidateContext(context: UiTurnContext): void {
+    context.canceled = true;
+    context.generation++;
+    context.uiTask = undefined;
+    this.clearPendingData(context);
+    context.queuedMessages.clear();
+  }
+
+  private turnKey(conversationId: string, turnId: string): string {
+    return `${conversationId.length}:${conversationId}${turnId}`;
+  }
+
+  private actionPlanReady(
+    message: AgentMessage,
+    context: UiTurnContext
+  ): ActionPlanReadyPayload | null {
+    if (message.payload === null || typeof message.payload !== 'object') {
+      return null;
+    }
+    const ready = message.payload as ActionPlanReadyPayload;
+    if (Object.keys(message.payload).sort().join(',') !==
+      'actionId,args,label,planId,runId,surfaceId,uiTaskId') {
+      return null;
+    }
+    if (ready.uiTaskId !== context.uiTaskId ||
+      ready.planId.trim().length === 0 || ready.runId.trim().length === 0 ||
+      ready.surfaceId !== context.surfaceId ||
+      ready.actionId !== 'workflow.run' ||
+      ready.label.trim().length === 0) {
+      return null;
+    }
+    const args = ready.args as WorkflowRunArgs;
+    if (args === null ||
+      typeof args !== 'object' ||
+      Array.isArray(args) ||
+      Object.keys(args).sort().join(',') !== 'planId,runId' ||
+      args.planId !== ready.planId ||
+      args.runId !== ready.runId) {
+      return null;
+    }
+    const safeArgs: WorkflowRunArgs = {
+      planId: args.planId,
+      runId: args.runId
+    };
+    return {
+      uiTaskId: ready.uiTaskId,
+      surfaceId: ready.surfaceId,
+      planId: ready.planId,
+      runId: ready.runId,
+      label: ready.label,
+      actionId: 'workflow.run',
+      args: safeArgs
+    };
+  }
+
+  private validateRenderedJsonl(
+    rendered: UiRenderResult,
+    allowWorkflowRun: boolean
+  ): void {
+    if (typeof rendered.jsonl !== 'string') {
+      throw new Error('UI renderer JSONL is malformed');
+    }
+    const lines = rendered.jsonl.split('\n');
+    for (let index = 0; index < lines.length; index++) {
+      const line = lines[index].trim();
+      if (line.length === 0) {
+        continue;
+      }
+      let parsed: JsonValue;
+      try {
+        parsed = JSON.parse(line) as JsonValue;
+      } catch (_error) {
+        throw new Error('UI renderer JSONL contains a malformed line');
+      }
+      if (!allowWorkflowRun && containsWorkflowRun(parsed)) {
+        throw new Error('UI renderer exposed workflow.run before Action Plan READY');
+      }
+    }
+  }
+
+}

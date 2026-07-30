@@ -6,7 +6,12 @@ import {
   inputTextAfterPromptSubmit,
   isWelcomeSurface,
   isPromptInputEnabled,
+  nextPendingToolRenderTick,
   nextSendSpinnerRotation,
+  runtimeCallbackIsCurrent,
+  runtimeOwnerAllowsSurfaceAction,
+  runtimeSurfaceIdentityMatches,
+  shouldShowFirecrawlPendingSurface,
   shouldShowWelcome,
   shouldShowQueryPendingSurface,
   shouldApplySurfaceUpdate,
@@ -14,7 +19,13 @@ import {
   voiceInputTextAfterRecognition
 } from '../main/ets/pages/A2uiHome/state/A2uiHomeState';
 
-function surface(sequence: number, status: string, surfaceId: string = 'surface_model'): A2uiSurfaceState {
+function surface(
+  sequence: number,
+  status: string,
+  surfaceId: string = 'surface_model',
+  runtimeOwner: 'multi_agent' | 'legacy' = 'multi_agent',
+  runtimeGeneration: number = 1
+): A2uiSurfaceState {
   return {
     surfaceId: surfaceId,
     rootId: 'root',
@@ -24,7 +35,9 @@ function surface(sequence: number, status: string, surfaceId: string = 'surface_
     components: [],
     dataModelJson: '{}',
     error: '',
-    sequence: sequence
+    sequence: sequence,
+    runtimeOwner,
+    runtimeGeneration
   };
 }
 
@@ -71,6 +84,72 @@ export default function a2uiHomeStateTest() {
       expect(shouldApplySurfaceUpdate(surface(12, 'calling_tool'), surface(13, 'ready'))).assertTrue();
     });
 
+    it('accepts only exact-owner actions and rejects stale or late owner changes', 0, () => {
+      const multi = surface(12, 'ready', 'surface_multi', 'multi_agent', 4);
+      const legacy = surface(12, 'ready', 'surface_legacy', 'legacy', 4);
+
+      expect(runtimeOwnerAllowsSurfaceAction(multi, 'multi_agent')).assertTrue();
+      expect(runtimeOwnerAllowsSurfaceAction(multi, 'legacy')).assertFalse();
+      expect(runtimeOwnerAllowsSurfaceAction(legacy, 'legacy')).assertTrue();
+      expect(runtimeOwnerAllowsSurfaceAction(legacy, 'multi_agent')).assertFalse();
+      expect(shouldApplySurfaceUpdate(
+        multi,
+        surface(99, 'ready', 'surface_old', 'legacy', 3)
+      )).assertFalse();
+      expect(shouldApplySurfaceUpdate(
+        multi,
+        surface(13, 'ready', 'surface_mutated', 'legacy', 4)
+      )).assertFalse();
+      expect(shouldApplySurfaceUpdate(
+        multi,
+        surface(1, 'ready', 'surface_next', 'legacy', 5)
+      )).assertTrue();
+    });
+
+    it('accepts callback state only for the generation and owner captured at submit', 0, () => {
+      expect(runtimeCallbackIsCurrent('multi_agent', 7, 'multi_agent', 7)).assertTrue();
+      expect(runtimeCallbackIsCurrent('multi_agent', 8, 'multi_agent', 7)).assertFalse();
+      expect(runtimeCallbackIsCurrent('legacy', 7, 'multi_agent', 7)).assertFalse();
+
+      let activeOwner: 'multi_agent' | 'legacy' = 'multi_agent';
+      let activeGeneration = 10;
+      let mutations = 0;
+      const mutate = (owner: 'multi_agent' | 'legacy', generation: number): void => {
+        if (runtimeCallbackIsCurrent(activeOwner, activeGeneration, owner, generation)) {
+          mutations++;
+        }
+      };
+      const oldMultiAgent = (): void => mutate('multi_agent', 10);
+      const oldLegacyStream = (): void => mutate('legacy', 10);
+      const oldToolStream = (): void => mutate('multi_agent', 10);
+      activeGeneration = 11;
+      oldMultiAgent();
+      oldLegacyStream();
+      oldToolStream();
+      expect(mutations).assertEqual(0);
+      mutate('multi_agent', 11);
+      expect(mutations).assertEqual(1);
+    });
+
+    it('requires exact current host and retained snapshot identity for page actions', 0, () => {
+      const current = surface(20, 'ready', 'surface-current', 'multi_agent', 9);
+      const retained = surface(20, 'ready', 'surface-current', 'multi_agent', 9);
+      expect(runtimeSurfaceIdentityMatches(current, retained, 'multi_agent', 9)).assertTrue();
+      expect(runtimeSurfaceIdentityMatches(
+        surface(21, 'ready', 'surface-newer', 'multi_agent', 10),
+        retained,
+        'multi_agent',
+        10
+      )).assertFalse();
+      expect(runtimeSurfaceIdentityMatches(
+        current,
+        surface(20, 'ready', 'surface-current', 'legacy', 9),
+        'multi_agent',
+        9
+      )).assertFalse();
+      expect(runtimeSurfaceIdentityMatches(current, retained, 'legacy', 9)).assertFalse();
+    });
+
     it('keeps send spinner rotation monotonic while loading', 0, () => {
       expect(nextSendSpinnerRotation(360 - A2UI_SEND_SPINNER_STEP_DEG, true)).assertEqual(360);
       expect(nextSendSpinnerRotation(360, true)).assertEqual(360 + A2UI_SEND_SPINNER_STEP_DEG);
@@ -94,6 +173,39 @@ export default function a2uiHomeStateTest() {
       expect(shouldShowQueryPendingSurface(true, true)).assertTrue();
       expect(shouldShowQueryPendingSurface(true, false)).assertFalse();
       expect(shouldShowQueryPendingSurface(false, true)).assertFalse();
+    });
+
+    it('reveals Firecrawl partial results while the tool is still busy', 0, () => {
+      const pending = surface(7, 'calling_tool');
+      pending.intent = 'social.public.search';
+      pending.components = [{
+        id: 'thinking',
+        component: 'ThinkingStream'
+      }];
+      const partial = surface(8, 'ready');
+      partial.intent = 'social.public.search';
+      partial.components = [{
+        id: 'results',
+        component: 'GenericToolResults'
+      }];
+
+      expect(shouldShowFirecrawlPendingSurface(
+        true,
+        'social.public.search',
+        pending
+      )).assertTrue();
+      expect(shouldShowFirecrawlPendingSurface(
+        true,
+        'social.public.search',
+        partial
+      )).assertFalse();
+    });
+
+    it('forces an HTML refresh when the pending Firecrawl tool changes', 0, () => {
+      expect(nextPendingToolRenderTick(7, '', 'shopping.research')).assertEqual(8);
+      expect(nextPendingToolRenderTick(8, 'shopping.research', 'shopping.research'))
+        .assertEqual(8);
+      expect(nextPendingToolRenderTick(8, 'shopping.research', '')).assertEqual(9);
     });
 
     it('shows welcome only for an idle seed surface with no messages', 0, () => {

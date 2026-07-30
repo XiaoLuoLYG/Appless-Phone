@@ -39,7 +39,7 @@ export function resolveA2uiButtonStyle(tone: string, active: boolean, isEnabled:
       backgroundColor: COLOR_ACTION_DEACTIVATED,
       borderColor: COLOR_ACTION_DEACTIVATED_EDGE,
       textColor: COLOR_ACTION_DEACTIVATED_TEXT,
-      opacity: 0.48
+      opacity: 1
     };
   }
   if (tone === 'danger') {

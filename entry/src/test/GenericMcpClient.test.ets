@@ -5,6 +5,7 @@ import {
   buildToolsListRequest,
   inferCredentialFromMcpFailure,
   McpToolResultPayload,
+  normalizeMcpReadTimeoutMs,
   parseMcpJsonRpcResponse,
   summarizeMcpToolResult
 } from '@loop/agent-core';
@@ -31,6 +32,13 @@ interface TestStructuredArrayContent {
 
 export default function genericMcpClientTest() {
   describe('genericMcpClient', () => {
+    it('normalizes MCP read timeouts without changing the 20 second default', 0, () => {
+      expect(normalizeMcpReadTimeoutMs(0)).assertEqual(20000);
+      expect(normalizeMcpReadTimeoutMs(999)).assertEqual(20000);
+      expect(normalizeMcpReadTimeoutMs(20000)).assertEqual(20000);
+      expect(normalizeMcpReadTimeoutMs(60000)).assertEqual(60000);
+    });
+
     it('builds initialize and tool requests', 0, () => {
       const args: TestCityArgs = { city: '深圳' };
 

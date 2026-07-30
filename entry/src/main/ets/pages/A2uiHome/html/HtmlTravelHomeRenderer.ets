@@ -427,6 +427,19 @@ button:disabled { cursor: default; opacity: 0.52; }
   align-items: center;
   margin-top: 10px;
 }
+.journey-price {
+  grid-column: 4;
+  justify-self: end;
+  align-self: center;
+  color: var(--source);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.journey-price b {
+  font-size: 18px;
+  line-height: 1;
+  font-weight: 850;
+}
 .time-block {
   min-width: 0;
 }
@@ -563,6 +576,8 @@ button:disabled { cursor: default; opacity: 0.52; }
   .route-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
   .route-stat { padding: 8px 7px; }
   .route-stat b { font-size: 13px; }
+  .journey-mainline { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+  .journey-price { grid-column: 3; }
   .journey-metrics { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: no-preference) {
@@ -659,6 +674,10 @@ const TRAVEL_HOME_JS: string = `
     var match = raw.match(/([01]?\\d|2[0-3]):([0-5]\\d)(?::[0-5]\\d)?/);
     if (!match) { return raw; }
     return (match[1].length === 1 ? '0' + match[1] : match[1]) + ':' + match[2];
+  }
+  function trainPrice(value) {
+    var raw = text(value).trim().replace(/^¥+/, '').replace(/起+$/, '').trim();
+    return raw.length > 0 ? '¥' + raw + '起' : '';
   }
   function available(value) {
     var raw = text(value);
@@ -836,7 +855,6 @@ const TRAVEL_HOME_JS: string = `
   }
   function renderPersonaBanner(parent) {
     var persona = data.persona || {};
-    var memory = data.personaMemory || {};
     var name = text(persona.name);
     if (text(persona.id).length === 0 || name.length === 0) { return; }
     var banner = add(parent, 'section', 'persona-banner');
@@ -852,7 +870,6 @@ const TRAVEL_HOME_JS: string = `
     }
     var copy = add(banner, 'div', 'persona-copy');
     add(copy, 'div', 'persona-title', name + '上线');
-    add(copy, 'div', 'persona-subtitle', text(memory.summary) || text(persona.reason));
   }
   app.textContent = '';
   var blocks = list(data.blocks);
@@ -950,12 +967,21 @@ const TRAVEL_HOME_JS: string = `
     var right = add(mainline, 'div', 'time-block');
     add(right, 'b', '', displayTime(metric(block, ['arrive', 'arrTime'])) || '--');
     add(right, 'span', '', metric(block, ['to', 'arr']) || '到达');
+    var price = metric(block, ['price']);
+    var displayPrice = trainPrice(price);
+    if (source === 'train' && displayPrice.length > 0) {
+      var priceBlock = add(mainline, 'div', 'journey-price');
+      add(priceBlock, 'b', '', displayPrice);
+    }
     var metrics = add(card, 'div', 'journey-metrics');
-    [
+    var summaryMetrics = [
       ['耗时', metric(block, ['duration']) || '待确认']
-    ].forEach(function (item) {
+    ];
+    summaryMetrics.forEach(function (item) {
       var box = add(metrics, 'div', 'journey-metric');
-      add(box, 'span', '', item[0]);
+      if (item[0].length > 0) {
+        add(box, 'span', '', item[0]);
+      }
       add(box, 'b', '', item[1]);
     });
     var detail = add(card, 'div', 'journey-detail');
@@ -963,6 +989,7 @@ const TRAVEL_HOME_JS: string = `
     detailRow(grid, '来源', sourceLabel(block));
     list(block.metrics).concat(list(block.rows)).forEach(function (item) {
       if (text(item && item.label) === 'source') { return; }
+      if (source === 'train' && text(item && item.label).toLowerCase() === 'price') { return; }
       detailRow(grid, text(item && item.label), text(item && item.value));
     });
     addActionButtons(detail, block.actions);

@@ -50,6 +50,7 @@ import {
   socialHubConnections,
   socialHubDraft,
   socialHubItems,
+  socialHubPublication,
   stripeReceivingAccount,
   trainOptions,
   travelOptions
@@ -70,7 +71,12 @@ import {
 import { gmailOpenDraftAction, gmailReplyDraftAction } from '@loop/agent-core';
 import { mailReplyDraftAction } from '@loop/agent-core';
 import { isMediaVideoResult, mediaVideoPlaybackAction, officialMediaVideoPlaybackUrl } from '@loop/agent-core';
-import { SocialHubConnectionData, SocialHubDraftData, SocialHubItemData } from '@loop/agent-core';
+import {
+  SocialHubConnectionData,
+  SocialHubDraftData,
+  SocialHubItemData,
+  SocialHubPublicationData
+} from '@loop/agent-core';
 import {
   HtmlHomeAction,
   HtmlHomeBlock,
@@ -96,6 +102,22 @@ interface HtmlHomeDocumentWithBusy extends HtmlHomeDocument {
 
 interface StripeOnboardingActionArgs {
   onboardingUrl: string;
+}
+
+interface TrainBookingActionArgs {
+  bookingUrl: string;
+}
+
+interface TrainPresaleScheduleActionArgs {
+  trainCode: string;
+  travelDate: string;
+  from: string;
+  fromCode: string;
+  to: string;
+  toCode: string;
+  depart: string;
+  arrive: string;
+  saleAt: string;
 }
 
 interface MailDetailActionArgs {
@@ -168,6 +190,7 @@ export function createHtmlHomeDocument(params: CreateHtmlHomeDocumentParams): Ht
     : firstText(aggregate.query, aggregate.summary, firstText(surface.error, prompt));
   const baseDocument: HtmlHomeDocument = {
     version: HTML_HOME_VERSION,
+    surfaceId: surface.surfaceId,
     source: sourceOf(kind, surface, params.isBusy),
     kind: kind,
     title: kind === 'aggregate-search' ? firstText(aggregateTitle, aggregateBaseTitle) : aggregateBaseTitle,
@@ -301,6 +324,7 @@ function buildEmbeddedDocumentFromSurface(
   const root = findA2uiComponent(embedded, embedded.rootId.length > 0 ? embedded.rootId : 'root');
   const document: HtmlHomeDocument = {
     version: HTML_HOME_VERSION,
+    surfaceId: embedded.surfaceId,
     source: 'tool',
     kind: kind,
     title: firstText(embedded.title, embedded.surfaceId),
@@ -487,6 +511,7 @@ function appendTravelBlocks(document: HtmlHomeDocument, surface: A2uiSurfaceStat
     appendMetric(block.metrics, 'arrive', item.arrive);
     appendMetric(block.metrics, 'duration', item.duration);
     appendMetric(block.metrics, 'price', item.price);
+    appendMetric(block.metrics, 'price', item.price);
     appendMetric(block.metrics, 'availability', item.availability);
     appendMetric(block.rows, 'detail', item.detail);
     block.actions.push(clientAction('html_pin_travel', '固定到桌面', JSON.stringify({
@@ -516,6 +541,7 @@ function appendTrainBlocks(document: HtmlHomeDocument, surface: A2uiSurfaceState
     appendMetric(block.metrics, 'depart', item.depart);
     appendMetric(block.metrics, 'arrive', item.arrive);
     appendMetric(block.metrics, 'duration', item.duration);
+    appendMetric(block.metrics, 'price', item.price);
     appendMetric(block.rows, 'seats', item.seats);
     appendMetric(block.rows, 'business', item.business);
     appendMetric(block.rows, 'first', item.first);
@@ -523,6 +549,49 @@ function appendTrainBlocks(document: HtmlHomeDocument, surface: A2uiSurfaceState
     appendMetric(block.rows, 'noSeat', item.noSeat);
     appendMetric(block.rows, 'hardSeat', item.hardSeat);
     appendMetric(block.rows, 'sleeperSoft', item.sleeperSoft);
+    if (item.saleState === 'presale') {
+      const scheduleArgs: TrainPresaleScheduleActionArgs = {
+        trainCode: item.trainCode,
+        travelDate: textOf(item.travelDate),
+        from: item.from,
+        fromCode: textOf(item.fromCode),
+        to: item.to,
+        toCode: textOf(item.toCode),
+        depart: item.depart,
+        arrive: item.arrive,
+        saleAt: textOf(item.saleAt)
+      };
+      block.actions.push({
+        id: 'train.presale.schedule',
+        label: '开售抢票',
+        prompt: '',
+        variant: 'primary',
+        kind: 'client',
+        sourceComponentId: component.id,
+        args: scheduleArgs
+      });
+    } else if (item.bookingUrl !== undefined && item.bookingUrl.trim().length > 0) {
+      const bookingArgs: TrainBookingActionArgs = {
+        bookingUrl: item.bookingUrl.trim()
+      };
+      block.actions.push({
+        id: 'train.booking.open',
+        label: '去购票',
+        prompt: '',
+        variant: 'primary',
+        kind: 'client',
+        sourceComponentId: component.id,
+        args: bookingArgs
+      });
+      block.actions.push({
+        id: 'train.booking.alipay.open',
+        label: '支付宝购票',
+        prompt: 'alipays://platformapi/startapp?appId=20000135',
+        variant: 'secondary',
+        kind: 'client',
+        sourceComponentId: component.id
+      });
+    }
     block.actions.push(clientAction('html_pin_train', '固定到桌面', JSON.stringify({
       index: index,
       trainCode: textOf(item.trainCode),
@@ -809,7 +878,8 @@ function appendSocialHubBlocks(document: HtmlHomeDocument, surface: A2uiSurfaceS
     appendMetric(block.rows, 'channel', item.channel);
     appendMetric(block.rows, 'threadId', item.threadId);
     appendMetric(block.rows, 'unread', item.unread);
-    if (item.id.length > 0) {
+    const community = item.kind === 'post' || item.kind === 'mention';
+    if (!community && item.id.length > 0) {
       block.actions.push(clientAction('social_hub_select_item', '查看', item.id, component.id));
       block.actions.push(clientAction('social_hub_draft_reply', '生成草稿', item.id, component.id));
     }
@@ -845,6 +915,20 @@ function appendSocialHubBlocks(document: HtmlHomeDocument, surface: A2uiSurfaceS
     appendMetric(block.rows, 'itemId', draft.itemId);
     appendMetric(block.rows, 'localOnly', draft.localOnly);
     appendMetric(block.rows, 'sent', draft.sent);
+    document.blocks.push(block);
+  }
+
+  const publication: SocialHubPublicationData = socialHubPublication(surface);
+  if (publication.status !== 'empty') {
+    const block = newBlock(component.id + '-publication', 'social-hub-publication', '公开帖子预览');
+    block.subtitle = publication.error;
+    block.status = publication.status;
+    block.source = publication.platform;
+    appendMetric(block.metrics, 'platform', publication.platform);
+    appendMetric(block.metrics, 'status', publication.status);
+    appendMetric(block.rows, 'account', publication.accountName);
+    appendMetric(block.rows, 'text', publication.text);
+    appendMetric(block.rows, 'error', publication.error);
     document.blocks.push(block);
   }
 }

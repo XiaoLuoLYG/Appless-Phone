@@ -4,7 +4,7 @@ export function composioToolkitLogoResource(toolkitSlug: string): Resource | nul
     return $r('app.media.logo_gmail');
   }
   if (slug === 'qqmail') {
-    return $r('app.media.logo_qqmail');
+    return $r('app.media.logo_qqmail_clean');
   }
   if (slug === 'googlecalendar' || slug === 'calendar') {
     return $r('app.media.logo_googlecalendar');
@@ -75,6 +75,9 @@ export function composioToolkitLogoResource(toolkitSlug: string): Resource | nul
   if (slug === 'hackernews' || slug === 'hackernewssearchposts') {
     return $r('app.media.logo_hackernews');
   }
+  if (slug === 'zhihu') {
+    return $r('app.media.logo_zhihu');
+  }
   if (slug === 'reddit' || slug === 'redditsearchposts' || slug === 'redditsearchacrosssubreddits') {
     return $r('app.media.logo_reddit');
   }
@@ -109,7 +112,10 @@ export function composioToolkitLogoResource(toolkitSlug: string): Resource | nul
     return $r('app.media.logo_taobao');
   }
   if (slug === 'luckin') {
-    return $r('app.media.logo_luckin');
+    return $r('app.media.logo_luckin_clean');
+  }
+  if (slug === 'didi') {
+    return $r('app.media.logo_didi');
   }
   if (slug === 'mcdonalds' || slug === 'mcd') {
     return $r('app.media.logo_mcdonalds');

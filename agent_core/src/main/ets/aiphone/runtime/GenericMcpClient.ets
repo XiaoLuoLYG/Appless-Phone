@@ -10,6 +10,11 @@ import {
 import { A2uiLabelValueData } from './A2uiTypes';
 
 const MCP_PROTOCOL_VERSION: string = '2025-06-18';
+const DEFAULT_MCP_READ_TIMEOUT_MS: number = 20000;
+
+export function normalizeMcpReadTimeoutMs(value: number): number {
+  return value >= 1000 ? value : DEFAULT_MCP_READ_TIMEOUT_MS;
+}
 
 class EmptyMcpCapabilities {}
 
@@ -319,7 +324,13 @@ function headerValue(headers: Object, key: string): string {
   return '';
 }
 
-async function postMcpJson(url: string, body: McpPostRequest, headers: Record<string, string>, sessionId: string): Promise<HttpMcpResponse> {
+async function postMcpJson(
+  url: string,
+  body: McpPostRequest,
+  headers: Record<string, string>,
+  sessionId: string,
+  readTimeoutMs: number
+): Promise<HttpMcpResponse> {
   const request = http.createHttp();
   try {
     const requestHeaders: Record<string, string> = {
@@ -336,7 +347,7 @@ async function postMcpJson(url: string, body: McpPostRequest, headers: Record<st
       header: requestHeaders,
       extraData: JSON.stringify(body),
       connectTimeout: 10000,
-      readTimeout: 20000
+      readTimeout: readTimeoutMs
     });
     return {
       status: response.responseCode,
@@ -373,9 +384,15 @@ function failedPreflight(
 }
 
 export class GenericMcpClient {
+  private readonly readTimeoutMs: number;
+
+  constructor(readTimeoutMs: number = DEFAULT_MCP_READ_TIMEOUT_MS) {
+    this.readTimeoutMs = normalizeMcpReadTimeoutMs(readTimeoutMs);
+  }
+
   async preflight(registration: DynamicToolRegistration, credentialValue: string): Promise<DynamicPreflightResult> {
     const headers = headersForRegistration(registration, credentialValue);
-    const init = await postMcpJson(registration.transport.url, buildInitializeRequest(1), headers, '');
+    const init = await postMcpJson(registration.transport.url, buildInitializeRequest(1), headers, '', this.readTimeoutMs);
     const initParsed = parseMcpJsonRpcResponse(init.text);
     if (init.status < 200 || init.status >= 300) {
       const message = initParsed.errorMessage.length > 0 ? initParsed.errorMessage : 'HTTP ' + init.status.toString();
@@ -386,7 +403,7 @@ export class GenericMcpClient {
       const status = inferCredentialFromMcpFailure(init.status, initParsed.errorMessage) === null ? 'preflight_failed' : 'needs_auth';
       return failedPreflight(init.status, initParsed.errorMessage, status);
     }
-    const listed = await postMcpJson(registration.transport.url, buildToolsListRequest(2), headers, init.sessionId);
+    const listed = await postMcpJson(registration.transport.url, buildToolsListRequest(2), headers, init.sessionId, this.readTimeoutMs);
     const parsed = parseMcpJsonRpcResponse(listed.text);
     const ok = listed.status >= 200 && listed.status < 300 && parsed.ok;
     const message = parsed.errorMessage.length > 0 ? parsed.errorMessage : (ok ? '' : 'HTTP ' + listed.status.toString());
@@ -402,7 +419,7 @@ export class GenericMcpClient {
 
   async callToolPayload(registration: DynamicToolRegistration, credentialValue: string, args: Object): Promise<McpToolCallResult> {
     const headers = headersForRegistration(registration, credentialValue);
-    const init = await postMcpJson(registration.transport.url, buildInitializeRequest(1), headers, '');
+    const init = await postMcpJson(registration.transport.url, buildInitializeRequest(1), headers, '', this.readTimeoutMs);
     const initParsed = parseMcpJsonRpcResponse(init.text);
     if (init.status < 200 || init.status >= 300 || !initParsed.ok) {
       return {
@@ -413,7 +430,7 @@ export class GenericMcpClient {
         rawPreview: init.text.substring(0, 1200)
       };
     }
-    const response = await postMcpJson(registration.transport.url, buildToolsCallRequest(3, registration.mcpToolName, args), headers, init.sessionId);
+    const response = await postMcpJson(registration.transport.url, buildToolsCallRequest(3, registration.mcpToolName, args), headers, init.sessionId, this.readTimeoutMs);
     const parsed = parseMcpJsonRpcResponse(response.text);
     if (response.status < 200 || response.status >= 300 || !parsed.ok || parsed.result === null) {
       return {

@@ -170,7 +170,7 @@ export default function htmlHomeSnapshotTest() {
       };
       const doc = createHtmlHomeDocument({
         surface: surface('travel', 'ready', [root('trains'), trains, flights],
-          '{"trains":[{"trainCode":"G123","from":"深圳北","to":"上海虹桥","depart":"09:00","arrive":"15:30","duration":"6h30m","seats":"二等座有票","status":"available","business":"","first":"2","second":"有","noSeat":"","hardSeat":"","sleeperSoft":""}],"flights":[{"flightNo":"CZ8888","airline":"南方航空","dep":"SZX","arr":"SHA","depTime":"10:20","arrTime":"12:45","status":"scheduled","price":"680"}],"summary":{"text":"北京到上海 2026-07-01 航班结果","toolName":"flight.search","dataLabel":"航班","count":1}}'),
+          '{"trains":[{"trainCode":"G123","from":"深圳北","to":"上海虹桥","depart":"09:00","arrive":"15:30","duration":"6h30m","seats":"二等座有票","status":"available","business":"","first":"2","second":"有","noSeat":"","hardSeat":"","sleeperSoft":"","price":"553","bookingUrl":"https://kyfw.12306.cn/otn/leftTicket/init?linktypeid=dc&fs=test&ts=test&date=2026-07-22&flag=N,N,Y"}],"flights":[{"flightNo":"CZ8888","airline":"南方航空","dep":"SZX","arr":"SHA","depTime":"10:20","arrTime":"12:45","status":"scheduled","price":"680"}],"summary":{"text":"北京到上海 2026-07-01 航班结果","toolName":"flight.search","dataLabel":"航班","count":1}}'),
         messages: [],
         isBusy: false,
         isAwaitingFirstSurface: false
@@ -184,22 +184,50 @@ export default function htmlHomeSnapshotTest() {
       expect(doc.blocks[1].kind).assertEqual('flight-option');
       expect(serialized.indexOf('G123')).assertLarger(-1);
       expect(serialized.indexOf('二等座有票')).assertLarger(-1);
+      expect(JSON.stringify(doc.blocks[0].metrics).indexOf('"label":"price","value":"553"')).assertLarger(-1);
       expect(serialized.indexOf('CZ8888')).assertLarger(-1);
       expect(serialized.indexOf('680')).assertLarger(-1);
       expect(doc.actions[0].id).assertEqual('travel_open');
-      expect(doc.blocks[0].actions[0].id).assertEqual('html_pin_train');
+      expect(doc.blocks[0].actions.length).assertEqual(3);
+      expect(doc.blocks[0].actions[0].id).assertEqual('train.booking.open');
+      expect(doc.blocks[0].actions[0].label).assertEqual('去购票');
+      expect(doc.blocks[0].actions[0].variant).assertEqual('primary');
+      expect(JSON.stringify(doc.blocks[0].actions[0].args).indexOf('"bookingUrl":"https://kyfw.12306.cn/')).assertLarger(-1);
+      expect(doc.blocks[0].actions[1].id).assertEqual('train.booking.alipay.open');
+      expect(doc.blocks[0].actions[1].label).assertEqual('支付宝购票');
+      expect(doc.blocks[0].actions[1].prompt).assertEqual('alipays://platformapi/startapp?appId=20000135');
+      expect(doc.blocks[0].actions[2].id).assertEqual('html_pin_train');
       expect(doc.blocks[1].actions[0].id).assertEqual('html_pin_flight');
-      expect(JSON.stringify(doc.blocks[0].actions).indexOf('html_pin_train')).assertLarger(-1);
+      expect(JSON.stringify(doc.blocks[0].actions).indexOf('train.booking.open')).assertLarger(-1);
       expect(JSON.stringify(doc.blocks[1].actions).indexOf('html_pin_flight')).assertLarger(-1);
-      expect(doc.blocks[0].actions[0].prompt.indexOf('"trainCode":"G123"')).assertLarger(-1);
-      expect(doc.blocks[0].actions[0].prompt.indexOf('"depart":"09:00"')).assertLarger(-1);
-      expect(doc.blocks[0].actions[0].prompt.indexOf('"from":"深圳北"')).assertLarger(-1);
-      expect(doc.blocks[0].actions[0].prompt.indexOf('"to":"上海虹桥"')).assertLarger(-1);
+      expect(doc.blocks[0].actions[2].prompt.indexOf('"trainCode":"G123"')).assertLarger(-1);
+      expect(doc.blocks[0].actions[2].prompt.indexOf('"depart":"09:00"')).assertLarger(-1);
+      expect(doc.blocks[0].actions[2].prompt.indexOf('"from":"深圳北"')).assertLarger(-1);
+      expect(doc.blocks[0].actions[2].prompt.indexOf('"to":"上海虹桥"')).assertLarger(-1);
       expect(doc.blocks[1].actions[0].prompt.indexOf('"flightNo":"CZ8888"')).assertLarger(-1);
       expect(doc.blocks[1].actions[0].prompt.indexOf('"depTime":"10:20"')).assertLarger(-1);
       expect(doc.blocks[1].actions[0].prompt.indexOf('"dep":"SZX"')).assertLarger(-1);
       expect(doc.blocks[1].actions[0].prompt.indexOf('"arr":"SHA"')).assertLarger(-1);
       expect(doc.blocks[1].prompt).assertEqual('2026-07-01');
+    });
+
+    it('keeps legacy train rows without price or booking action', 0, () => {
+      const trains: A2uiComponent = {
+        id: 'legacy-trains',
+        component: 'TrainOptions',
+        dataPath: '/trains'
+      };
+      const doc = createHtmlHomeDocument({
+        surface: surface('travel', 'ready', [root('legacy-trains'), trains],
+          '{"trains":[{"trainCode":"G1","from":"深圳北","to":"上海虹桥","depart":"09:00","arrive":"15:30","duration":"6h30m","seats":"二等座有票","status":"available","business":"","first":"2","second":"有","noSeat":"","hardSeat":"","sleeperSoft":""}]}'),
+        messages: [],
+        isBusy: false,
+        isAwaitingFirstSurface: false
+      });
+
+      expect(JSON.stringify(doc.blocks[0].metrics).indexOf('"label":"price"')).assertEqual(-1);
+      expect(doc.blocks[0].actions.length).assertEqual(1);
+      expect(doc.blocks[0].actions[0].id).assertEqual('html_pin_train');
     });
 
     it('drops completed thinking blocks after real results arrive', 0, () => {
@@ -555,8 +583,8 @@ export default function htmlHomeSnapshotTest() {
       expect(serialized.indexOf('local draft only; not sent')).assertLarger(-1);
       expect(serialized.indexOf('Slack token required')).assertLarger(-1);
       expect(serialized.indexOf('WeCom callback unavailable')).assertLarger(-1);
-      expect(serialized.indexOf('social_hub_select_item')).assertLarger(-1);
-      expect(serialized.indexOf('social_hub_draft_reply')).assertLarger(-1);
+      expect(serialized.indexOf('social_hub_select_item')).assertEqual(-1);
+      expect(serialized.indexOf('social_hub_draft_reply')).assertEqual(-1);
       expect(serialized.indexOf('social_hub_open_source')).assertLarger(-1);
       expect(serialized.indexOf('social_select_message')).assertEqual(-1);
       expect(serialized.indexOf('SocialInbox')).assertEqual(-1);
@@ -740,7 +768,7 @@ export default function htmlHomeSnapshotTest() {
       };
       const doc = createHtmlHomeDocument({
         surface: surface('hotel', 'ready', [root('results'), results],
-          '{"genericToolResults":[{"sourceTag":"RollingGo","toolName":"hotel.detail","title":"豪华大床房","status":"success","summary":"550 CNY · 不含早餐","rows":[{"label":"酒店 ID","value":"47675"},{"label":"Rate plan ID","value":"5nAv6vObodN-6idXNkFPe3z"},{"label":"入住","value":"2026-08-15 → 2026-08-17"},{"label":"客人","value":"2 成人 · 1 间"},{"label":"平均价","value":"550 CNY"},{"label":"取消政策","value":"免费取消截止至酒店当地时间 2026-08-12 08:00:00"},{"label":"能力边界","value":"Appless 暂不支持创建或跟踪酒店订单"}],"rawPreview":""}]}'),
+          '{"genericToolResults":[{"sourceTag":"RollingGo","toolName":"hotel.detail","title":"豪华大床房","status":"success","summary":"550 CNY · 不含早餐","rows":[{"label":"酒店 ID","value":"47675"},{"label":"Rate plan ID","value":"5nAv6vObodN-6idXNkFPe3z"},{"label":"入住","value":"2026-08-15 → 2026-08-17"},{"label":"客人","value":"2 成人 · 1 间"},{"label":"平均价","value":"550 CNY"},{"label":"取消政策","value":"免费取消截止至酒店当地时间 2026-08-12 08:00:00"},{"label":"能力边界","value":"Appless 支持打开 App 内 RollingGo Web 预订；原生订单创建、状态和取消不可用"}],"rawPreview":""}]}'),
         messages: [],
         isBusy: false,
         isAwaitingFirstSurface: false
@@ -754,7 +782,7 @@ export default function htmlHomeSnapshotTest() {
       expect(serialized.indexOf('5nAv6vObodN-6idXNkFPe3z')).assertLarger(-1);
       expect(serialized.indexOf('550 CNY')).assertLarger(-1);
       expect(serialized.indexOf('免费取消截止至酒店当地时间')).assertLarger(-1);
-      expect(serialized.indexOf('Appless 暂不支持创建或跟踪酒店订单')).assertLarger(-1);
+      expect(serialized.indexOf('Appless 支持打开 App 内 RollingGo Web 预订')).assertLarger(-1);
       expect(serialized.indexOf('订单编号')).assertEqual(-1);
     });
 

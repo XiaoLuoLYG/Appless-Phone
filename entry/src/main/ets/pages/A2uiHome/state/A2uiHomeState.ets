@@ -1,4 +1,4 @@
-import { A2uiSurfaceState } from '@loop/agent-core';
+import { A2uiSurfaceState, RuntimeOwner } from '@loop/agent-core';
 
 export const A2UI_SEND_SPINNER_STEP_DEG: number = 24;
 
@@ -43,7 +43,48 @@ export function updateConnectionPanelState(current: ConnectionPanelState, update
 }
 
 export function shouldApplySurfaceUpdate(current: A2uiSurfaceState, next: A2uiSurfaceState): boolean {
+  const currentGeneration: number = current.runtimeGeneration === undefined ? 0 : current.runtimeGeneration;
+  const nextGeneration: number = next.runtimeGeneration === undefined ? 0 : next.runtimeGeneration;
+  if (nextGeneration < currentGeneration) {
+    return false;
+  }
+  if (nextGeneration === currentGeneration && current.runtimeOwner !== undefined &&
+    next.runtimeOwner !== undefined && current.runtimeOwner !== next.runtimeOwner) {
+    return false;
+  }
   return current.surfaceId !== next.surfaceId || current.sequence !== next.sequence;
+}
+
+export function runtimeOwnerAllowsSurfaceAction(
+  surface: A2uiSurfaceState,
+  owner: RuntimeOwner
+): boolean {
+  return surface.runtimeOwner === owner;
+}
+
+export function runtimeCallbackIsCurrent(
+  activeOwner: RuntimeOwner,
+  activeGeneration: number,
+  callbackOwner: RuntimeOwner,
+  callbackGeneration: number
+): boolean {
+  return activeOwner === callbackOwner && activeGeneration === callbackGeneration;
+}
+
+export function runtimeSurfaceIdentityMatches(
+  current: A2uiSurfaceState,
+  retained: A2uiSurfaceState,
+  activeOwner: RuntimeOwner,
+  activeGeneration: number
+): boolean {
+  return activeOwner === 'multi_agent' && Number.isSafeInteger(activeGeneration) &&
+    activeGeneration > 0 &&
+    current.runtimeOwner === activeOwner &&
+    retained.runtimeOwner === activeOwner &&
+    current.runtimeGeneration === activeGeneration &&
+    retained.runtimeGeneration === activeGeneration &&
+    current.surfaceId.trim().length > 0 &&
+    current.surfaceId === retained.surfaceId;
 }
 
 export function nextSendSpinnerRotation(current: number, isBusy: boolean): number {
@@ -53,12 +94,37 @@ export function nextSendSpinnerRotation(current: number, isBusy: boolean): numbe
   return current + A2UI_SEND_SPINNER_STEP_DEG;
 }
 
+export function nextPendingToolRenderTick(
+  current: number,
+  currentToolId: string,
+  nextToolId: string
+): number {
+  return currentToolId === nextToolId ? current : current + 1;
+}
+
 export function isPromptInputEnabled(isBusy: boolean): boolean {
   return !isBusy;
 }
 
 export function shouldShowQueryPendingSurface(isBusy: boolean, isAwaitingFirstSurface: boolean): boolean {
   return isBusy && isAwaitingFirstSurface;
+}
+
+export function shouldShowFirecrawlPendingSurface(
+  isBusy: boolean,
+  pendingToolId: string,
+  surface: A2uiSurfaceState
+): boolean {
+  if (!isBusy || pendingToolId.length === 0) {
+    return false;
+  }
+  for (let index = 0; index < surface.components.length; index++) {
+    if (surface.intent === pendingToolId &&
+      surface.components[index].component === 'GenericToolResults') {
+      return false;
+    }
+  }
+  return true;
 }
 
 export function isWelcomeSurface(surface: A2uiSurfaceState): boolean {

@@ -1300,7 +1300,6 @@ const RIDE_HAILING_HOME_JS: string = `
   });
   function renderPersona(parent) {
     var persona = data.persona || {};
-    var memory = data.personaMemory || {};
     var name = text(persona.name);
     if (text(persona.id).length === 0 || name.length === 0) { return; }
     var banner = add(parent, 'section', 'ride-persona');
@@ -1316,7 +1315,6 @@ const RIDE_HAILING_HOME_JS: string = `
     }
     var copy = add(banner, 'div');
     add(copy, 'div', 'ride-persona-title', name + '上线');
-    add(copy, 'div', 'ride-persona-note', text(memory.summary) || text(persona.reason));
   }
   function renderRideCard(parent, block) {
     var stage = metricValue(block, ['stage']);

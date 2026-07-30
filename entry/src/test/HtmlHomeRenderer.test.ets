@@ -1,6 +1,23 @@
 import { describe, it, expect } from '@ohos/hypium';
+import {
+  A2uiAction,
+  A2uiSurfaceStore,
+  HotelSearchResult,
+  hotelSearchA2ui,
+  parseA2uiJsonl,
+  parseHotelSearchRequest
+} from '@loop/agent-core';
 import { renderHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeRenderer';
-import { HtmlHomeAction, HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
+import { buildMultiTaskHomePayload } from '../main/ets/pages/A2uiHome/html/HtmlMultiTaskHomeRenderer';
+import { createFirecrawlPendingDocument } from '../main/ets/pages/A2uiHome/html/HtmlFirecrawlHomeRenderer';
+import { createHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeSnapshot';
+import {
+  HtmlHomeAction,
+  HtmlHomeBlock,
+  HtmlHomeDocument,
+  HtmlHomeMetric
+} from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
+import { parseHtmlHomeAction } from '../main/ets/pages/A2uiHome/components/HtmlHomeSurfaceView';
 import { renderRideDriverMapHtml } from '../main/ets/pages/A2uiHome/html/RideDriverMapHtmlRenderer';
 
 interface GooglePayCheckoutArgsFixture {
@@ -13,6 +30,37 @@ interface GooglePayCheckoutArgsFixture {
   paypalEnvironment: string;
   paypalEmail: string;
   paypalMerchantId: string;
+}
+
+interface BookingUrlArgsFixture {
+  bookingUrl: string;
+}
+
+interface MapsOpenArgsFixture {
+  url: string;
+}
+
+interface RenderedHomeDataFixture {
+  blocks: HtmlHomeBlock[];
+}
+
+function renderedActionByLabel(html: string, label: string): A2uiAction | null {
+  const start = html.indexOf('<script id="home-data" type="application/json">');
+  const end = html.indexOf('</script>', start);
+  if (start < 0 || end < 0) {
+    return null;
+  }
+  const jsonStart = start + '<script id="home-data" type="application/json">'.length;
+  const data = JSON.parse(html.substring(jsonStart, end)) as RenderedHomeDataFixture;
+  for (let blockIndex = 0; blockIndex < data.blocks.length; blockIndex++) {
+    const actions = data.blocks[blockIndex].actions;
+    for (let actionIndex = 0; actionIndex < actions.length; actionIndex++) {
+      if (actions[actionIndex].label === label) {
+        return parseHtmlHomeAction(JSON.stringify(actions[actionIndex]));
+      }
+    }
+  }
+  return null;
 }
 
 function documentFixture(): HtmlHomeDocument {
@@ -66,6 +114,165 @@ function dynamicCredentialDocumentFixture(): HtmlHomeDocument {
   return doc;
 }
 
+function firecrawlDocumentFixture(toolName: string = 'web.research.search'): HtmlHomeDocument {
+  const doc = documentFixture();
+  const monitorConfirmArgs = JSON.parse(
+    '{"name":"Appless Firecrawl QA","confirmed":true}'
+  ) as Object;
+  doc.kind = 'dynamic-tools';
+  doc.title = toolName === 'web.page.read' ? '网页读取' :
+    (toolName === 'shopping.research' ? '商品研究' :
+    (toolName === 'social.public.search' ? '小红书公开搜索' :
+      (toolName === 'web.monitor.create' ? '创建网页监控' : '网页研究')));
+  doc.subtitle = '仅展示可验证的公开来源';
+  doc.blocks = [{
+    id: 'firecrawl-overview',
+    kind: 'generic-tool-result',
+    title: toolName === 'web.monitor.create' ? '确认创建 Firecrawl Monitor' :
+      (toolName === 'web.page.read' ? 'Firecrawl Monitor 使用说明' :
+        (toolName === 'shopping.research' ? '商品研究综述' :
+          (toolName === 'social.public.search' ? '小红书公开结果' : '网页研究综述'))),
+    subtitle: toolName === 'web.monitor.create' ? '确认后才会调用 Provider 创建真实 Monitor。' :
+      '已核验 2 个公开来源。',
+    status: toolName === 'web.monitor.create' ? 'confirm_required' : 'success',
+    source: 'Firecrawl',
+    metrics: [
+      { label: 'source', value: 'Firecrawl' },
+      { label: 'toolName', value: toolName }
+    ],
+    rows: toolName === 'web.monitor.create' ? [
+      { label: 'Monitor 名称', value: 'Appless Firecrawl QA' },
+      { label: '页面 1', value: 'https://www.firecrawl.dev/changelog' },
+      { label: '计划', value: 'daily' },
+      { label: '时区', value: 'Asia/Shanghai' }
+    ] : (toolName === 'web.page.read' ? [
+      { label: 'URL', value: 'https://www.firecrawl.dev/monitor' }
+    ] : (toolName === 'shopping.research' ? [
+      { label: '品牌', value: 'Firecrawl' },
+      { label: '价格', value: '¥ 99' },
+      { label: '规格', value: '公开页面价格' },
+      { label: 'URL', value: 'https://www.firecrawl.dev/monitor' }
+    ] : (toolName === 'social.public.search' ? [
+      { label: 'URL', value: 'https://www.xiaohongshu.com/explore/example' },
+      { label: '作者', value: '周末探店员' },
+      { label: '发布时间', value: '07-24' },
+      { label: '封面图', value: 'https://sns-webpic-qc.xhscdn.com/note-cover.webp' },
+      {
+        label: '图片列表',
+        value: 'https://sns-webpic-qc.xhscdn.com/note-cover.webp\n' +
+          'https://sns-webpic-qc.xhscdn.com/note-second.webp\n' +
+          'https://sns-webpic-qc.xhscdn.com/note-third.webp'
+      },
+      { label: '图片数量', value: '3' },
+      { label: '内容类型', value: '视频' },
+      { label: '视频时长', value: '0:42' },
+      { label: '完整正文', value: '这是应用内展示的完整笔记正文。\n第二段继续展示笔记内容。' }
+    ] : [
+      { label: 'Search ID', value: 'search-current' },
+      { label: 'Search Credits', value: '2' }
+    ]))),
+    actions: toolName === 'web.monitor.create' ? [{
+      id: 'web.monitor.create.confirm',
+      label: '确认创建监控',
+      prompt: '确认创建 Firecrawl Monitor',
+      variant: 'primary',
+      kind: 'prompt',
+      args: monitorConfirmArgs
+    }] : [{
+      id: 'web.open.source',
+      label: '打开原网页',
+      prompt: 'https://www.firecrawl.dev/monitor',
+      variant: 'secondary',
+      kind: 'client'
+    }]
+  }];
+  doc.actions = doc.blocks[0].actions.slice();
+  return doc;
+}
+
+function shoppingSourceFixture(
+  id: string,
+  url: string,
+  price: string,
+  eligible: boolean,
+  priceFen: number,
+  comparisonKey: string,
+  priceKind: string = 'public'
+): HtmlHomeBlock {
+  const action: HtmlHomeAction = {
+    id: 'web.open.source',
+    label: '打开原网页',
+    prompt: url,
+    variant: 'secondary',
+    kind: 'client'
+  };
+  const readAction: HtmlHomeAction = {
+    id: 'web.page.read',
+    label: '深入阅读此来源',
+    prompt: '深入阅读此来源',
+    variant: 'secondary',
+    kind: 'prompt'
+  };
+  return {
+    id: id,
+    kind: 'generic-tool-result',
+    title: 'Sony WH-1000XM6 黑色',
+    subtitle: '公开页面商品信息。',
+    status: 'success',
+    source: 'Firecrawl',
+    toolId: 'shopping.research',
+    metrics: [
+      { label: 'source', value: 'Firecrawl' },
+      { label: 'toolName', value: 'shopping.research' }
+    ],
+    rows: [
+      { label: '品牌', value: 'Sony' },
+      { label: '平台', value: id === 'shopping-jd' ? '京东' : '苏宁易购' },
+      { label: '卖家', value: id === 'shopping-jd' ? '京东自营' : '苏宁自营' },
+      { label: priceKind === 'estimated' ? '预估到手价' : '价格', value: price },
+      { label: 'comparisonEligible', value: eligible ? 'true' : 'false' },
+      { label: 'comparisonPriceFen', value: priceFen.toString() },
+      { label: 'comparisonPriceKind', value: priceKind },
+      { label: 'comparisonKey', value: comparisonKey },
+      { label: '规格', value: 'WH-1000XM6 · 黑色' },
+      { label: '优惠券', value: id === 'shopping-jd' ? '满 3000 减 100' : '无公开优惠券' },
+      { label: '运费', value: '包邮' },
+      { label: '抓取时间', value: '2026-07-27 10:00' },
+      { label: '数据页面', value: id === 'shopping-jd' ?
+        'https://detail.zol.com.cn/headphone/sony-wh-1000xm6.html' :
+        'https://product.pconline.com.cn/headphone/sony-wh-1000xm6.html' },
+      { label: '市场', value: 'CN' },
+      { label: '币种', value: 'CNY' },
+      { label: 'URL', value: url }
+    ],
+    actions: [action, readAction]
+  };
+}
+
+function shoppingComparisonDocumentFixture(): HtmlHomeDocument {
+  const doc = firecrawlDocumentFixture('shopping.research');
+  doc.blocks = [
+    shoppingSourceFixture(
+      'shopping-jd',
+      'https://item.jd.com/sony-wh-1000xm6',
+      '¥2,999',
+      true,
+      299900,
+      'sony|wh-1000xm6 黑色'
+    ),
+    shoppingSourceFixture(
+      'shopping-suning',
+      'https://product.suning.com/sony-wh-1000xm6',
+      '¥3,199',
+      true,
+      319900,
+      'sony|wh-1000xm6 黑色'
+    )
+  ];
+  doc.actions = doc.blocks[0].actions.concat(doc.blocks[1].actions);
+  return doc;
+}
+
 function hotelDocumentFixture(): HtmlHomeDocument {
   const doc = documentFixture();
   doc.kind = 'hotel';
@@ -93,7 +300,7 @@ function hotelDocumentFixture(): HtmlHomeDocument {
       { label: '餐食', value: '不含早餐' },
       { label: '取消政策', value: '免费取消截止至酒店当地时间 2026-08-12 08:00:00' },
       { label: '税费与有效期', value: '税费拆分与报价有效期：供应商未返回' },
-      { label: '能力边界', value: 'Appless 暂不支持创建或跟踪酒店订单' }
+      { label: '能力边界', value: 'Appless 支持打开 App 内 RollingGo Web 预订；原生订单创建、状态和取消不可用' }
     ],
     actions: [{
       id: 'hotel.search.restore',
@@ -105,6 +312,64 @@ function hotelDocumentFixture(): HtmlHomeDocument {
   }];
   doc.actions = [];
   return doc;
+}
+
+function allowHotelAction(_action: A2uiAction): boolean {
+  return true;
+}
+
+function hotelSearchDocumentFixture(withCoordinates: boolean = true): HtmlHomeDocument {
+  const parsed = parseHotelSearchRequest(JSON.parse('{' +
+    '"originQuery":"深圳酒店","place":"深圳","placeType":"CITY","countryCode":"CN",' +
+    '"checkInDate":"2026-08-15","stayNights":2,"adultCount":2,"childCount":0,' +
+    '"childAgeDetails":[],"roomCount":1,"currency":"CNY","size":10}') as Object);
+  if (parsed.value === null) {
+    throw new Error('hotel search renderer fixture is invalid');
+  }
+  const result: HotelSearchResult = {
+    ok: true,
+    error: '',
+    message: '酒店搜索成功',
+    query: parsed.value,
+    hotels: [{
+      hotelId: 47675,
+      bookingUrl: '',
+      name: '深圳测试酒店',
+      nameEn: 'Shenzhen Test Hotel',
+      brand: '',
+      address: '深圳市南山区科技南路 88 号',
+      destinationId: '6046792',
+      latitude: withCoordinates ? 22.5431 : null,
+      longitude: withCoordinates ? 114.0579 : null,
+      distanceInMeters: 0,
+      starRating: 5,
+      price: {
+        message: '2 晚参考价',
+        hasPrice: true,
+        currency: 'CNY',
+        lowestPrice: 1100
+      },
+      areaCode: 'NANSHAN',
+      description: '',
+      imageUrl: '',
+      hotelAmenities: ['Wi-Fi'],
+      tags: ['商务']
+    }]
+  };
+  const parsedJsonl = parseA2uiJsonl(hotelSearchA2ui('hotel-search-task-6', result, allowHotelAction));
+  if (parsedJsonl.error.length > 0) {
+    throw new Error(parsedJsonl.error);
+  }
+  const store = new A2uiSurfaceStore();
+  parsedJsonl.envelopes.forEach((envelope) => {
+    store.apply(envelope);
+  });
+  return createHtmlHomeDocument({
+    surface: store.getSurface(),
+    messages: [],
+    isBusy: false,
+    isAwaitingFirstSurface: false
+  });
 }
 
 function rideDocumentFixture(): HtmlHomeDocument {
@@ -227,6 +492,9 @@ function aggregateSearchDocumentFixture(): HtmlHomeDocument {
 
 function travelFoodCardsDocumentFixture(): HtmlHomeDocument {
   const doc = documentFixture();
+  const bookingArgs: BookingUrlArgsFixture = {
+    bookingUrl: 'https://kyfw.12306.cn/otn/leftTicket/init?linktypeid=dc&fs=test&ts=test&date=2026-07-22&flag=N,N,Y'
+  };
   doc.kind = 'travel';
   doc.title = '深圳北到上海虹桥';
   doc.subtitle = 'Travel and food results';
@@ -239,6 +507,7 @@ function travelFoodCardsDocumentFixture(): HtmlHomeDocument {
     source: '12306',
     metrics: [
       { label: 'duration', value: '6h30m' },
+      { label: 'price', value: '553' },
       { label: 'source', value: 'train' }
     ],
     rows: [
@@ -246,7 +515,20 @@ function travelFoodCardsDocumentFixture(): HtmlHomeDocument {
       { label: 'arrive', value: '15:30' },
       { label: 'seats', value: '二等座有票' }
     ],
-    actions: [{ id: 'html_pin_travel', label: '收藏行程', prompt: 'pin train', variant: 'secondary', kind: 'client' }]
+    actions: [{
+      id: 'train.booking.open',
+      label: '去购票',
+      prompt: '',
+      variant: 'primary',
+      kind: 'client',
+      args: bookingArgs
+    }, {
+      id: 'html_pin_travel',
+      label: '收藏行程',
+      prompt: 'pin train',
+      variant: 'secondary',
+      kind: 'client'
+    }]
   }, {
     id: 'food-amap-1',
     kind: 'food-result',
@@ -691,7 +973,7 @@ function calendarDeleteConfirmationDocumentFixture(): HtmlHomeDocument {
     prompt: '确认删除 Google Calendar 日程',
     variant: 'danger',
     kind: 'prompt',
-    args: JSON.parse('{"eventId":"event-delete-1","calendarId":"primary","confirmed":true}') as Object
+    args: JSON.parse('{"eventId":"event-delete-1","calendarId":"primary"}') as Object
   };
   doc.blocks[0].actions = [confirmAction];
   return doc;
@@ -1125,6 +1407,49 @@ function expectCalmUtilityPalette(document: HtmlHomeDocument): void {
 
 export default function htmlHomeRendererTest() {
   describe('htmlHomeRenderer', () => {
+    it('keeps the existing auth card beside a successful result without object or raw JSON UI', 0, () => {
+      const doc = dynamicCredentialDocumentFixture();
+      const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=Shenzhen';
+      const mapsArgs: MapsOpenArgsFixture = { url: mapsUrl };
+      const openMaps: HtmlHomeAction = {
+        id: 'maps.open.web',
+        label: '打开地图',
+        prompt: mapsUrl,
+        variant: 'secondary',
+        kind: 'client',
+        args: mapsArgs
+      };
+      const mapsResult: HtmlHomeBlock = {
+        id: 'maps-success',
+        kind: 'generic-tool-result',
+        title: '深圳湾',
+        subtitle: '真实地点结果',
+        status: 'success',
+        source: 'Google Maps',
+        metrics: [],
+        rows: [{ label: '地址', value: '深圳湾' }],
+        actions: [openMaps]
+      };
+      doc.blocks.push(mapsResult);
+      doc.actions = [openMaps];
+
+      const html = renderHtmlHomeDocument(doc);
+      const visibleAction = renderedActionByLabel(html, '打开地图');
+
+      expect(html.indexOf('Amap Maps')).assertLarger(-1);
+      expect(html.indexOf('深圳湾')).assertLarger(-1);
+      expect(html.indexOf('button.textContent = text(action.label || action.id);')).assertLarger(-1);
+      expect(html.indexOf('addActions(detailHost, block.actions);')).assertLarger(-1);
+      expect(html.indexOf('args: action.args && typeof action.args === \'object\' ? action.args : null')).assertLarger(-1);
+      expect(visibleAction === null).assertFalse();
+      expect((visibleAction as A2uiAction).id).assertEqual('maps.open.web');
+      expect((visibleAction as A2uiAction).label).assertEqual('打开地图');
+      expect((visibleAction as A2uiAction).prompt).assertEqual(mapsUrl);
+      expect(JSON.stringify((visibleAction as A2uiAction).args)).assertEqual(JSON.stringify(mapsArgs));
+      expect(html.indexOf('[object Object]')).assertEqual(-1);
+      expect(html.indexOf('raw JSON')).assertEqual(-1);
+    });
+
     it('uses the calm utility palette across result templates', 0, () => {
       expectCalmUtilityPalette(documentFixture());
       expectCalmUtilityPalette(calendarSearchDocumentFixture());
@@ -1160,6 +1485,32 @@ export default function htmlHomeRendererTest() {
       const html = renderHtmlHomeDocument(documentFixture());
 
       expect(html.indexOf('AIPhoneHome.postAction')).assertLarger(-1);
+    });
+
+    it('binds an embedded multi-task click to its exact section', 0, () => {
+      const embedded = documentFixture();
+      const document = documentFixture();
+      document.kind = 'multi-task';
+      document.blocks = [{
+        id: 'slot-review',
+        kind: 'multi-task-section',
+        title: 'Review',
+        sectionId: 'slot-review',
+        metrics: [],
+        rows: [],
+        actions: [],
+        embeddedDocument: embedded
+      }];
+      const payload = buildMultiTaskHomePayload(document);
+      const parsed = parseHtmlHomeAction(
+        '{"id":"doc-action","label":"Run Action","prompt":"run it",' +
+        '"variant":"primary","kind":"prompt","sourceSectionId":"slot-review","args":{"id":"real"}}'
+      );
+
+      expect(payload.embeds.length).assertEqual(1);
+      expect(payload.embeds[0].html.indexOf('sourceSectionId')).assertLarger(-1);
+      expect(payload.embeds[0].html.indexOf('slot-review')).assertLarger(-1);
+      expect(JSON.stringify(parsed).indexOf('"sourceSectionId":"slot-review"')).assertLarger(-1);
     });
 
     it('renders ride tool panel with no fake map before driver coordinates', 0, () => {
@@ -1399,8 +1750,18 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('"name":"旅行搭子"')).assertLarger(-1);
       expect(html.indexOf('用户请求属于旅行或出行规划场景。')).assertLarger(-1);
       expect(html.indexOf('renderPersonaBanner(hero)')).assertLarger(-1);
+      expect(html.indexOf("add(copy, 'div', 'persona-subtitle'")).assertEqual(-1);
       expect(html.indexOf('G123')).assertLarger(-1);
       expect(html.indexOf('麦当劳 科技园店')).assertLarger(-1);
+      expect(html.indexOf("var price = metric(block, ['price']);")).assertLarger(-1);
+      expect(html.indexOf('var displayPrice = trainPrice(price);')).assertLarger(-1);
+      expect(html.indexOf("add(priceBlock, 'b', '', displayPrice)")).assertLarger(-1);
+      expect(html.indexOf("add(mainline, 'div', 'journey-price')")).assertLarger(-1);
+      expect(html.indexOf("summaryMetrics.push(['', '¥' + price + '起'])")).assertEqual(-1);
+      expect(html.indexOf('grid-column: 4')).assertLarger(-1);
+      expect(html.indexOf('去购票')).assertLarger(-1);
+      expect(html.indexOf('二等座起')).assertEqual(-1);
+      expect(html.indexOf('train.booking.open')).assertLess(html.indexOf('html_pin_travel'));
       expect(html.indexOf('html_pin_travel')).assertLarger(-1);
       expect(html.indexOf('html_open_food_map')).assertLarger(-1);
       expect(html.indexOf('AIPhoneHome.postAction')).assertLarger(-1);
@@ -1718,9 +2079,18 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('calendar-view-month')).assertLarger(-1);
       expect(html.indexOf('data-calendar-view="day"')).assertLarger(-1);
       expect(html.indexOf('calendar-delete-button')).assertLarger(-1);
+      expect(html.indexOf('<button type="button" class="calendar-delete-button" style="display:none"'))
+        .assertLarger(-1);
+      expect(html.indexOf(
+        "deleteButton.style.display = selectedDeleteActionId === 'calendar.event.delete.confirm' ? " +
+        "'inline-flex' : 'none';"
+      )).assertLarger(-1);
       expect(html.indexOf('calendar-confirm-delete')).assertLarger(-1);
       expect(html.indexOf('calendar.event.delete.confirm')).assertLarger(-1);
-      expect(html.indexOf('confirmed: true')).assertLarger(-1);
+      expect(html.indexOf("var selectedDeleteAction = '';")).assertLarger(-1);
+      expect(html.indexOf('var action = JSON.parse(selectedDeleteAction);')).assertLarger(-1);
+      expect(html.indexOf("label: '确认删除日程'")).assertEqual(-1);
+      expect(html.indexOf('confirmed: true')).assertEqual(-1);
       expect(html.indexOf('AIPhoneHome.postAction')).assertLarger(-1);
       expect(html.indexOf('Google Calendar API')).assertLarger(-1);
       expect(html.indexOf('产品同步')).assertLarger(-1);
@@ -1788,7 +2158,8 @@ export default function htmlHomeRendererTest() {
       const html = renderHtmlHomeDocument(calendarDeleteConfirmationDocumentFixture());
 
       expect(html.indexOf('data-delete-confirm="true"')).assertLarger(-1);
-      expect(html.indexOf('function postCalendarDelete(card)')).assertLarger(-1);
+      expect(html.indexOf('function postCalendarWrite(card)')).assertLarger(-1);
+      expect(html.indexOf('calendar.event.delete.confirm')).assertLarger(-1);
       expect(html.indexOf('<aside class="calendar-detail-drawer">')).assertEqual(-1);
     });
 
@@ -1856,6 +2227,73 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('16:30')).assertLarger(-1);
       expect(html.indexOf('17:00')).assertLarger(-1);
       expect(html.indexOf('已写入')).assertLarger(-1);
+    });
+
+    it('labels a successful Google Calendar update as updated rather than written', 0, () => {
+      const update = calendarCreateDocumentFixture();
+      update.blocks[0].metrics[1].value = 'calendar.event.update';
+      const html = renderHtmlHomeDocument(update);
+
+      expect(html.indexOf('已更新 Google Calendar')).assertLarger(-1);
+      expect(html.indexOf('Google Calendar API · 已更新')).assertLarger(-1);
+      expect(html.indexOf('已写入 Google Calendar')).assertEqual(-1);
+    });
+
+    it('keeps Calendar create and update reviews visibly pending until provider success', 0, () => {
+      const create = calendarCreateDocumentFixture();
+      create.subtitle = '请核对当前日程参数；只有点击此卡片上的精确操作才会调用 Provider。';
+      create.blocks[0].status = 'confirm_required';
+      create.blocks[0].subtitle = create.subtitle;
+      const update = calendarCreateDocumentFixture();
+      update.subtitle = create.subtitle;
+      update.blocks[0].status = 'confirm_required';
+      update.blocks[0].subtitle = update.subtitle;
+      update.blocks[0].metrics[1].value = 'calendar.event.update';
+      create.blocks[0].actions = [{
+        id: 'calendar.event.create',
+        label: '确认创建',
+        prompt: 'calendar.event.create',
+        variant: 'primary',
+        kind: 'prompt',
+        args: JSON.parse('{"title":"一对一会议","start":"2026-07-02T16:30:00+08:00","end":"2026-07-02T17:00:00+08:00"}') as Object
+      }];
+      update.blocks[0].actions = [{
+        id: 'calendar.event.update',
+        label: '确认更新',
+        prompt: 'calendar.event.update',
+        variant: 'primary',
+        kind: 'prompt',
+        args: JSON.parse('{"eventId":"event-create-1","start":"2026-07-02T16:30:00+08:00","end":"2026-07-02T17:00:00+08:00"}') as Object
+      }];
+
+      [create, update].forEach((doc: HtmlHomeDocument): void => {
+        const html = renderHtmlHomeDocument(doc);
+        expect(html.indexOf('等待确认')).assertLarger(-1);
+        expect(html.indexOf('data-calendar-action=')).assertLarger(-1);
+        expect(html.indexOf('function postCalendarWrite(card)')).assertLarger(-1);
+        expect(html.indexOf(doc.blocks[0].actions[0].id)).assertLarger(-1);
+        expect(html.indexOf('已写入 Google Calendar')).assertEqual(-1);
+        expect(html.indexOf('已更新 Google Calendar')).assertEqual(-1);
+      });
+    });
+
+    it('renders the provider-bound Calendar update offer as the existing confirmation control', 0, () => {
+      const update = calendarSearchDocumentFixture();
+      update.blocks[0].actions = [{
+        id: 'calendar.event.update',
+        label: '确认更新日程',
+        prompt: 'calendar.event.update',
+        variant: 'primary',
+        kind: 'prompt',
+        args: JSON.parse('{"eventId":"event-1","title":"产品同步",' +
+          '"start":"2026-07-02T16:00:00+08:00","end":"2026-07-02T16:30:00+08:00"}') as Object
+      }];
+
+      const html = renderHtmlHomeDocument(update);
+
+      expect(html.indexOf('calendar-write-confirm')).assertLarger(-1);
+      expect(html.indexOf('确认更新日程')).assertLarger(-1);
+      expect(html.indexOf('postCalendarWrite')).assertLarger(-1);
     });
 
     it('does not show a write confirmation for a failed Calendar create', 0, () => {
@@ -1933,6 +2371,14 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf("kind === 'generic-tool-result' && isMailBlock(block)")).assertLarger(-1);
     });
 
+    it('initializes expanded details for mail blocks outside the Gmail scene', 0, () => {
+      const doc = mailAggregateDocumentFixture();
+      doc.kind = 'generic';
+      const html = renderHtmlHomeDocument(doc);
+
+      expect(html.indexOf("if (isMailBlock(block))")).assertLarger(-1);
+    });
+
     it('filters Gmail hero preview counts to mail blocks', 0, () => {
       const doc = mailAggregateDocumentFixture();
       doc.blocks.unshift({
@@ -1994,6 +2440,7 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('"name":"娱乐搭子"')).assertLarger(-1);
       expect(html.indexOf('用户请求属于娱乐或媒体内容场景。')).assertLarger(-1);
       expect(html.indexOf('renderPersonaBanner(heroCopy)')).assertLarger(-1);
+      expect(html.indexOf("add(copy, 'div', 'persona-subtitle'")).assertEqual(-1);
       expect(html.indexOf('YouTube video')).assertLarger(-1);
       expect(html.indexOf('Bilibili video')).assertLarger(-1);
       expect(html.indexOf('data-source-key="media-youtube"')).assertLarger(-1);
@@ -2125,8 +2572,14 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('hotel-room-card')).assertLarger(-1);
       expect(html.indexOf('hotel-room-toggle')).assertLarger(-1);
       expect(html.indexOf('hotel-room-details')).assertLarger(-1);
-      expect(html.indexOf('查看房型')).assertLarger(-1);
-      expect(html.indexOf("button.setAttribute('aria-label', '查看房型：'")).assertLarger(-1);
+      expect(html.indexOf('var allBlocks = list(data.blocks);')).assertLarger(-1);
+      expect(html.indexOf("metricValue(block, ['toolName']) === 'hotel.detail'")).assertLarger(-1);
+      expect(html.indexOf("metricValue(block, ['toolName']) === 'hotel.search'")).assertLarger(-1);
+      expect(html.indexOf('var isDetail = detailBlocks.length > 0;')).assertLarger(-1);
+      expect(html.indexOf('var blocks = isDetail ? detailBlocks : searchBlocks;')).assertLarger(-1);
+      expect(html.indexOf("metricValue(blocks[0], ['toolName'])")).assertEqual(-1);
+      expect(html.indexOf('detailAction.label')).assertLarger(-1);
+      expect(html.indexOf("button.setAttribute('aria-label', text(detailAction.label)")).assertLarger(-1);
       expect(html.indexOf('价格与取消规则')).assertLarger(-1);
       expect(html.indexOf('返回酒店结果')).assertLarger(-1);
       expect(html.indexOf('查看详情')).assertEqual(-1);
@@ -2138,7 +2591,7 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('550 CNY')).assertLarger(-1);
       expect(html.indexOf('免费取消截止至酒店当地时间')).assertLarger(-1);
       expect(html.indexOf('税费拆分与报价有效期：供应商未返回')).assertLarger(-1);
-      expect(html.indexOf('Appless 暂不支持创建或跟踪酒店订单')).assertLarger(-1);
+      expect(html.indexOf('Appless 支持打开 App 内 RollingGo Web 预订；原生订单创建、状态和取消不可用')).assertLarger(-1);
       expect(html.indexOf('min-height: 44px')).assertLarger(-1);
       expect(html.indexOf('@media (prefers-reduced-motion: reduce)')).assertLarger(-1);
       expect(html.indexOf('LIVE HOTEL DATA')).assertEqual(-1);
@@ -2147,6 +2600,353 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('第三方预订（离开 Appless）：')).assertEqual(-1);
       expect(html.indexOf('下单成功')).assertEqual(-1);
       expect(html.indexOf('订单编号')).assertEqual(-1);
+    });
+
+    it('renders a dedicated Firecrawl workspace with visible source and monitor actions', 0, () => {
+      const researchHtml = renderHtmlHomeDocument(firecrawlDocumentFixture());
+      const pageHtml = renderHtmlHomeDocument(firecrawlDocumentFixture('web.page.read'));
+      const productHtml = renderHtmlHomeDocument(shoppingComparisonDocumentFixture());
+      const socialDoc = firecrawlDocumentFixture('social.public.search');
+      socialDoc.blocks[0].actions.unshift({
+        id: 'dynamic_retry',
+        label: '重新查询',
+        prompt: '重新调用动态工具 social.public.search',
+        variant: 'primary',
+        kind: 'prompt'
+      });
+      socialDoc.blocks[0].actions.push(socialDoc.blocks[0].actions[1]);
+      socialDoc.blocks[0].status = 'partial';
+      const socialHtml = renderHtmlHomeDocument(socialDoc);
+      const monitorHtml = renderHtmlHomeDocument(firecrawlDocumentFixture('web.monitor.create'));
+      const pendingHtml = renderHtmlHomeDocument(createFirecrawlPendingDocument('web.research.search'), true);
+
+      expect(researchHtml.indexOf('data-scene="firecrawl"')).assertLarger(-1);
+      expect(researchHtml.indexOf('网页研究工作台')).assertLarger(-1);
+      expect(researchHtml.indexOf('公开网页')).assertLarger(-1);
+      expect(researchHtml.indexOf('固定工具')).assertEqual(-1);
+      expect(researchHtml.indexOf('firecrawl-route')).assertEqual(-1);
+      expect(researchHtml.indexOf('来源证据')).assertLarger(-1);
+      expect(researchHtml.indexOf('打开原网页')).assertLarger(-1);
+      expect(researchHtml.indexOf('data-firecrawl-action-index')).assertLarger(-1);
+      expect(researchHtml.indexOf('window.AIPhoneHome.postAction')).assertLarger(-1);
+      expect(researchHtml.indexOf('min-height: 44px')).assertLarger(-1);
+      expect(researchHtml.indexOf('@media (prefers-reduced-motion: reduce)')).assertLarger(-1);
+      expect(pageHtml.indexOf('阅读摘要')).assertLarger(-1);
+      expect(pageHtml.indexOf('firecrawl-read-card')).assertLarger(-1);
+      expect(pageHtml.indexOf('剩余额度')).assertEqual(-1);
+      expect(productHtml.indexOf('商品研究')).assertLarger(-1);
+      expect(productHtml.indexOf('¥2,999')).assertLarger(-1);
+      expect(productHtml.indexOf('商品比价')).assertLarger(-1);
+      expect(productHtml.indexOf('firecrawl-shopping-source-list')).assertLarger(-1);
+      expect(productHtml.indexOf('剩余额度')).assertEqual(-1);
+      expect(socialHtml.indexOf('小红书公开搜索')).assertLarger(-1);
+      expect(socialHtml.indexOf('xiaohongshu.com')).assertLarger(-1);
+      expect(socialHtml.indexOf('小红书笔记')).assertLarger(-1);
+      expect(socialHtml.indexOf('firecrawl-social-card')).assertLarger(-1);
+      expect(socialHtml.indexOf('firecrawl-social-card is-featured')).assertLarger(-1);
+      expect(socialHtml.indexOf('firecrawl-social-media')).assertLarger(-1);
+      expect(socialHtml.indexOf('sns-webpic-qc.xhscdn.com/note-cover.webp')).assertLarger(-1);
+      expect(socialHtml.indexOf('firecrawl-social-carousel')).assertLarger(-1);
+      expect(socialHtml.indexOf('firecrawl-social-slide')).assertLarger(-1);
+      expect(socialHtml.indexOf('scroll-snap-type: x mandatory')).assertLarger(-1);
+      expect(socialHtml.indexOf('笔记图片，可左右滑动')).assertLarger(-1);
+      expect(socialHtml.indexOf('role="link"')).assertEqual(-1);
+      expect(socialHtml.indexOf('role="button"')).assertLarger(-1);
+      expect(socialHtml.indexOf('aria-label="应用内查看完整笔记')).assertLarger(-1);
+      expect(socialHtml.indexOf('data-firecrawl-note-index="0"')).assertLarger(-1);
+      expect(socialHtml.indexOf('data-firecrawl-action-index="1"')).assertEqual(-1);
+      expect(socialHtml.indexOf('部分返回')).assertEqual(-1);
+      expect(socialHtml.indexOf('firecrawl-social-play')).assertLarger(-1);
+      expect(socialHtml.indexOf('0:42')).assertLarger(-1);
+      expect(socialHtml.indexOf('loading="eager"')).assertLarger(-1);
+      expect(socialHtml.indexOf('referrerpolicy="no-referrer"')).assertLarger(-1);
+      expect(socialHtml.indexOf('查看原笔记')).assertEqual(-1);
+      expect(socialHtml.indexOf('firecrawl-social-detail')).assertLarger(-1);
+      expect(socialHtml.indexOf('data-firecrawl-detail-index="0"')).assertLarger(-1);
+      expect(socialHtml.indexOf('这是应用内展示的完整笔记正文')).assertLarger(-1);
+      expect(socialHtml.indexOf('返回笔记列表')).assertLarger(-1);
+      expect(socialHtml.indexOf("detail.classList.add('is-open')")).assertLarger(-1);
+      expect(socialHtml.indexOf('<video')).assertEqual(-1);
+      expect(socialHtml.indexOf('点开卡片可在应用内查看正文和图片')).assertLarger(-1);
+      expect(socialHtml.indexOf('剩余额度')).assertEqual(-1);
+      expect(monitorHtml.indexOf('确认创建监控')).assertLarger(-1);
+      expect(monitorHtml.indexOf('网页监控')).assertLarger(-1);
+      expect(monitorHtml.indexOf('Appless Firecrawl QA')).assertLarger(-1);
+      expect(pendingHtml.indexOf('firecrawl-loading')).assertLarger(-1);
+      expect(pendingHtml.indexOf('正在读取公开来源')).assertLarger(-1);
+      expect(pendingHtml.indexOf('分身')).assertEqual(-1);
+    });
+
+    it('renders same-product shopping sources as one accessible vertical list', 0, () => {
+      const productHtml = renderHtmlHomeDocument(shoppingComparisonDocumentFixture());
+
+      expect(productHtml.indexOf('商品比价')).assertLarger(-1);
+      expect(productHtml.indexOf('当前最低公开价')).assertLarger(-1);
+      expect(productHtml.indexOf('class="firecrawl-shopping-source-list"')).assertLarger(-1);
+      expect(productHtml.indexOf('class="firecrawl-shopping-source-row is-lowest"')).assertLarger(-1);
+      expect(productHtml.indexOf('<table class="firecrawl-compare-table"')).assertEqual(-1);
+      expect(productHtml.indexOf('firecrawl-compare-scroll')).assertEqual(-1);
+      expect(productHtml.indexOf('min-width: 650px')).assertEqual(-1);
+      expect(productHtml.indexOf('data-shopping-source-count="2"')).assertLarger(-1);
+      expect(productHtml.indexOf('data-shopping-comparable-count="2"')).assertLarger(-1);
+      expect(productHtml.indexOf('data-shopping-detail="0"')).assertLarger(-1);
+      expect(productHtml.indexOf('aria-expanded="false"')).assertLarger(-1);
+      expect(productHtml.indexOf('aria-controls="shopping-detail-0"')).assertLarger(-1);
+      expect(productHtml.indexOf('id="shopping-detail-0"')).assertLarger(-1);
+      expect(productHtml.indexOf('打开原网页')).assertLarger(-1);
+      expect(productHtml.indexOf('>深入阅读此来源<')).assertEqual(-1);
+      expect(productHtml.indexOf('data-firecrawl-action-index="1"')).assertEqual(-1);
+      expect(productHtml.indexOf('>京东<')).assertLarger(-1);
+      expect(productHtml.indexOf('数据页面：detail.zol.com.cn')).assertLarger(-1);
+      expect(productHtml.indexOf('京东自营')).assertLarger(-1);
+      expect(productHtml.indexOf('满 3000 减 100')).assertLarger(-1);
+      expect(productHtml.indexOf('firecrawl-product-card')).assertEqual(-1);
+      expect(productHtml.indexOf('comparisonEligible')).assertEqual(-1);
+      expect(productHtml.indexOf('comparisonPriceFen')).assertEqual(-1);
+      expect(productHtml.indexOf('comparisonPriceKind')).assertEqual(-1);
+      expect(productHtml.indexOf('comparisonKey')).assertEqual(-1);
+      expect(productHtml.indexOf("target.closest('[data-shopping-detail]')")).assertLarger(-1);
+      expect(productHtml.indexOf("detailButton.setAttribute('aria-expanded'")).assertLarger(-1);
+    });
+
+    it('does not claim a lowest price from one comparable source', 0, () => {
+      const singleDoc = shoppingComparisonDocumentFixture();
+      singleDoc.blocks = [singleDoc.blocks[0]];
+      singleDoc.actions = singleDoc.blocks[0].actions.slice();
+      const singleHtml = renderHtmlHomeDocument(singleDoc);
+
+      expect(singleHtml.indexOf('来源不足，暂不能形成比价')).assertLarger(-1);
+      expect(singleHtml.indexOf('当前最低公开价')).assertEqual(-1);
+    });
+
+    it('shows a ranged price without treating it as comparable', 0, () => {
+      const rangeDoc = shoppingComparisonDocumentFixture();
+      rangeDoc.blocks = [shoppingSourceFixture(
+        'shopping-jd',
+        'https://item.jd.com/sony-wh-1000xm6',
+        '¥2,999起',
+        false,
+        0,
+        'sony|wh-1000xm6 黑色'
+      )];
+      rangeDoc.actions = rangeDoc.blocks[0].actions.slice();
+      const rangeHtml = renderHtmlHomeDocument(rangeDoc);
+
+      expect(rangeHtml.indexOf('当前可见公开价')).assertLarger(-1);
+      expect(rangeHtml.indexOf('当前最低公开价')).assertEqual(-1);
+    });
+
+    it('does not calculate a lowest price across different comparison keys', 0, () => {
+      const mismatchedDoc = shoppingComparisonDocumentFixture();
+      const comparisonKey = mismatchedDoc.blocks[1].rows.find((row: HtmlHomeMetric): boolean =>
+        row.label === 'comparisonKey'
+      );
+      if (comparisonKey !== undefined) {
+        comparisonKey.value = 'sony|wh-1000xm6 银色';
+      }
+      const mismatchedHtml = renderHtmlHomeDocument(mismatchedDoc);
+
+      expect(mismatchedHtml.indexOf('来源规格不同，暂不计算最低价')).assertLarger(-1);
+      expect(mismatchedHtml.indexOf('当前最低公开价')).assertEqual(-1);
+    });
+
+    it('does not claim a minimum when a third visible source has a different key', 0, () => {
+      const mixedDoc = shoppingComparisonDocumentFixture();
+      const third = shoppingSourceFixture(
+        'shopping-third',
+        'https://detail.zol.com.cn/sony-wh-1000xm6-silver',
+        '¥2,799起',
+        false,
+        0,
+        'sony|wh-1000xm6 银色'
+      );
+      mixedDoc.blocks.push(third);
+      mixedDoc.actions = mixedDoc.actions.concat(third.actions);
+      const mixedHtml = renderHtmlHomeDocument(mixedDoc);
+
+      expect(mixedHtml.indexOf('来源规格不同，暂不计算最低价')).assertLarger(-1);
+      expect(mixedHtml.indexOf('当前最低公开价')).assertEqual(-1);
+      expect(mixedHtml.indexOf('firecrawl-shopping-source-row is-lowest')).assertEqual(-1);
+    });
+
+    it('shows missing runtime commerce details without inferring the seller from host', 0, () => {
+      const runtimeDoc = shoppingComparisonDocumentFixture();
+      runtimeDoc.blocks[0].rows = runtimeDoc.blocks[0].rows.filter(
+        (row: HtmlHomeMetric): boolean =>
+          row.label !== '卖家' && row.label !== '优惠券' && row.label !== '运费'
+      );
+      runtimeDoc.blocks = [runtimeDoc.blocks[0]];
+      runtimeDoc.actions = runtimeDoc.blocks[0].actions.slice();
+      const runtimeHtml = renderHtmlHomeDocument(runtimeDoc);
+
+      expect(runtimeHtml.indexOf(
+        '<div class="firecrawl-row"><b>卖家</b><span>页面未返回</span></div>'
+      )).assertLarger(-1);
+      expect(runtimeHtml.indexOf(
+        '<div class="firecrawl-row"><b>优惠券</b><span>页面未返回</span></div>'
+      )).assertLarger(-1);
+      expect(runtimeHtml.indexOf(
+        '<div class="firecrawl-row"><b>运费</b><span>页面未返回</span></div>'
+      )).assertLarger(-1);
+    });
+
+    it('labels an estimated lowest price in both the shopping hero and row', 0, () => {
+      const estimatedDoc = shoppingComparisonDocumentFixture();
+      estimatedDoc.blocks[0] = shoppingSourceFixture(
+        'shopping-jd',
+        'https://item.jd.com/sony-wh-1000xm6',
+        '¥2,899',
+        true,
+        289900,
+        'sony|wh-1000xm6 黑色',
+        'estimated'
+      );
+      estimatedDoc.actions = estimatedDoc.blocks[0].actions.concat(estimatedDoc.blocks[1].actions);
+      const estimatedHtml = renderHtmlHomeDocument(estimatedDoc);
+
+      expect(estimatedHtml.indexOf('当前最低预估到手价')).assertLarger(-1);
+      expect(estimatedHtml.indexOf(
+        '<span class="firecrawl-shopping-hero-price-kind">预估到手价</span>'
+      )).assertLarger(-1);
+      expect(estimatedHtml.indexOf('<span class="firecrawl-shopping-price-kind">预估到手价</span>'))
+        .assertLarger(-1);
+    });
+
+    it('keeps overseas references separate from the domestic minimum', 0, () => {
+      const marketDoc = shoppingComparisonDocumentFixture();
+      const overseas = shoppingSourceFixture(
+        'shopping-amazon',
+        'https://amazon.com/dp/sony-wh-1000xm6',
+        '$399',
+        true,
+        39900,
+        'US|USD|sony|wh-1000xm6 黑色'
+      );
+      const platform = overseas.rows.find((row: HtmlHomeMetric): boolean => row.label === '平台');
+      const evidence = overseas.rows.find((row: HtmlHomeMetric): boolean => row.label === '数据页面');
+      const market = overseas.rows.find((row: HtmlHomeMetric): boolean => row.label === '市场');
+      const currency = overseas.rows.find((row: HtmlHomeMetric): boolean => row.label === '币种');
+      if (platform !== undefined) {
+        platform.value = 'Amazon';
+      }
+      if (evidence !== undefined) {
+        evidence.value = 'https://www.amazon.com/dp/sony-wh-1000xm6';
+      }
+      if (market !== undefined) {
+        market.value = 'US';
+      }
+      if (currency !== undefined) {
+        currency.value = 'USD';
+      }
+      marketDoc.blocks.push(overseas);
+      marketDoc.actions = marketDoc.actions.concat(overseas.actions);
+      const marketHtml = renderHtmlHomeDocument(marketDoc);
+
+      expect(marketHtml.indexOf('当前最低公开价')).assertLarger(-1);
+      expect(marketHtml.indexOf('海外参考')).assertLarger(-1);
+      expect(marketHtml.indexOf('>Amazon<')).assertLarger(-1);
+      expect(marketHtml.indexOf('$399')).assertLarger(-1);
+      expect(marketHtml.indexOf('data-shopping-comparable-count="2"')).assertLarger(-1);
+    });
+
+    it('renders shopping-specific empty and pending states', 0, () => {
+      const emptyDoc = shoppingComparisonDocumentFixture();
+      emptyDoc.blocks[0].rows = emptyDoc.blocks[0].rows.filter((row: HtmlHomeMetric): boolean =>
+        row.label !== 'URL'
+      );
+      emptyDoc.blocks = [emptyDoc.blocks[0]];
+      emptyDoc.actions = [];
+      const emptyHtml = renderHtmlHomeDocument(emptyDoc);
+      const pendingHtml = renderHtmlHomeDocument(
+        createFirecrawlPendingDocument('shopping.research'),
+        true
+      );
+
+      expect(emptyHtml.indexOf('暂未找到可核验的同款公开价格')).assertLarger(-1);
+      expect(pendingHtml.indexOf('正在查询固定公开来源')).assertLarger(-1);
+      expect(pendingHtml.indexOf('先返回的价格会先显示，无需等待全部站点')).assertLarger(-1);
+      expect(pendingHtml.indexOf('class="firecrawl-shopping-source-list"')).assertLarger(-1);
+      expect(pendingHtml.indexOf('正在查询第一个公开来源')).assertLarger(-1);
+      expect(pendingHtml.indexOf('仍在寻找第二个可比来源')).assertLarger(-1);
+      expect(pendingHtml.indexOf('<table class="firecrawl-compare-table"')).assertEqual(-1);
+      expect(pendingHtml.indexOf('分身')).assertEqual(-1);
+      expect(pendingHtml.indexOf('credits')).assertEqual(-1);
+      expect(pendingHtml.indexOf('debug')).assertEqual(-1);
+    });
+
+    it('drops a retained hotel pending block once real search results exist', 0, () => {
+      const doc = hotelSearchDocumentFixture();
+      doc.blocks.unshift({
+        id: 'pending',
+        kind: 'text',
+        title: '正在查询 RollingGo',
+        subtitle: '正在等待真实酒店结果',
+        status: 'calling_tool',
+        source: '',
+        metrics: [],
+        rows: [],
+        actions: []
+      });
+
+      const html = renderHtmlHomeDocument(doc);
+
+      expect(html.indexOf('正在查询 RollingGo')).assertEqual(-1);
+      expect(html.indexOf('深圳测试酒店')).assertLarger(-1);
+      expect(html.indexOf('"toolName","value":"hotel.search"')).assertLarger(-1);
+    });
+
+    it('renders exact conditional hotel actions from the A2UI snapshot', 0, () => {
+      const doc = hotelSearchDocumentFixture();
+      const actions = doc.blocks[0].actions;
+      actions.forEach((item: HtmlHomeAction) => {
+        if (item.id === 'hotel.detail') {
+          item.label = '房型详情';
+        } else if (item.id === 'hotel.navigate') {
+          item.label = '去这里';
+        } else if (item.id === 'hotel.booking.open') {
+          item.label = '继续预订';
+        }
+      });
+      const html = renderHtmlHomeDocument(doc);
+
+      expect(doc.rawSurfaceRoot === null).assertFalse();
+      expect(doc.surfaceId).assertEqual('hotel-search-task-6');
+      expect(JSON.stringify(actions).indexOf('"id":"hotel.detail"')).assertLarger(-1);
+      expect(JSON.stringify(actions).indexOf('"id":"hotel.navigate"')).assertLarger(-1);
+      expect(JSON.stringify(actions).indexOf('"id":"hotel.booking.open"')).assertEqual(-1);
+      expect(html.indexOf('房型详情')).assertLarger(-1);
+      expect(html.indexOf('去这里')).assertLarger(-1);
+      expect(html.indexOf('继续预订')).assertEqual(-1);
+      expect(html.indexOf('hotel-action-row')).assertLarger(-1);
+      expect(html.indexOf('hotel-card-cta-primary')).assertLarger(-1);
+      expect(html.indexOf('hotel-card-cta-secondary')).assertLarger(-1);
+      expect(html.indexOf("actionFor(block, 'hotel.navigate')")).assertLarger(-1);
+      expect(html.indexOf("actionFor(block, 'hotel.booking.open')")).assertEqual(-1);
+      expect(html.indexOf('postAction(JSON.stringify(action))')).assertLarger(-1);
+      expect(html.indexOf('collectHotelSmokeEvidence')).assertLarger(-1);
+      expect(html.indexOf('clickLabel')).assertLarger(-1);
+      expect(html.indexOf('bookingEvidence')).assertLarger(-1);
+      expect(html.indexOf('coordinatesValid')).assertLarger(-1);
+      expect(html.indexOf('var byActionId = {};')).assertLarger(-1);
+      expect(html.indexOf('current.argsValid && !sanitized.argsValid')).assertLarger(-1);
+      expect(html.indexOf("['hotel.detail', 'hotel.navigate', 'hotel.booking.open']")).assertLarger(-1);
+      expect(html.indexOf('evidence.push(sanitizeHotelAction(action))')).assertEqual(-1);
+      expect(html.indexOf('"surfaceId":"hotel-search-task-6"')).assertLarger(-1);
+      expect(html.indexOf('id: text(action.id)')).assertEqual(-1);
+      expect(html.indexOf("actionFor(block, 'hotel.book')")).assertEqual(-1);
+    });
+
+    it('keeps unavailable hotel navigation and call controls hidden', 0, () => {
+      const doc = hotelSearchDocumentFixture(false);
+      const html = renderHtmlHomeDocument(doc);
+      const actions = JSON.stringify(doc.blocks[0].actions);
+
+      expect(actions.indexOf('"id":"hotel.detail"')).assertLarger(-1);
+      expect(actions.indexOf('"id":"hotel.navigate"')).assertEqual(-1);
+      expect(actions.indexOf('"id":"hotel.booking.open"')).assertEqual(-1);
+      expect(actions.indexOf('"id":"hotel.book"')).assertEqual(-1);
+      expect(html.indexOf('导航到酒店')).assertEqual(-1);
+      expect(html.indexOf('联系酒店')).assertEqual(-1);
     });
 
     it('does not auto-render welcome scene and source chips', 0, () => {

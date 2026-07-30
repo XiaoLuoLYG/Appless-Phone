@@ -236,6 +236,19 @@ export struct HtmlHomeSurfaceView {
     }
   }
 
+  private async collectHotelSmokeEvidence(): Promise<void> {
+    try {
+      const evidence = await this.controller.runJavaScript(
+        "try{typeof window.collectHotelSmokeEvidence==='function'?window.collectHotelSmokeEvidence():''}catch(e){''}"
+      );
+      if (evidence.length > 0) {
+        aiLogInfo('[AIPhone][HotelHomeActionEvidence] evidence=' + evidence);
+      }
+    } catch (error) {
+      aiLogError('[AIPhone][HotelHomeActionEvidenceError] ' + JSON.stringify(error));
+    }
+  }
+
   build() {
     Stack({ alignContent: Alignment.Top }) {
       Web({ src: 'data:text/html;charset=utf-8,<body style="margin:0;background:%23F5F2EE"></body>', controller: this.controller })
@@ -260,6 +273,7 @@ export struct HtmlHomeSurfaceView {
           this.pushMailDetailEventIfNeeded();
           this.pushMailReplyEventIfNeeded();
           this.pushMailCalendarEventIfNeeded();
+          this.collectHotelSmokeEvidence();
         })
         .onWindowNew((event: OnWindowNewEvent) => {
           this.popupTitle = popupTitleFromUrl(event.targetUrl);
@@ -342,7 +356,7 @@ export struct HtmlHomeSurfaceView {
   }
 }
 
-function parseHtmlHomeAction(raw: string): A2uiAction | null {
+export function parseHtmlHomeAction(raw: string): A2uiAction | null {
   try {
     const parsed = JSON.parse(raw) as HtmlHomePostedAction;
     const keys = Object.keys(parsed);
@@ -350,7 +364,7 @@ function parseHtmlHomeAction(raw: string): A2uiAction | null {
       keys.indexOf('prompt') < 0 || keys.indexOf('kind') < 0) {
       return null;
     }
-    return {
+    const action: A2uiAction = {
       id: actionText(parsed['id']),
       label: actionText(parsed['label']),
       prompt: actionText(parsed['prompt']),
@@ -358,6 +372,12 @@ function parseHtmlHomeAction(raw: string): A2uiAction | null {
       kind: actionText(parsed['kind']),
       args: actionObject(parsed['args'])
     };
+    const sourceSectionId = typeof parsed['sourceSectionId'] === 'string' ?
+      (parsed['sourceSectionId'] as string).trim() : '';
+    if (sourceSectionId.length > 0) {
+      action.sourceSectionId = sourceSectionId;
+    }
+    return action;
   } catch (error) {
     return null;
   }

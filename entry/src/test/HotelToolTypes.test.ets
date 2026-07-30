@@ -172,6 +172,25 @@ export default function hotelToolTypesTest() {
       expect(serialized.indexOf('taxes')).assertEqual(-1);
     });
 
+    it('keeps missing hotel coordinates null without adding provider data', 0, () => {
+      const parsed = parseHotelSearchRequest(searchArgs());
+      if (parsed.value === null) {
+        return;
+      }
+      const payload: McpToolResultPayload = {
+        isError: false,
+        structuredContent: structured(
+          '{"success":true,"hotelInformationList":[{"hotelId":47675,"name":"深圳测试酒店"}]}'
+        )
+      };
+
+      const result = normalizeHotelSearchResult(payload, parsed.value);
+
+      expect(result.hotels[0].latitude === null).assertTrue();
+      expect(result.hotels[0].longitude === null).assertTrue();
+      expect(JSON.stringify(result.hotels[0]).indexOf('contact')).assertEqual(-1);
+    });
+
     it('returns a controlled error for malformed provider result arrays', 0, () => {
       const searchRequest = parseHotelSearchRequest(searchArgs());
       if (searchRequest.value === null) {

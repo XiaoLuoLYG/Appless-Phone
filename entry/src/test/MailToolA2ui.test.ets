@@ -2,7 +2,12 @@ import { describe, it, expect } from '@ohos/hypium';
 import { genericToolResults } from '@loop/agent-core';
 import { parseA2uiJsonl } from '@loop/agent-core';
 import { A2uiSurfaceStore } from '@loop/agent-core';
-import { mailReplyDraftAction, mailResultsA2ui } from '@loop/agent-core';
+import {
+  mailReplyDraftAction,
+  mailResultsA2ui,
+  mailSearchStructuredDataA2ui,
+  mailThreadSummary
+} from '@loop/agent-core';
 import { MailProviderStatus, MailThreadResult } from '@loop/agent-core';
 import { DynamicGenericToolResult } from '@loop/agent-core';
 
@@ -180,8 +185,32 @@ export default function mailToolA2uiTest() {
         expect(action.id).assertEqual('mail.ai.reply.draft');
         expect(action.label).assertEqual('AI 回复草稿');
         expect(action.prompt.indexOf('mail.draft.create')).assertLarger(-1);
+        expect(action.prompt.indexOf('gmail.message.send')).assertEqual(-1);
         expect(action.prompt.indexOf('"provider":"qq"')).assertLarger(-1);
         expect(action.prompt.indexOf('"messageId":"qq-message"')).assertLarger(-1);
+      }
+    });
+
+    it('renders the same aggregate mail data from one structured object', 0, () => {
+      const source = thread('qq', '2026-06-30T09:00:00+08:00', 'QQ structured thread');
+      const status: MailProviderStatus = {
+        provider: 'gmail', status: 'error', title: 'Gmail 调用失败', message: 'transport timeout'
+      };
+      const oldRows = genericToolResults(surfaceFromJsonl(
+        mailResultsA2ui('mail_old', 'mail.search', [source], [status])
+      ).getSurface());
+      const newRows = genericToolResults(surfaceFromJsonl(mailSearchStructuredDataA2ui(
+        'mail_new',
+        'mail.search',
+        { threads: [mailThreadSummary(source)], statuses: [status], extras: [] }
+      )).getSurface());
+
+      expect(JSON.stringify(newRows)).assertEqual(JSON.stringify(oldRows));
+      expect(mailThreadSummary(source).requestKey).assertEqual('qq:qq-message');
+      const action = mailReplyDraftAction(newRows[1]);
+      expect(action !== null).assertTrue();
+      if (action !== null) {
+        expect(JSON.stringify(action.args).indexOf('qq-message')).assertLarger(-1);
       }
     });
   });

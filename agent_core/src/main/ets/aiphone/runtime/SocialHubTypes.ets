@@ -1,7 +1,8 @@
-export type SocialHubPlatform = 'x' | 'slack' | 'wecom' | 'discord' | 'linkedin' | 'whatsapp' | 'instagram' | 'unknown';
+export type SocialHubPlatform = 'x' | 'slack' | 'wecom' | 'discord' | 'linkedin' | 'whatsapp' | 'instagram' | 'reddit' | 'unknown';
 export type SocialHubItemKind = 'message' | 'mention' | 'post' | 'connection';
 export type SocialHubConnectionStatus = 'connected' | 'needs_auth' | 'limited' | 'error' | 'disabled';
 export type SocialHubDraftStatus = 'empty' | 'draft' | 'error';
+export type SocialHubPublicationStatus = 'empty' | 'preview' | 'error';
 
 export interface SocialHubItemData {
   id: string;
@@ -37,10 +38,22 @@ export interface SocialHubConnectionData {
   message: string;
 }
 
+export interface SocialHubPublicationData {
+  platform: SocialHubPlatform;
+  operation: 'publish';
+  accountId: string;
+  accountName: string;
+  text: string;
+  status: SocialHubPublicationStatus;
+  updatedAt: string;
+  error: string;
+}
+
 export interface SocialHubData {
   items: SocialHubItemData[];
   selected: SocialHubItemData;
   draft: SocialHubDraftData;
+  publication: SocialHubPublicationData;
   connections: SocialHubConnectionData[];
 }
 
@@ -78,10 +91,22 @@ interface LooseSocialHubConnectionData {
   message?: Object | string | number | boolean | null;
 }
 
+interface LooseSocialHubPublicationData {
+  platform?: Object | string | number | boolean | null;
+  operation?: Object | string | number | boolean | null;
+  accountId?: Object | string | number | boolean | null;
+  accountName?: Object | string | number | boolean | null;
+  text?: Object | string | number | boolean | null;
+  status?: Object | string | number | boolean | null;
+  updatedAt?: Object | string | number | boolean | null;
+  error?: Object | string | number | boolean | null;
+}
+
 interface LooseSocialHubData {
   items?: Object[];
   selected?: Object;
   draft?: Object;
+  publication?: Object;
   connections?: Object[];
 }
 
@@ -109,10 +134,21 @@ function normalizePlatform(value: Object | string | number | boolean | null | un
   if (text === 'wecom' || text === 'wework' || text === '企业微信') {
     return 'wecom';
   }
-  if (text === 'discord' || text === 'linkedin' || text === 'whatsapp' || text === 'instagram') {
+  if (text === 'discord' || text === 'linkedin' || text === 'whatsapp' ||
+    text === 'instagram' || text === 'reddit') {
     return text as SocialHubPlatform;
   }
   return 'unknown';
+}
+
+function normalizePublicationStatus(
+  value: Object | string | number | boolean | null | undefined
+): SocialHubPublicationStatus {
+  const text = textOf(value);
+  if (text === 'empty' || text === 'preview' || text === 'error') {
+    return text as SocialHubPublicationStatus;
+  }
+  return 'empty';
 }
 
 function normalizeKind(value: Object | string | number | boolean | null | undefined): SocialHubItemKind {
@@ -169,11 +205,25 @@ export function emptySocialHubDraft(): SocialHubDraftData {
   };
 }
 
+export function emptySocialHubPublication(): SocialHubPublicationData {
+  return {
+    platform: 'unknown',
+    operation: 'publish',
+    accountId: '',
+    accountName: '',
+    text: '',
+    status: 'empty',
+    updatedAt: '',
+    error: ''
+  };
+}
+
 export function emptySocialHub(): SocialHubData {
   return {
     items: [],
     selected: emptySocialHubItem(),
     draft: emptySocialHubDraft(),
+    publication: emptySocialHubPublication(),
     connections: []
   };
 }
@@ -214,6 +264,25 @@ export function normalizeSocialHubDraft(value: Object | SocialHubDraftData | nul
     error: textOf(source.error),
     localOnly: localOnly,
     sent: localOnly ? false : source.sent === true
+  };
+}
+
+export function normalizeSocialHubPublication(
+  value: Object | SocialHubPublicationData | null | undefined
+): SocialHubPublicationData {
+  if (value === undefined || value === null) {
+    return emptySocialHubPublication();
+  }
+  const source = value as LooseSocialHubPublicationData;
+  return {
+    platform: normalizePlatform(source.platform),
+    operation: 'publish',
+    accountId: textOf(source.accountId),
+    accountName: textOf(source.accountName),
+    text: textOf(source.text),
+    status: normalizePublicationStatus(source.status),
+    updatedAt: textOf(source.updatedAt),
+    error: textOf(source.error)
   };
 }
 
@@ -258,6 +327,8 @@ export function normalizeSocialHub(value: Object | SocialHubData | null | undefi
     items: items,
     selected: source.selected === undefined ? fallback.selected : normalizeSocialHubItem(source.selected),
     draft: source.draft === undefined ? fallback.draft : normalizeSocialHubDraft(source.draft),
+    publication: source.publication === undefined ?
+      fallback.publication : normalizeSocialHubPublication(source.publication),
     connections: connections
   };
 }

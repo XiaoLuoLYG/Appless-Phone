@@ -11,13 +11,6 @@ const defaultComposioBaseUrl = 'https://backend.composio.dev/api/v3.1';
 
 const providerKeys = [
   'TOOL_GATEWAY_API_KEY',
-  'X_BEARER_TOKEN',
-  'X_ACCESS_TOKEN',
-  'X_OAUTH_TOKEN',
-  'X_USERNAME',
-  'X_OAUTH_CLIENT_ID',
-  'X_OAUTH_REDIRECT_URI',
-  'SLACK_USER_TOKEN',
   'DASHSCOPE_API_KEY',
   'FLIGHT_MCP_KEY',
   'VARIFLIGHT_API_KEY',
@@ -27,6 +20,8 @@ const providerKeys = [
   'FLIGHT_VARIFLIGHT_URL',
   'ROLLINGGO_HOTEL_MCP_KEY',
   'ROLLINGGO_HOTEL_MCP_URL',
+  'FIRECRAWL_API_KEY',
+  'FIRECRAWL_MCP_URL',
   'AMAP_KEY',
   'AMAP_DEFAULT_LOCATION',
   'FOOD_DEFAULT_LOCATION',
@@ -52,6 +47,7 @@ const providerKeys = [
   'AMAP_MCP_KEY',
   'AMAP_MCP_URL',
   'RIDE_MOCK_ENABLED',
+  'AIPHONE_WHATSAPP_TEST_TO',
   'GOOGLE_MAPS_API_KEY',
   'GOOGLE_OAUTH_CLIENT_ID',
   'GOOGLE_OAUTH_CLIENT_SECRET',
@@ -144,11 +140,13 @@ if (!existsSync(envPath)) {
 const env = loadEnv(envPath);
 const config = {};
 for (const key of providerKeys) {
-  if (env[key]) {
+  const value = key === 'AIPHONE_WHATSAPP_TEST_TO' ?
+    (process.env.AIPHONE_WHATSAPP_TEST_TO || env[key]) : env[key];
+  if (value) {
     if (key === 'PAYPAL_CHECKOUT_GATEWAY_URL' || key === 'STRIPE_CHECKOUT_GATEWAY_URL') {
       continue;
     }
-    config[key] = env[key];
+    config[key] = value;
   }
 }
 
@@ -159,15 +157,13 @@ removeAppleDoubleSibling(outPath);
 console.log(`Wrote ${outPath}`);
 console.log(maskedStatus(config, [
   'TOOL_GATEWAY_API_KEY',
-  'X_BEARER_TOKEN',
-  'X_USERNAME',
-  'X_OAUTH_CLIENT_ID',
-  'SLACK_USER_TOKEN',
   'DASHSCOPE_API_KEY',
   'FLIGHT_MCP_KEY',
   'VARIFLIGHT_API_KEY',
   'ROLLINGGO_HOTEL_MCP_KEY',
   'ROLLINGGO_HOTEL_MCP_URL',
+  'FIRECRAWL_API_KEY',
+  'FIRECRAWL_MCP_URL',
   'AMAP_KEY',
   'TENCENT_MAP_KEY',
   'BAIDU_MAP_AK',
@@ -181,6 +177,7 @@ console.log(maskedStatus(config, [
   'DIDI_MCP_SANDBOX',
   'AMAP_MCP_KEY',
   'RIDE_MOCK_ENABLED',
+  'AIPHONE_WHATSAPP_TEST_TO',
   'GOOGLE_MAPS_API_KEY',
   'GOOGLE_OAUTH_CLIENT_ID',
   'GOOGLE_OAUTH_CLIENT_SECRET',

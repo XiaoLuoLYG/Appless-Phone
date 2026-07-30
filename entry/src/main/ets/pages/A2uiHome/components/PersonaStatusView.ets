@@ -3,8 +3,7 @@ import {
   COLOR_ACCENT_SOFT,
   COLOR_CARD_EDGE,
   COLOR_FIELD,
-  COLOR_INK,
-  COLOR_MUTED
+  COLOR_INK
 } from '../style/A2uiHomeTheme';
 import { personaAvatarResource } from './PersonaAvatar';
 
@@ -15,10 +14,6 @@ export struct PersonaStatusView {
 
   private titleText(): string {
     return this.persona.name.length > 0 ? this.persona.name + '上线' : '';
-  }
-
-  private subtitleText(): string {
-    return this.personaMemory.summary.length > 0 ? this.personaMemory.summary : this.persona.reason;
   }
 
   build() {
@@ -36,11 +31,6 @@ export struct PersonaStatusView {
             .fontSize(15)
             .fontWeight(FontWeight.Bold)
             .fontColor(COLOR_INK)
-          Text(this.subtitleText())
-            .fontSize(12)
-            .fontColor(COLOR_MUTED)
-            .lineHeight(18)
-            .margin({ top: 4 })
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)

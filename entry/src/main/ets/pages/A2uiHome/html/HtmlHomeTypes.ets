@@ -88,6 +88,7 @@ export interface HtmlHomePersonaMemory {
 
 export interface HtmlHomeDocument {
   version: number;
+  surfaceId?: string;
   source: HtmlHomeSource;
   kind: HtmlHomeKind;
   title: string;

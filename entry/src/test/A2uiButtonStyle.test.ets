@@ -6,7 +6,8 @@ import {
   COLOR_ACTION_ACTIVATED,
   COLOR_ACTION_DEACTIVATED,
   COLOR_BUTTON_TEXT,
-  COLOR_ERROR_SOFT
+  COLOR_ERROR_SOFT,
+  COLOR_TEXT
 } from '../main/ets/pages/A2uiHome/style/A2uiHomeTheme';
 
 export default function a2uiButtonStyleTest() {
@@ -18,13 +19,15 @@ export default function a2uiButtonStyleTest() {
       expect(style.backgroundColor).assertEqual(COLOR_ACCENT_DEEP);
       expect(style.borderColor).assertEqual(COLOR_ACCENT);
       expect(style.textColor).assertEqual(COLOR_BUTTON_TEXT);
+      expect(style.textColor).assertEqual('#FFFFFF');
     });
 
     it('uses disabled style before active or tone', 0, () => {
       const style = resolveA2uiButtonStyle('danger', true, false);
 
       expect(style.backgroundColor).assertEqual(COLOR_ACTION_DEACTIVATED);
-      expect(style.opacity < 1).assertTrue();
+      expect(style.textColor).assertEqual(COLOR_TEXT);
+      expect(style.opacity).assertEqual(1);
     });
 
     it('keeps deactivated button text bright while enabled', 0, () => {

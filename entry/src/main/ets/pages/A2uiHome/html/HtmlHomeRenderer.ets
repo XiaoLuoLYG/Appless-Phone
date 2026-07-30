@@ -3,6 +3,7 @@ import { renderMultiTaskHomeDocument, shouldRenderMultiTaskHomeDocument } from '
 import { renderAggregateSearchHomeDocument, shouldRenderAggregateSearchHomeDocument } from './HtmlAggregateSearchHomeRenderer';
 import { renderCalendarHomeDocument, shouldRenderCalendarHomeDocument } from './HtmlCalendarHomeRenderer';
 import { renderFoodHomeDocument, shouldRenderFoodHomeDocument } from './HtmlFoodHomeRenderer';
+import { renderFirecrawlHomeDocument, shouldRenderFirecrawlHomeDocument } from './HtmlFirecrawlHomeRenderer';
 import { renderHotelHomeDocument, shouldRenderHotelHomeDocument } from './HtmlHotelHomeRenderer';
 import { renderMediaHomeDocument, shouldRenderMediaHomeDocument } from './HtmlMediaHomeRenderer';
 import { renderPaymentHomeDocument, shouldRenderPaymentHomeDocument } from './HtmlPaymentHomeRenderer';
@@ -10,6 +11,8 @@ import { renderRideHailingHomeDocument, shouldRenderRideHailingHomeDocument } fr
 import { renderTravelHomeDocument, shouldRenderTravelHomeDocument } from './HtmlTravelHomeRenderer';
 import { personaAvatarDataUri } from './PersonaAvatarDataUri';
 import { APP_LOGO_AMAP, APP_LOGO_ASANA, APP_LOGO_BAIDU_MAPS, APP_LOGO_BILIBILI, APP_LOGO_DISCORD, APP_LOGO_GITHUB, APP_LOGO_GMAIL, APP_LOGO_GOOGLE_DOCS, APP_LOGO_GOOGLE_DRIVE, APP_LOGO_GOOGLE_MAPS, APP_LOGO_HUBSPOT, APP_LOGO_INSTAGRAM, APP_LOGO_KFC, APP_LOGO_LINEAR, APP_LOGO_LINKEDIN, APP_LOGO_LUCKIN, APP_LOGO_MCDONALDS, APP_LOGO_MEITUAN, APP_LOGO_MICROSOFT_OUTLOOK, APP_LOGO_NOTION, APP_LOGO_QQMAIL, APP_LOGO_SALESFORCE, APP_LOGO_SLACK, APP_LOGO_SPOTIFY, APP_LOGO_TAOBAO, APP_LOGO_TENCENT_MAPS, APP_LOGO_TICKETMASTER, APP_LOGO_TIKTOK, APP_LOGO_TRELLO, APP_LOGO_WECOM, APP_LOGO_WHATSAPP, APP_LOGO_X, APP_LOGO_YOUTUBE } from './AppLogoDataUri';
+
+export { buildMultiTaskHomePayload } from './HtmlMultiTaskHomeRenderer';
 
 type HtmlHomeTextValue = Object | string | number | boolean | null | undefined;
 
@@ -5119,7 +5122,6 @@ const HTML_HOME_JS: string = `
   }
   function renderPersonaBanner(parent) {
     var persona = data.persona || {};
-    var memory = data.personaMemory || {};
     var name = text(persona.name);
     if (text(persona.id).length === 0 || name.length === 0) {
       return;
@@ -5137,7 +5139,6 @@ const HTML_HOME_JS: string = `
     }
     var copy = add(banner, 'div', 'persona-copy');
     add(copy, 'div', 'persona-title', name + '上线');
-    add(copy, 'div', 'persona-subtitle', text(memory.summary) || text(persona.reason));
   }
   app.textContent = '';
   var shell = add(app, 'main', isEnhancedScene() ? 'shell ' + sceneClassName() : 'shell');
@@ -5255,7 +5256,7 @@ const HTML_HOME_JS: string = `
         var detailHost = expandable ? add(card, 'div', 'details') : card;
         addMediaEmbed(detailHost, block);
         addStripeReceivingOnboarding(detailHost, block);
-        if (scene === 'gmail' && text(block.kind) === 'generic-tool-result') {
+        if (isMailBlock(block)) {
           addMailExpandedDetails(detailHost, block, card);
         } else if (isWhatsAppSendBlock(block)) {
           addPairs(detailHost, block.rows, 'rows');
@@ -5432,6 +5433,9 @@ const HTML_HOME_JS: string = `
 export function renderHtmlHomeDocument(document: HtmlHomeDocument, isBusy: boolean = false): string {
   if (shouldRenderMultiTaskHomeDocument(document)) {
     return renderMultiTaskHomeDocument(document, isBusy);
+  }
+  if (shouldRenderFirecrawlHomeDocument(document)) {
+    return renderFirecrawlHomeDocument(document, isBusy);
   }
   if (shouldRenderCalendarHomeDocument(document)) {
     return renderCalendarHomeDocument(document, isBusy);

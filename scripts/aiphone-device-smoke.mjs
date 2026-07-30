@@ -1,12 +1,113 @@
 #!/usr/bin/env node
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
-import { dirname, join } from 'node:path';
+import { dirname, extname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  evaluateHotelSystemActionEvidence,
+  foregroundBundleFromAbilityDump,
+  hasPopulatedHotelActionEvidence,
+  hasVisibleHotelRateRuleEvidence,
+  hotelActionEvidenceFromLogs,
+  hotelDetailClickLocator,
+  hotelMultiAgentSearchEvidence,
+  hotelToolLifecycleFromLogs,
+  hasSafeHotelSystemIntentOpen,
+  isExpectedHotelSystemBundle,
+  matchesHotelDetailAccessibleLabel,
+  shouldRetryHotelReturnToApp,
+  validateHotelDetailBookingEvidence,
+  validateHotelSearchActionEvidence,
+  validateHotelSurfaceIdentity,
+  hotelMultiAgentDetailEvidence,
+  restoredHotelSearchSurface
+} from './hotel-smoke-evidence.mjs';
+import {
+  captureCompletionSettled,
+  collectExternalAuthJumps,
+  composioAuthEvidence,
+  calendarConfirmationButtonCenter,
+  calendarProviderActionEvidence,
+  calendarProviderAbsenceEvidence,
+  normalizeCalendarQaDate,
+  runC19CleanupFinalizer,
+  directTextVisibleEvidence,
+  dynamicAuthOutcomeAssessment,
+  dynamicToolDiscoveryEvidence,
+  expandedMailBodyRegionText,
+  mailThreadReadEvidence,
+  modelTransportEvidence,
+  multiAgentActionEvidence,
+  multiAgentPostCompletionWaitMs,
+  multiAgentTurnEvidence,
+  shouldPreserveSmokeAppSession,
+  socialDraftUiEvidence,
+  socialReplyButtonCenter,
+  shouldRecoverMailBodyViewport,
+  toolExecutionEvidence,
+  visibleMailBodyText
+} from './multi-agent-smoke-evidence.mjs';
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
-const outDir = join(rootDir, 'tool-gateway', '.smoke');
+const outDir = process.env.AIPHONE_SMOKE_OUT_DIR || join(rootDir, 'tool-gateway', '.smoke');
 mkdirSync(outDir, { recursive: true });
+const caseEvidenceDir = join(outDir, 'cases');
+const evidenceScreens = [];
+mkdirSync(caseEvidenceDir, { recursive: true });
+
+function snapshotCaseArtifacts(caseId, attempt, sourcePrefixes, summary) {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const destinationDir = join(caseEvidenceDir, caseId);
+  mkdirSync(destinationDir, { recursive: true });
+  for (const fileName of readdirSync(outDir)) {
+    const prefix = sourcePrefixes.find((candidate) =>
+      fileName.startsWith(`${candidate}-`) || fileName.startsWith(`${candidate}.`));
+    if (prefix === undefined) continue;
+    const extension = extname(fileName);
+    const stage = fileName.slice(prefix.length + 1, extension.length > 0 ? -extension.length : undefined)
+      .replace(/[^a-zA-Z0-9_-]+/g, '-') || 'artifact';
+    const destinationPath = join(destinationDir, `${attempt}-${stage}-${timestamp}${extension}`);
+    copyFileSync(join(outDir, fileName), destinationPath);
+    if (extension === '.png') evidenceScreens.push({ caseId, attempt, path: destinationPath });
+  }
+  writeFileSync(
+    join(destinationDir, `${attempt}-summary-${timestamp}.json`),
+    JSON.stringify(summary, null, 2)
+  );
+}
+
+function captureBlockedCase(caseId, attempt, summary) {
+  const prefix = `${caseId}-blocked`;
+  const layout = dumpLayout(`${prefix}-layout.json`);
+  writeFileSync(join(outDir, `${prefix}-layout-text.txt`), collectLayoutText(layout).join('\n') + '\n');
+  captureScreen(`${prefix}-screen.png`);
+  snapshotCaseArtifacts(caseId, attempt, [prefix], summary);
+}
+
+function writeScreenshotIndex() {
+  const ordered = [...evidenceScreens].sort((left, right) => {
+    const leftMatch = /^([CF])(\d+)(.*)$/.exec(left.caseId);
+    const rightMatch = /^([CF])(\d+)(.*)$/.exec(right.caseId);
+    if (leftMatch === null || rightMatch === null) return left.caseId.localeCompare(right.caseId);
+    return (leftMatch[1] === rightMatch[1] ? 0 : leftMatch[1] === 'C' ? -1 : 1) ||
+      Number(leftMatch[2]) - Number(rightMatch[2]) ||
+      leftMatch[3].localeCompare(rightMatch[3]) ||
+      left.attempt - right.attempt;
+  });
+  const lines = ['# 真机场景截图索引', ''];
+  let previousCaseId = '';
+  for (const screen of ordered) {
+    if (screen.caseId !== previousCaseId) {
+      lines.push(`## ${screen.caseId}`, '');
+      previousCaseId = screen.caseId;
+    }
+    const imagePath = relative(outDir, screen.path);
+    lines.push(`![${screen.caseId} attempt ${screen.attempt}](${imagePath})`, '');
+  }
+  const indexPath = join(outDir, 'screenshots-index.md');
+  writeFileSync(indexPath, lines.join('\n'));
+  return indexPath;
+}
 
 const defaultCases = [
   { query: '我明天要从北京去上海，帮我搜索出行方案', expectsTool: true, expectedToolId: 'travel.search' },
@@ -37,19 +138,22 @@ const composioCases = [
     query: '帮我在 GitHub 里找 Appless-Phone 最近的 pr',
     expectsTool: true,
     expectedToolId: 'dynamic.search',
-    expectedDiscoveredToolId: 'dynamic.search'
+    expectedDiscoveredToolId: 'dynamic.search',
+    expectedDynamicQualifiedName: 'github_find_pull_requests'
   },
   {
     query: '帮我在 Google Drive 里找专利交底书',
     expectsTool: true,
     expectedToolId: 'dynamic.search',
-    expectedDiscoveredToolId: 'dynamic.search'
+    expectedDiscoveredToolId: 'dynamic.search',
+    expectedDynamicQualifiedName: 'googledrive_find_file'
   },
   {
     query: '帮我在 Google Docs 里找 AIPhoneDemo 设计文档',
     expectsTool: true,
     expectedToolId: 'dynamic.search',
-    expectedDiscoveredToolId: 'dynamic.search'
+    expectedDiscoveredToolId: 'dynamic.search',
+    expectedDynamicQualifiedName: 'googledocs_search_documents'
   },
   {
     query: '帮我用 Composio Slack 查最近提到 AIPhoneDemo 的消息',
@@ -130,6 +234,8 @@ const whatsappTestTo = (process.env.AIPHONE_WHATSAPP_TEST_TO || '').trim();
 const qaDateValue = new Date();
 qaDateValue.setDate(qaDateValue.getDate() + 7);
 const qaDate = `${qaDateValue.getFullYear()}年${String(qaDateValue.getMonth() + 1).padStart(2, '0')}月${String(qaDateValue.getDate()).padStart(2, '0')}日`;
+const qaDateIso = normalizeCalendarQaDate(qaDate);
+if (qaDateIso.length === 0) throw new Error(`Could not normalize C19 QA date: ${qaDate}`);
 const qaTitle = `Appless QA ${smokeRunId}`;
 const whatsappRecipient = whatsappTestTo.length > 0 ? whatsappTestTo : '{AIPHONE_WHATSAPP_TEST_TO}';
 
@@ -145,7 +251,7 @@ const coreRegressionCases = [
   { id: 'C09', query: '帮我查看我今天 X 和 Slack 上的消息', expectsTool: true, expectedToolId: 'social.feed.search', verifySocialDraft: true },
   { id: 'C10', query: '帮我查看 X 上 OpenAI 最近的公开 post', expectsTool: true, expectedToolId: 'x.post.search' },
   { id: 'C11a', query: '点一杯咖啡', expectsTool: true, expectedToolId: 'food.search' },
-  { id: 'C11b', query: '我只喝瑞幸咖啡', expectsTool: false, expectedToolId: '' },
+  { id: 'C11b', query: '我只喝瑞幸咖啡', expectsTool: false, expectedToolId: '', expectedToolIds: ['memory.update'] },
   { id: 'C11c', query: '点一杯咖啡', expectsTool: true, expectedToolId: 'food.search', expectedPersonaMemory: 'luckin_only' },
   { id: 'C12', query: '我想看世界杯下一场比赛和赛程', expectsTool: true, expectedToolId: 'worldcup.open' },
   { id: 'C13', query: '帮我查明天深圳天气', expectsTool: true, expectedToolId: 'dynamic.search', expectedDiscoveredToolId: 'weather.query' },
@@ -161,17 +267,41 @@ const coreRegressionCases = [
     blockedWithoutWhatsAppTestTo: true
   },
   { id: 'C19a', query: `帮我查询 ${qaDate} 的 Google Calendar 日程`, expectsTool: true, expectedToolId: 'calendar.events.search' },
-  { id: 'C19b', query: `帮我在 ${qaDate} 下午3点创建标题为 ${qaTitle} 的30分钟日程`, expectsTool: true, expectedToolId: 'calendar.event.create' },
-  { id: 'C19c', query: `把 ${qaDate} 的 ${qaTitle} 日程改到下午4点，保持30分钟`, expectsTool: true, expectedToolId: 'calendar.event.update' },
+  { id: 'C19b', query: `帮我在 ${qaDate} 下午3点创建标题为 ${qaTitle} 的30分钟日程`, expectsTool: true, expectedToolId: 'calendar.event.create', verifyCalendarCreate: true },
+  { id: 'C19c', query: `把 ${qaDate} 的 ${qaTitle} 日程改到下午4点，保持30分钟`, expectsTool: true, expectedToolId: 'calendar.events.search', verifyCalendarUpdate: true },
   { id: 'C19d', query: `帮我查询 ${qaDate} 标题为 ${qaTitle} 的 Google Calendar 日程`, expectsTool: true, expectedToolId: 'calendar.events.search' },
-  { id: 'C19e', query: `删除 ${qaDate} 标题为 ${qaTitle} 的 Google Calendar 日程`, expectsTool: true, expectedToolId: 'calendar.event.delete', verifyCalendarDelete: true },
+  { id: 'C19e', query: `删除 ${qaDate} 标题为 ${qaTitle} 的 Google Calendar 日程`, expectsTool: true, expectedToolId: 'calendar.events.search', verifyCalendarDelete: true },
   { id: 'C19f', query: `再次查询 ${qaDate} 标题为 ${qaTitle} 的 Google Calendar 日程，确认它不存在`, expectsTool: true, expectedToolId: 'calendar.events.search', expectAbsentText: qaTitle },
   {
     id: 'C20',
     query: '帮我找8月8日到10日深圳科技园附近的酒店，2位成人1间房',
     expectsTool: true,
     expectedToolId: 'hotel.search',
-    verifyHotelDetail: true
+    verifyHotelDetail: true,
+    hotelCapabilities: ['hotel.detail', 'hotel.booking.open', 'hotel.navigate']
+  },
+  {
+    id: 'C21',
+    query: '查一下现在的时间，查好时间之后帮我打车从华为坂田基地打车到秋岗花园，再在明天的这个时间新建一个会议日程',
+    expectsTool: true,
+    expectedToolId: 'time',
+    expectedToolIds: ['time', 'ride.estimate'],
+    minimumDataRounds: 2,
+    expectedDataRounds: [
+      { toolId: 'time', round: 1 },
+      { toolId: 'ride.estimate', round: 2 }
+    ]
+  },
+  {
+    id: 'C22',
+    query: '我现在要打车从深圳华为坂田基地到秋港花园，帮我点一杯瑞幸生椰拿铁，半糖少冰，转账给罗一格5美金',
+    expectsTool: true,
+    expectedToolId: 'ride.estimate',
+    expectedToolIds: ['ride.estimate', 'luckin.order.preview', 'payment.send'],
+    minimumDataRounds: 1,
+    expectedDataRounds: [
+      { toolId: 'ride.estimate', round: 1 }
+    ]
   }
 ];
 
@@ -182,17 +312,89 @@ const retainedFullCases = [
   { id: 'F04', query: '瑞幸生椰拿铁多少钱', expectsTool: true, expectedToolId: 'food.search' },
   { id: 'F05', query: '用 Google Pay 给罗一格转 1 美元', expectsTool: true, expectedToolId: 'payment.send' },
   { id: 'F06', query: '帮我设置 Stripe 收款账户', expectsTool: true, expectedToolId: 'payment.account.setup' },
-  { id: 'F07', query: '帮我用 Gmail 写一封邮件给 alice@example.com，说我收到了', expectsTool: true, expectedToolId: 'gmail.draft.create' },
-  { id: 'F08', query: '确认应用刚才的 Gmail 草稿', expectsTool: true, expectedToolId: 'gmail.draft.apply' },
+  {
+    id: 'F07',
+    query: '帮我用 Gmail 写一封邮件给 alice@example.com，说我收到了',
+    expectsTool: true,
+    expectedToolId: 'gmail.draft.create',
+    retryLimit: 0
+  },
+  {
+    id: 'F08',
+    query: '确认应用刚才的 Gmail 草稿',
+    expectsTool: true,
+    expectedToolId: 'gmail.draft.apply',
+    dependsOnCaseId: 'F07',
+    retryLimit: 0
+  },
   { id: 'F09', query: '帮我在 YouTube 搜索世界杯相关视频', expectsTool: true, expectedToolId: 'youtube.video.search' },
   { id: 'F10', query: '帮我查看我的 YouTube 播放列表', expectsTool: true, expectedToolId: 'youtube.mine.playlists' },
   { id: 'F11', query: '帮我查看我的 YouTube 订阅', expectsTool: true, expectedToolId: 'youtube.mine.subscriptions' },
-  { id: 'F13', query: '帮我在 GitHub 里找 Appless-Phone 最近的 pr', expectsTool: true, expectedToolId: 'dynamic.search', expectedDiscoveredToolId: 'dynamic.search' },
-  { id: 'F14', query: '帮我在 Google Drive 里找专利交底书', expectsTool: true, expectedToolId: 'dynamic.search', expectedDiscoveredToolId: 'dynamic.search' },
-  { id: 'F15', query: '帮我在 Google Docs 里找 AIPhoneDemo 设计文档', expectsTool: true, expectedToolId: 'dynamic.search', expectedDiscoveredToolId: 'dynamic.search' }
+  {
+    id: 'F12',
+    query: '帮我先用 Google Maps 搜索伦敦国王十字车站，再用搜索结果的真实 placeId 查询地点详情',
+    expectsTool: true,
+    expectedToolId: 'maps.place.search',
+    expectedToolIds: ['maps.place.search', 'maps.place.details'],
+    minimumDataRounds: 2,
+    expectedDependencies: [{
+      toolId: 'maps.place.details',
+      predecessorToolId: 'maps.place.search',
+      path: '/places/0/placeId',
+      target: '/placeId'
+    }]
+  },
+  { id: 'F13', query: '帮我在 GitHub 里找 Appless-Phone 最近的 pr', expectsTool: true, expectedToolId: 'dynamic.search', expectedDiscoveredToolId: 'dynamic.search', expectedDynamicQualifiedName: 'github_find_pull_requests' },
+  { id: 'F14', query: '帮我在 Google Drive 里找专利交底书', expectsTool: true, expectedToolId: 'dynamic.search', expectedDiscoveredToolId: 'dynamic.search', expectedDynamicQualifiedName: 'googledrive_find_file' },
+  { id: 'F15', query: '帮我在 Google Docs 里找 AIPhoneDemo 设计文档', expectsTool: true, expectedToolId: 'dynamic.search', expectedDiscoveredToolId: 'dynamic.search', expectedDynamicQualifiedName: 'googledocs_search_documents' },
+  {
+    id: 'F16',
+    query: '打开当前应用的 Composio 管理授权设置',
+    expectsTool: false,
+    expectedToolId: '',
+    expectedToolIds: [],
+    verifyComposioSettings: true
+  }
 ];
 
 const fullRegressionCases = [...coreRegressionCases, ...retainedFullCases];
+
+function lifecycleOptions(testCase) {
+  const expectedToolId = testCase.expectedToolId || '';
+  return {
+    expectedToolIds: testCase.expectedToolIds ||
+      (expectedToolId.length > 0 ? [expectedToolId] : []),
+    minimumDataRounds: testCase.minimumDataRounds || 0,
+    expectedDependencies: testCase.expectedDependencies || [],
+    expectedDataRounds: testCase.expectedDataRounds || [],
+    expectedParallelDataToolIds: testCase.expectedParallelDataToolIds || []
+  };
+}
+
+const coreScenarioManifest = [
+  ['C01', []], ['C02', ['travel.search']], ['C03', ['food.search']],
+  ['C04', ['maps.place.search']], ['C05', ['mail.search']],
+  ['C06', ['gmail.mail.search']], ['C07', ['media.video.search']],
+  ['C08', ['media.aggregate.search']], ['C09', ['social.feed.search']],
+  ['C10', ['x.post.search']], ['C11', ['food.search', 'memory.update']],
+  ['C12', ['worldcup.open']], ['C13', ['dynamic.search']],
+  ['C14', ['ride.estimate']], ['C15', ['luckin.order.preview']],
+  ['C16', ['maps.route.open']], ['C17', ['payment.send']],
+  ['C18', ['whatsapp.message.send']],
+  ['C19', ['calendar.events.search', 'calendar.event.create', 'calendar.event.update', 'calendar.event.delete']],
+  ['C20', ['hotel.search']],
+  ['C21', ['time', 'ride.estimate']],
+  ['C22', ['ride.estimate', 'luckin.order.preview', 'payment.send']]
+].map(([id, expectedToolIds]) => ({ id, expectedToolIds }));
+
+const fullScenarioManifest = retainedFullCases.map((testCase) => ({
+  id: testCase.id,
+  expectedToolIds: testCase.expectedToolIds ||
+    (testCase.expectedToolId.length > 0 ? [testCase.expectedToolId] : []),
+  minimumDataRounds: testCase.minimumDataRounds || 0,
+  expectedDependencies: testCase.expectedDependencies || [],
+  expectedDynamicQualifiedName: testCase.expectedDynamicQualifiedName || ''
+}));
 
 const forbiddenSocialHubLegacyMarkers = [
   'SocialInbox',
@@ -283,9 +485,7 @@ const visibleDomainMarkers = [
   'gmail.message.send',
   'Composio Gmail',
   '授权 Gmail',
-  'UnsafeActionBlocked',
   '不会模拟 Gmail 邮件',
-  '不会自动发送 Gmail',
   'AMAP_MAPS_API_KEY',
   'Authorization',
   'API_KEY',
@@ -405,6 +605,7 @@ const runComposioAuthCases = argv.includes('--composio-auth');
 const runGoogleApps = argv.includes('--google-apps');
 const runFullRegression = argv.includes('--full-regression');
 const runCoreRegression = argv.includes('--core-regression');
+const runGmailSendManual = argv.includes('--gmail-send-manual');
 const listCases = argv.includes('--list-cases');
 const queryArgs = argv.filter((arg) => arg !== '--clean-data' &&
   arg !== '--dynamic-tools' &&
@@ -413,6 +614,7 @@ const queryArgs = argv.filter((arg) => arg !== '--clean-data' &&
   arg !== '--google-apps' &&
   arg !== '--full-regression' &&
   arg !== '--core-regression' &&
+  arg !== '--gmail-send-manual' &&
   arg !== '--list-cases');
 const selectedDefaultCases = runComposioCases ? composioCases :
   (runFullRegression ? fullRegressionCases :
@@ -421,13 +623,42 @@ const selectedDefaultCases = runComposioCases ? composioCases :
         (runDynamicCases ? defaultCases.concat(dynamicCases) : defaultCases))));
 const useDefaultCases = queryArgs.length === 0;
 const queries = useDefaultCases ? selectedDefaultCases.map((testCase) => testCase.query) : queryArgs;
+const queryRetryLimit = Number.parseInt(process.env.AIPHONE_QUERY_RETRY_LIMIT || '2', 10);
 if (listCases) {
-  console.log(JSON.stringify(selectedDefaultCases, null, 2));
+  if (runGmailSendManual) {
+    const safeThreadId = (process.env.AIPHONE_GMAIL_SAFE_THREAD_ID || '').trim();
+    const safeRecipient = (process.env.AIPHONE_GMAIL_SAFE_RECIPIENT || '').trim();
+    if (safeThreadId.length === 0 || safeRecipient.length === 0) {
+      console.error('Manual Gmail reply-send listing requires AIPHONE_GMAIL_SAFE_THREAD_ID and AIPHONE_GMAIL_SAFE_RECIPIENT.');
+      process.exit(2);
+    }
+    console.log(JSON.stringify([{
+      id: 'M01',
+      mode: 'manual-only',
+      automated: false,
+      expectedToolIds: ['gmail.message.send'],
+      requiresCurrentVisibleReplySurface: true
+    }], null, 2));
+    process.exit(0);
+  }
+  const manifest = queryArgs.length > 0 ? queryArgs.map((query) => {
+    const testCase = expectedCaseForQuery(query);
+    return {
+      id: testCase.id || '',
+      expectedToolIds: lifecycleOptions(testCase).expectedToolIds,
+      retryLimit: testCase.retryLimit ?? queryRetryLimit
+    };
+  }) : (runFullRegression ?
+    [...coreScenarioManifest, ...fullScenarioManifest] : coreScenarioManifest);
+  console.log(JSON.stringify(manifest, null, 2));
   process.exit(0);
+}
+if (runGmailSendManual) {
+  console.error('gmail.message.send is manual-only; use --gmail-send-manual --list-cases to inspect its safe gate.');
+  process.exit(2);
 }
 const target = process.env.AIPHONE_HDC_TARGET || firstTarget();
 const timeoutMs = Number.parseInt(process.env.AIPHONE_QUERY_TIMEOUT_MS || '90000', 10);
-const queryRetryLimit = Number.parseInt(process.env.AIPHONE_QUERY_RETRY_LIMIT || '2', 10);
 const mailActionScrollLimit = Number.parseInt(process.env.AIPHONE_MAIL_ACTION_SCROLL_LIMIT || '16', 10);
 
 function isWhatsAppSendQuery(query) {
@@ -443,6 +674,10 @@ function isHotelQuery(query) {
 }
 
 function expectedCaseForQuery(query) {
+  const configuredCase = fullRegressionCases.find((testCase) => testCase.query === query);
+  if (configuredCase !== undefined) {
+    return configuredCase;
+  }
   if (isPersonaMemoryUpdateQuery(query)) {
     return {
       expectsTool: false,
@@ -548,7 +783,7 @@ function expectedCaseForQuery(query) {
   if (/Gmail|谷歌邮箱|谷歌邮件/i.test(query) && /直接发送|立刻发送|马上发送|不确认直接发/.test(query)) {
     return {
       expectsTool: true,
-      expectedToolId: 'gmail.message.send'
+      expectedToolId: 'gmail.draft.create'
     };
   }
   if (/Gmail|谷歌邮箱|谷歌邮件/i.test(query) && /写一封|写邮件|起草|草稿|回复|撰写/.test(query)) {
@@ -652,7 +887,8 @@ function expectedCaseForQuery(query) {
     return {
       expectsTool: true,
       expectedToolId: 'hotel.search',
-      verifyHotelDetail: true
+      verifyHotelDetail: true,
+      hotelCapabilities: ['hotel.detail', 'hotel.booking.open', 'hotel.navigate']
     };
   }
   if (/瑞幸|luckin|ruixing/i.test(query) && /点一杯|点杯|点个瑞幸|点瑞幸|帮我点|我要点|下单|下一杯|买一杯|帮我买|购买一杯|购买瑞幸|来一杯|要一杯/.test(query)) {
@@ -930,13 +1166,33 @@ function dumpLayout(localName = 'latest-layout.json') {
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
-function captureScreen(localName = 'latest-screen.png') {
-  moveAppWindowIntoScreenshot();
+function captureCurrentScreen(localName = 'latest-screen.png') {
   const remote = '/data/local/tmp/aiphone-smoke-screen.png';
   const local = join(outDir, localName);
   hdc(['shell', 'uitest', 'screenCap', '-p', remote]);
   hdc(['file', 'recv', remote, local]);
   return local;
+}
+
+function captureScreen(localName = 'latest-screen.png') {
+  moveAppWindowIntoScreenshot();
+  return captureCurrentScreen(localName);
+}
+
+function captureForegroundAbility(localName) {
+  const output = hdc(['shell', 'aa', 'dump', '-l']);
+  const path = join(outDir, localName);
+  writeFileSync(path, output);
+  return {
+    bundleName: foregroundBundleFromAbilityDump(output),
+    path
+  };
+}
+
+function sanitizeExternalUrlLogs(logText) {
+  return String(logText || '')
+    .replace(/("(?:bookingUrl|uri|url)"\s*:\s*")[^"]*(")/g, '$1<redacted>$2')
+    .replace(/\b(url|uri|bookingUrl)=\S+/g, '$1=<redacted>');
 }
 
 function collectLayoutText(layout) {
@@ -967,6 +1223,13 @@ function findTextCenter(layout, marker) {
 function findExactTextCenter(layout, marker) {
   const match = findTextMatches(layout, marker).find((item) =>
     item.text.split('|').some((value) => value.trim() === marker));
+  return match === undefined ? null : { x: match.bounds.x, y: match.bounds.y };
+}
+
+function findHotelDetailTextCenter(layout, marker) {
+  const match = findTextMatches(layout, marker).find((item) =>
+    item.text.split('|').some((value) =>
+      matchesHotelDetailAccessibleLabel(value, marker)));
   return match === undefined ? null : { x: match.bounds.x, y: match.bounds.y };
 }
 
@@ -1010,7 +1273,7 @@ function findHeaderSettingsCenter(layout) {
     }
   });
   candidates.sort((left, right) => right.x - left.x);
-  return candidates.length >= 2 ? { x: candidates[1].x, y: candidates[1].y } : null;
+  return candidates.length > 0 ? { x: candidates[0].x, y: candidates[0].y } : null;
 }
 
 async function findTextCenterWithScroll(marker, localNamePrefix, maxSwipes = 4) {
@@ -1021,6 +1284,32 @@ async function findTextCenterWithScroll(marker, localNamePrefix, maxSwipes = 4) 
     const found = findTextCenter(layout, marker);
     if (found !== null) {
       return found;
+    }
+    swipeResultsUp();
+    await sleep(800);
+  }
+  return null;
+}
+
+async function findExternalAuthActionWithScroll(appName, localNamePrefix, maxSwipes = 5) {
+  for (let attempt = 0; attempt <= maxSwipes; attempt += 1) {
+    const layout = dumpLayout(`${localNamePrefix}-${attempt + 1}.json`);
+    const text = collectLayoutText(layout).join('\n');
+    writeFileSync(join(outDir, `${localNamePrefix}-${attempt + 1}-text.txt`), text + '\n');
+    const app = findTextMatches(layout, appName).find((item) =>
+      item.text.split('|').some((value) => value.trim() === appName));
+    const actions = findTextMatches(layout, '授权').filter((item) =>
+      item.text.split('|').some((value) => value.trim() === '授权'));
+    if (app !== undefined) {
+      const action = actions
+        .filter((item) => item.bounds.y > app.bounds.y &&
+          item.bounds.y - app.bounds.y < 280 &&
+          item.bounds.x > app.bounds.x)
+        .sort((left, right) =>
+          Math.abs(left.bounds.y - app.bounds.y) - Math.abs(right.bounds.y - app.bounds.y))[0];
+      if (action !== undefined) {
+        return { x: action.bounds.x, y: action.bounds.y };
+      }
     }
     swipeResultsUp();
     await sleep(800);
@@ -1119,7 +1408,7 @@ function lineMatchesPid(line, pid) {
   return line.indexOf(` ${pid} `) >= 0;
 }
 
-async function captureWhile(appPid, runAction) {
+async function captureWhile(appPid, runAction, lifecycleOptions = null) {
   const logs = [];
   const child = spawn('hdc', ['-t', target, 'hilog'], {
     stdio: ['ignore', 'pipe', 'pipe']
@@ -1150,22 +1439,109 @@ async function captureWhile(appPid, runAction) {
     while (Date.now() - started < timeoutMs) {
       await sleep(500);
       const text = logs.join('\n');
-      const done = /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult)\] ok=/.test(text) ||
+      const hotelActionEvidence = hotelActionEvidenceFromLogs(text);
+      const hasHotelActionEvidence =
+        typeof hotelActionEvidence.surfaceId === 'string' &&
+        hotelActionEvidence.surfaceId.length > 0;
+      const hotelActionEvidencePopulated =
+        hasPopulatedHotelActionEvidence(hotelActionEvidence);
+      const hotelToolLifecycle = hotelToolLifecycleFromLogs(text);
+      const hotelToolLifecycleComplete = hotelToolLifecycle.ok;
+      const customCompletion = lifecycleOptions !== null &&
+        typeof lifecycleOptions.completionEvidence === 'function' ?
+        lifecycleOptions.completionEvidence(text) : null;
+      const multiAgentLifecycle = lifecycleOptions === null || customCompletion !== null ? null :
+        multiAgentTurnEvidence(text, lifecycleOptions);
+      const hasTerminalOutcome =
+        /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult)\] ok=/.test(text) ||
         /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest)\] none/.test(text) ||
         /\[AIPhone\]\[PersonaMemoryUpdate\]/.test(text);
+      const done = customCompletion !== null ? customCompletion.complete :
+        lifecycleOptions === null ?
+        (hotelActionEvidencePopulated || hotelToolLifecycleComplete || hasTerminalOutcome) :
+        multiAgentLifecycle.complete;
+      const hotelActionRequested =
+        /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel|LocalToolRequest)\][^\n]*toolId=hotel\.(?:search|detail)/.test(text);
+      const hotelRuntimeRequested = hotelActionRequested || hotelToolLifecycle.requested;
       const hasQueryHtmlDocument = /\[AIPhone\]\[HtmlHomeDocument\][^\n]*source=(?!welcome\b)[^ \n]+[^\n]*chars=\d+[^\n]*blocks=\d+/.test(text);
       if (done && doneAt === 0) {
         doneAt = Date.now();
       }
-      if (done && (hasQueryHtmlDocument || Date.now() - doneAt > 3000)) {
+      const hotelUiReady = customCompletion !== null ? customCompletion.complete :
+        lifecycleOptions !== null ? multiAgentLifecycle.complete :
+        hotelActionEvidencePopulated ||
+        (hotelToolLifecycleComplete && Date.now() - doneAt > 1500) ||
+        (hasTerminalOutcome && hasHotelActionEvidence && Date.now() - doneAt > 1500);
+      const completionSettled = captureCompletionSettled({
+        done,
+        doneAt,
+        lifecycleOptions,
+        customCompletion,
+        now: Date.now()
+      });
+      if (customCompletion !== null && completionSettled) {
+        break;
+      }
+      if (customCompletion !== null && !done && lifecycleOptions.idleActionTimeoutMs > 0 &&
+        Date.now() - started > lifecycleOptions.idleActionTimeoutMs &&
+        !/\[AIPhone\]\[MultiAgentActionRun\][^\n]*action=(?:mail|gmail)\.thread\.read\b/.test(text)) {
+        break;
+      }
+      if (customCompletion === null && completionSettled && (!hotelRuntimeRequested || hotelUiReady) &&
+        (hasQueryHtmlDocument || Date.now() - doneAt > 3000)) {
         break;
       }
       const modelFailed = /\[AIPhone\]\[(ModelResult|A2uiHomeModelResult)\] ok=false/.test(text);
       const hasToolRequest = /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel)\][^\n]*toolId=/.test(text);
-      if (modelFailed && !hasToolRequest && Date.now() - started > 5000) {
+      if (lifecycleOptions === null && modelFailed && !hasToolRequest &&
+        Date.now() - started > 5000) {
         break;
       }
     }
+  } catch (error) {
+    actionError = error;
+  } finally {
+    child.kill('SIGTERM');
+    await waitForProcessExit(child, 1500);
+    if (child.exitCode === null) {
+      child.kill('SIGKILL');
+      await waitForProcessExit(child, 1500);
+    }
+    cleanupHilogProcesses();
+  }
+  if (actionError !== null) {
+    throw actionError;
+  }
+  return logs;
+}
+
+async function captureAppLogsFor(appPid, runAction, durationMs = 2500) {
+  const logs = [];
+  const child = spawn('hdc', ['-t', target, 'hilog'], {
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  let buffer = '';
+  const onData = (chunk) => {
+    buffer += chunk;
+    const parts = buffer.split('\n');
+    buffer = parts.pop() || '';
+    for (const line of parts) {
+      if (lineMatchesPid(line, appPid) &&
+        (line.includes('AIPhone') || line.includes('aiphonedemo'))) {
+        logs.push(line);
+      }
+    }
+  };
+  child.stdout.on('data', onData);
+  child.stderr.on('data', onData);
+
+  let actionError = null;
+  try {
+    await sleep(800);
+    await runAction();
+    await sleep(durationMs);
   } catch (error) {
     actionError = error;
   } finally {
@@ -1252,71 +1628,121 @@ function htmlHomeSurfaceLoadEvidence(logs) {
   };
 }
 
-function analyze(query, logs, expectedTool, expectedToolId = '', expectedDiscoveredToolId = '') {
+function analyze(
+  query,
+  logs,
+  expectedTool,
+  expectedToolId = '',
+  expectedDiscoveredToolId = '',
+  expectedDynamicQualifiedName = '',
+  expectedToolIds = [],
+  minimumDataRounds = 0,
+  expectedDependencies = [],
+  expectedDataRounds = [],
+  expectedParallelDataToolIds = []
+) {
   const text = logs.join('\n');
+  const multiAgentLifecycle = multiAgentTurnEvidence(text, {
+    expectedToolIds,
+    minimumDataRounds,
+    expectedDependencies,
+    expectedDataRounds,
+    expectedParallelDataToolIds
+  });
+  const executionEvidence = toolExecutionEvidence(text, {
+    expectedToolIds,
+    minimumDataRounds,
+    expectedDependencies,
+    expectedDataRounds,
+    expectedParallelDataToolIds
+  });
   const htmlHomeDocument = htmlHomeDocumentEvidence(logs);
   const htmlHomeSurfaceLoad = htmlHomeSurfaceLoadEvidence(logs);
   const escapedToolId = escapeRegExp(expectedToolId);
-  const toolIdPattern = expectedToolId.length > 0 ?
-    new RegExp(`\\[AIPhone\\]\\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel)\\][^\\n]*toolId=${escapedToolId}`) :
-    null;
-  const hasExpectedToolId = toolIdPattern === null ? true : toolIdPattern.test(text);
-  const discoveryPattern = expectedDiscoveredToolId.length > 0 ?
-    new RegExp(`\\[AIPhone\\]\\[DynamicToolDiscovery\\][^\\n]*selectedToolId=${expectedDiscoveredToolId.replace('.', '\\.')}`) :
-    null;
-  const hasExpectedDiscoveredToolId = discoveryPattern === null ? true : discoveryPattern.test(text);
+  const hasExpectedToolId = multiAgentLifecycle.complete &&
+    expectedToolIds.every((toolId) => multiAgentLifecycle.toolIds.includes(toolId));
+  const dynamicDiscovery = expectedDiscoveredToolId.length === 0 ? null :
+    dynamicToolDiscoveryEvidence(text, {
+      expectedSelectedToolId: expectedDiscoveredToolId,
+      expectedProvider: expectedDiscoveredToolId === 'dynamic.search' ? 'composio' : '',
+      expectedQualifiedName: expectedDynamicQualifiedName
+    });
+  const hasExpectedDiscoveredToolId = dynamicDiscovery === null ? true : dynamicDiscovery.ok;
   const missingConfig = /\[AIPhone\]\[LocalToolMissingConfig\]/.test(text);
-  const modelSelectedExpectedToolId = expectedToolId.length === 0 ||
+  const rawModelSelectedExpectedToolId = expectedToolId.length === 0 ||
     new RegExp(`"toolId":"${escapedToolId}"`).test(text) ||
     new RegExp(`toolId=${escapedToolId}`).test(text);
+  const modelSelectedExpectedToolId = expectedToolId.length === 0 ||
+    executionEvidence.exactMultiAgentLifecycle ||
+    (!executionEvidence.hasMultiAgentInput && rawModelSelectedExpectedToolId);
   const personaCoffeeProof = !isPersonaCoffeeQuery(query) || /饮食搭子上线|饮食搭子/.test(text);
   const personaMemoryUpdateProof = !isPersonaMemoryUpdateQuery(query) ||
-    (/\[AIPhone\]\[PersonaMemoryUpdate\][^\n]*ok=true[^\n]*personaId=food_companion/.test(text) &&
-      /\[AIPhone\]\[ToolRequest\][^\n]*toolId=memory\.update/.test(text) &&
-      /\[AIPhone\]\[ToolResult\] ok=true toolId=memory\.update/.test(text));
+    /\[AIPhone\]\[PersonaMemoryUpdate\][^\n]*ok=true[^\n]*personaId=food_companion/.test(text);
   const result = {
     query,
     expectedTool,
     expectedToolId,
+    expectedToolIds,
     expectedDiscoveredToolId,
+    expectedDynamicQualifiedName,
+    dynamicDiscovery,
+    multiAgentLifecycle,
     hasExpectedToolId,
     hasExpectedDiscoveredToolId,
     htmlHomeDocument,
     htmlHomeSurfaceLoad,
     htmlLoadError: /\[AIPhone\]\[HtmlHomeSurfaceLoadError\]/.test(text),
     modelSelectedExpectedToolId,
+    exactMultiAgentToolLifecycle: executionEvidence.exactMultiAgentLifecycle,
+    toolExecutionObserved: executionEvidence.observed,
     personaCoffeeProof,
     personaMemoryUpdateProof,
     directIntent: /\[AIPhone\]\[(ToolRequestByIntent|A2uiHomeToolRequestByIntent)\] toolId=/.test(text),
     localToolRequest: /\[AIPhone\]\[LocalToolRequest\] endpoint=local:\/\/aiphone-tools toolId=/.test(text),
-    model200: /\[AIPhone\]\[(ModelStreamResponse|ModelRawResponse)\] code=200/.test(text) || /response_code":200[\s\S]*dst_port":11434/.test(text),
-    modelOk: /\[AIPhone\]\[(ModelResult|A2uiHomeModelResult)\] ok=true/.test(text),
-    toolRequested: /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel)\][^\n]*toolId=/.test(text),
-    toolOk: /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult)\] ok=true/.test(text),
+    model200: modelTransportEvidence(text, {
+      expectedToolIds,
+      minimumDataRounds,
+      expectedDependencies
+    }),
+    modelOk: multiAgentLifecycle.ok,
+    toolRequested: multiAgentLifecycle.toolIds.length > 0,
+    toolOk: multiAgentLifecycle.ok && multiAgentLifecycle.toolIds.length > 0,
     failedConnect: /failed to connect|Could not connect|Couldn.t connect|ECONNREFUSED|server is not running|CURLcode result 7|curl_code":7|os_errno":111/i.test(text),
     providerFailed: /\[AIPhone\]\[LocalTool12306Endpoint\][^\n]*code=[45]\d\d/.test(text) ||
       /\[AIPhone\]\[LocalToolException\]/.test(text) ||
       /\[AIPhone\]\[A2uiHomeToolOutput\][^\n]*"status":"error"/.test(text) ||
       /Google Calendar API 调用失败/.test(text) ||
       /invalid request data provided|Composio 调用失败|WhatsApp Business 账号不可用/i.test(text) ||
+      (multiAgentLifecycle.complete && multiAgentLifecycle.status === 'error') ||
       (missingConfig && expectedToolId !== 'travel.search'),
-    modelFailed: /\[AIPhone\]\[(ModelResult|A2uiHomeModelResult)\] ok=false/.test(text),
-    toolNone: /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest)\] none/.test(text),
-    gmailWebOpened: /\[AIPhone\]\[A2uiHomeOpenUrl\] ok=true url=https:\/\/mail\.google\.com/.test(text),
+    modelFailed: !multiAgentLifecycle.ok,
+    toolNone: multiAgentLifecycle.complete && multiAgentLifecycle.toolIds.length === 0,
+    gmailWebOpened:
+      /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel|LocalToolRequest)\][^\n]*toolId=gmail\.open\.web/.test(text) &&
+      /\[AIPhone\]\[A2uiHomeOpenUrl\] ok=true scheme=https chars=\d+/.test(text),
     worldCupOpened: /\[AIPhone\]\[AnythingDemoRouteByTool\]/.test(text),
     syntheticFallback: forbiddenSyntheticMarkers.some((marker) => text.includes(marker))
   };
-  const modelFallbackOnlyAfterSameToolSelection = result.modelFailed && result.directIntent && result.modelSelectedExpectedToolId;
-  const modelPassed = modelFallbackOnlyAfterSameToolSelection || (result.model200 && result.modelOk && !result.modelFailed);
+  const modelPassed = multiAgentLifecycle.ok;
+  const expectsDirectText = expectedTool === false && !isPersonaMemoryUpdateQuery(query);
+  const directTextLifecycle = expectsDirectText && multiAgentLifecycle.complete &&
+    multiAgentLifecycle.ok && multiAgentLifecycle.status === 'success' &&
+    multiAgentLifecycle.textResult && multiAgentLifecycle.surfaceId === 'none' &&
+    multiAgentLifecycle.finalUiSurfaceId === '' && multiAgentLifecycle.toolIds.length === 0 &&
+    multiAgentLifecycle.dataTasks.length === 0 && multiAgentLifecycle.surfaceIds.length === 0 &&
+    result.model200 && !result.directIntent && !result.syntheticFallback;
   const htmlDocumentPassed = result.htmlHomeDocument.ok ||
     (isSocialHubExpectedToolId(expectedToolId) && result.htmlHomeDocument.count > 0) ||
     (expectedToolId === 'worldcup.open' && result.worldCupOpened);
-  const baseWithoutTransport = !result.htmlLoadError &&
-    result.htmlHomeSurfaceLoad.ok &&
-    !result.syntheticFallback &&
-    (!result.directIntent || modelFallbackOnlyAfterSameToolSelection || (expectedToolId === 'worldcup.open' && result.worldCupOpened)) &&
-    htmlDocumentPassed;
+  const baseWithoutTransport = expectsDirectText ?
+    !result.htmlLoadError && directTextLifecycle :
+    !result.htmlLoadError &&
+      result.htmlHomeSurfaceLoad.ok &&
+      !result.syntheticFallback &&
+      (!result.directIntent || (expectedToolId === 'worldcup.open' && result.worldCupOpened)) &&
+      htmlDocumentPassed;
   result.modelPassed = modelPassed;
+  result.directTextLifecycle = directTextLifecycle;
   result.transportPassed = !result.failedConnect && !result.providerFailed;
   result.basePassedWithoutTransport = baseWithoutTransport;
   const basePassed = result.transportPassed && baseWithoutTransport;
@@ -1324,18 +1750,17 @@ function analyze(query, logs, expectedTool, expectedToolId = '', expectedDiscove
     result.modelPassed = result.personaMemoryUpdateProof === true;
     result.transportPassed = true;
     result.basePassedWithoutTransport = true;
-    result.ok = result.personaMemoryUpdateProof === true &&
-      /\[AIPhone\]\[ToolRequest\][^\n]*toolId=memory\.update/.test(text) &&
-      /\[AIPhone\]\[ToolResult\] ok=true toolId=memory\.update/.test(text);
+    result.ok = result.personaMemoryUpdateProof === true && multiAgentLifecycle.ok &&
+      multiAgentLifecycle.toolIds.length === 1 &&
+      multiAgentLifecycle.toolIds[0] === 'memory.update';
   } else if (expectedTool === true) {
-    result.ok = basePassed && modelPassed && result.toolRequested &&
-      (result.localToolRequest || (expectedToolId === 'worldcup.open' && result.worldCupOpened)) &&
-      result.toolOk && result.hasExpectedToolId && result.hasExpectedDiscoveredToolId && result.personaCoffeeProof;
+    result.ok = basePassed && modelPassed && result.toolRequested && result.toolOk &&
+      result.hasExpectedToolId && result.hasExpectedDiscoveredToolId && result.personaCoffeeProof;
   } else if (expectedTool === false) {
-    result.ok = basePassed && modelPassed && result.toolNone && !result.toolRequested && !result.localToolRequest;
+    result.ok = basePassed && modelPassed && result.toolNone && !result.toolRequested;
   } else {
     result.ok = basePassed && modelPassed &&
-      (result.toolRequested ? (result.localToolRequest && result.toolOk) : (result.toolNone && !result.localToolRequest));
+      (result.toolRequested ? result.toolOk : result.toolNone);
   }
   return result;
 }
@@ -1534,7 +1959,7 @@ function layoutExpectationsForQuery(query) {
     return ['Gmail Web', 'gmail.open.web', 'https://mail.google.com'];
   }
   if (/Gmail|谷歌邮箱|谷歌邮件/i.test(query) && /直接发送|立刻发送|马上发送|不确认直接发/.test(query)) {
-    return ['UnsafeActionBlocked', '不会自动发送 Gmail', 'gmail.message.send'];
+    return ['gmail.draft.create', 'Composio Gmail', '授权 Gmail', '不会模拟 Gmail 邮件'];
   }
   if (/Gmail|谷歌邮箱|谷歌邮件/i.test(query) && /写一封|写邮件|起草|草稿|回复|撰写/.test(query)) {
     return ['gmail.draft.create', 'Composio Gmail', '授权 Gmail', 'Draft saved', 'Saved in Gmail', 'ready_to_apply', '不会模拟 Gmail 邮件'];
@@ -1590,7 +2015,7 @@ function layoutExpectationsForQuery(query) {
     return ['高铁', '12306', 'train.search'];
   }
   if (isHotelQuery(query)) {
-    return ['酒店 · 实时搜索', 'RollingGo', '查看房型'];
+    return ['酒店 · 实时搜索', 'RollingGo'];
   }
   if (/瑞幸|luckin|ruixing/i.test(query) && /点一杯|点杯|点个瑞幸|点瑞幸|帮我点|我要点|下单|下一杯|买一杯|帮我买|购买一杯|购买瑞幸|来一杯|要一杯/.test(query)) {
     return ['瑞幸', 'luckin.order.preview', '选择瑞幸门店', '确认瑞幸订单', '确认下单'];
@@ -1687,24 +2112,88 @@ function expandMatchesForTarget(layout, targetMarker) {
     });
 }
 
-async function verifyMailExpandedBody(layout, index) {
+function currentMailReadEvidence(logText, sourceToolId, actionContext) {
+  const actionIds = ['mail.thread.read', 'gmail.thread.read'];
+  const results = actionIds.map((actionId) => mailThreadReadEvidence(
+    logText,
+    exactActionOptions(actionId, sourceToolId, actionContext)
+  ));
+  return results.find((result) => result.complete) || results[0];
+}
+
+function visibleExpandedMailBody(layout, text) {
+  return visibleMailBodyText(expandedMailBodyRegionText(layout)) &&
+    !hasTechnicalGmailArgsCard(text);
+}
+
+async function verifyMailExpandedBody(layout, index, appPid, actionContext) {
   let currentLayout = layout;
+  const sourceToolId = visibleSourceToolId(actionContext);
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const matches = expandMatchesForTarget(currentLayout, '');
-    if (matches.length > 0) {
-      const target = matches[0].bounds;
-      hdc(['shell', 'uitest', 'uiInput', 'click', String(target.x), String(target.y)]);
-      await sleep(900);
-      const expanded = dumpLayout(`query-${index + 1}-mail-body-layout.json`);
-      const text = collectLayoutText(expanded).join('\n');
-      const textPath = join(outDir, `query-${index + 1}-mail-body-layout-text.txt`);
+    for (let candidate = 0; candidate < matches.length; candidate += 1) {
+      const target = matches[candidate].bounds;
+      clearHilog();
+      const actionLogs = await captureWhile(appPid, async () => {
+        hdc(['shell', 'uitest', 'uiInput', 'click', String(target.x), String(target.y)]);
+      }, {
+        completionEvidence: (text) => currentMailReadEvidence(text, sourceToolId, actionContext),
+        idleActionTimeoutMs: 2500,
+        postCompletionWaitMs: 0
+      });
+      const logs = actionLogs.join('\n');
+      const evidence = currentMailReadEvidence(logs, sourceToolId, actionContext);
+      let expanded = dumpLayout(
+        `query-${index + 1}-mail-body-${attempt + 1}-${candidate + 1}-layout.json`
+      );
+      let text = collectLayoutText(expanded).join('\n');
+      for (let poll = 0; poll < 16 && evidence.complete &&
+        !visibleExpandedMailBody(expanded, text) &&
+        !/邮件正文加载失败|正文读取失败|PROVIDER_|AUTH_REQUIRED/.test(text); poll += 1) {
+        await sleep(250);
+        expanded = dumpLayout(
+          `query-${index + 1}-mail-body-${attempt + 1}-${candidate + 1}-poll-${poll + 1}-layout.json`
+        );
+        text = collectLayoutText(expanded).join('\n');
+      }
+      let bodyVisible = visibleExpandedMailBody(expanded, text);
+      if (shouldRecoverMailBodyViewport(evidence, bodyVisible)) {
+        for (let recovery = 0; recovery < 4 && !bodyVisible; recovery += 1) {
+          swipeResultsUp();
+          await sleep(450);
+          expanded = dumpLayout(
+            `query-${index + 1}-mail-body-${attempt + 1}-${candidate + 1}-viewport-${recovery + 1}-layout.json`
+          );
+          text = collectLayoutText(expanded).join('\n');
+          bodyVisible = visibleExpandedMailBody(expanded, text);
+        }
+      }
+      const textPath = join(
+        outDir,
+        `query-${index + 1}-mail-body-${attempt + 1}-${candidate + 1}-layout-text.txt`
+      );
+      const logPath = join(
+        outDir,
+        `query-${index + 1}-mail-body-${attempt + 1}-${candidate + 1}.log`
+      );
       writeFileSync(textPath, text + '\n');
-      return {
-        ok: /正文|发件人|收件人|主题|回复/.test(text) && !hasTechnicalGmailArgsCard(text),
-        capability: 'mail.thread.read',
-        textPath,
-        screenPath: captureScreen(`query-${index + 1}-mail-body-screen.png`)
-      };
+      writeFileSync(logPath, logs + '\n');
+      if (evidence.ok && evidence.bodyVisible && bodyVisible) {
+        return {
+          ok: true,
+          capability: evidence.dataToolId,
+          evidence,
+          textPath,
+          logPath,
+          screenPath: captureScreen(`query-${index + 1}-mail-body-screen.png`)
+        };
+      }
+      const collapse = findTextMatches(expanded, '收起')
+        .sort((left, right) => Math.abs(left.bounds.y - target.y) - Math.abs(right.bounds.y - target.y))[0];
+      if (collapse !== undefined) {
+        hdc(['shell', 'uitest', 'uiInput', 'click', String(collapse.bounds.x), String(collapse.bounds.y)]);
+        await sleep(400);
+      }
     }
     swipeResultsUp();
     await sleep(800);
@@ -1716,7 +2205,19 @@ async function verifyMailExpandedBody(layout, index) {
 async function verifySocialDraftAction(layout, index) {
   let currentLayout = layout;
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    const center = findTextCenter(currentLayout, '生成草稿');
+    const currentText = collectLayoutText(currentLayout).join('\n');
+    const currentEvidence = socialDraftUiEvidence(currentLayout);
+    if (currentEvidence.ok) {
+      const textPath = join(outDir, `query-${index + 1}-social-draft-layout-text.txt`);
+      writeFileSync(textPath, currentText + '\n');
+      return {
+        ...currentEvidence,
+        capability: 'social.reply.draft',
+        textPath,
+        screenPath: captureScreen(`query-${index + 1}-social-draft-screen.png`)
+      };
+    }
+    const center = socialReplyButtonCenter(currentLayout);
     if (center !== null) {
       hdc(['shell', 'uitest', 'uiInput', 'click', String(center.x), String(center.y)]);
       await sleep(1000);
@@ -1724,8 +2225,9 @@ async function verifySocialDraftAction(layout, index) {
       const text = collectLayoutText(resultLayout).join('\n');
       const textPath = join(outDir, `query-${index + 1}-social-draft-layout-text.txt`);
       writeFileSync(textPath, text + '\n');
+      const evidence = socialDraftUiEvidence(resultLayout);
       return {
-        ok: /回复草稿|本地草稿预览|尚未生成草稿/.test(text) && !/已发送|发送成功/.test(text),
+        ...evidence,
         capability: 'social.reply.draft',
         textPath,
         screenPath: captureScreen(`query-${index + 1}-social-draft-screen.png`)
@@ -1735,33 +2237,110 @@ async function verifySocialDraftAction(layout, index) {
     await sleep(800);
     currentLayout = dumpLayout(`query-${index + 1}-social-draft-scroll-${attempt + 1}.json`);
   }
-  return { ok: false, capability: 'social.reply.draft', reason: '生成草稿 button not found' };
+  return { ok: false, capability: 'social.reply.draft', reason: 'safe draft or reply composer not found' };
 }
 
-async function verifyCalendarDeleteAction(layout, index, appPid) {
+function exactActionOptions(actionId, sourceToolId, context) {
+  return {
+    expectedActionId: actionId,
+    expectedSourceToolId: sourceToolId || 'invalid',
+    currentSurfaceId: context?.surfaceId || 'invalid',
+    expectedConversationId: context?.conversationId || 'invalid',
+    expectedVirtual: false
+  };
+}
+
+function visibleSourceToolId(lifecycle) {
+  return Array.isArray(lifecycle?.finalUiToolIds) && lifecycle.finalUiToolIds.length === 1
+    ? lifecycle.finalUiToolIds[0]
+    : '';
+}
+
+async function verifyCalendarWriteAction(
+  layout, index, appPid, _actionContext, actionId, label, expectedTime = '', onProviderSuccess = undefined
+) {
   let currentLayout = layout;
   for (let attempt = 0; attempt < 6; attempt += 1) {
-    const center = findTextCenter(currentLayout, '确认删除');
+    const center = calendarConfirmationButtonCenter(currentLayout, label);
+    if (center !== null) {
+      clearHilog();
+      const actionLogs = await captureWhile(appPid, async () => {
+        hdc(['shell', 'uitest', 'uiInput', 'click', String(center.x), String(center.y)]);
+      });
+      const logs = actionLogs.join('\n');
+      const actionEvidence = multiAgentActionEvidence(
+        logs, { expectedActionId: actionId, expectedVirtual: false }
+      );
+      const providerEvidence = calendarProviderActionEvidence(logs, actionEvidence, { expectedTime });
+      if (actionId === 'calendar.event.create' && providerEvidence.ok && typeof onProviderSuccess === 'function') {
+        onProviderSuccess(providerEvidence.providerEventId);
+      }
+      const resultLayout = dumpLayout(`query-${index + 1}-${actionId.replaceAll('.', '-')}-layout.json`);
+      const suffix = actionId.replaceAll('.', '-');
+      const logPath = join(outDir, `query-${index + 1}-${suffix}.log`);
+      const textPath = join(outDir, `query-${index + 1}-${suffix}-layout-text.txt`);
+      writeFileSync(logPath, logs + '\n');
+      writeFileSync(textPath, collectLayoutText(resultLayout).join('\n') + '\n');
+      return {
+        ok: actionEvidence.ok && providerEvidence.ok,
+        capability: actionId,
+        actionEvidence,
+        providerEvidence,
+        expectedTime,
+        logPath,
+        textPath,
+        screenPath: captureScreen(`query-${index + 1}-${suffix}-screen.png`)
+      };
+    }
+    swipeResultsUp();
+    await sleep(800);
+    currentLayout = dumpLayout(`query-${index + 1}-${actionId.replaceAll('.', '-')}-scroll-${attempt + 1}.json`);
+  }
+  return { ok: false, capability: actionId, reason: `${label} button not found` };
+}
+
+async function verifyCalendarDeleteAction(layout, index, appPid, _actionContext) {
+  let currentLayout = layout;
+  let confirmationOpened = false;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const center = findExactTextCenter(currentLayout, '确认删除');
     if (center !== null) {
       clearHilog();
       const actionLogs = await captureWhile(appPid, async () => {
         hdc(['shell', 'uitest', 'uiInput', 'click', String(center.x), String(center.y)]);
       });
       const resultLayout = dumpLayout(`query-${index + 1}-calendar-delete-layout.json`);
-      const text = collectLayoutText(resultLayout).join('\n');
       const logs = actionLogs.join('\n');
+      const actionEvidence = multiAgentActionEvidence(
+        logs, { expectedActionId: 'calendar.event.delete', expectedVirtual: false }
+      );
+      const providerEvidence = calendarProviderActionEvidence(logs, actionEvidence);
       const logPath = join(outDir, `query-${index + 1}-calendar-delete.log`);
       const textPath = join(outDir, `query-${index + 1}-calendar-delete-layout-text.txt`);
       writeFileSync(logPath, logs + '\n');
-      writeFileSync(textPath, text + '\n');
+      writeFileSync(textPath, collectLayoutText(resultLayout).join('\n') + '\n');
       return {
-        ok: /calendar\.event\.delete/.test(`${text}\n${logs}`) &&
-          !/status":"error"|删除失败/.test(`${text}\n${logs}`),
+        ok: actionEvidence.ok && providerEvidence.ok,
         capability: 'calendar.event.delete.confirm',
+        actionEvidence,
+        providerEvidence,
         logPath,
         textPath,
         screenPath: captureScreen(`query-${index + 1}-calendar-delete-screen.png`)
       };
+    }
+    if (!confirmationOpened) {
+      const deleteCenter = findExactTextCenter(currentLayout, '删除日程');
+      if (deleteCenter !== null) {
+        hdc(['shell', 'uitest', 'uiInput', 'click', String(deleteCenter.x), String(deleteCenter.y)]);
+        await sleep(600);
+        currentLayout = dumpLayout(`query-${index + 1}-calendar-delete-confirmation.json`);
+        confirmationOpened = true;
+        swipeResultsUp();
+        await sleep(800);
+        currentLayout = dumpLayout(`query-${index + 1}-calendar-delete-confirmation-ready.json`);
+        continue;
+      }
     }
     swipeResultsUp();
     await sleep(800);
@@ -1770,11 +2349,289 @@ async function verifyCalendarDeleteAction(layout, index, appPid) {
   return { ok: false, capability: 'calendar.event.delete.confirm', reason: '确认删除 button not found' };
 }
 
-async function verifyHotelDetailAction(layout, index, appPid) {
+async function locateHotelSystemAction(layout, label, index, actionName) {
+  let currentLayout = layout;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    swipeResultsDown();
+    await sleep(250);
+  }
+  currentLayout = dumpLayout(`query-${index + 1}-hotel-${actionName}-top-layout.json`);
+  for (let attempt = 0; attempt <= 8; attempt += 1) {
+    const center = findExactTextCenter(currentLayout, label);
+    if (center !== null) {
+      return {
+        center,
+        layout: currentLayout
+      };
+    }
+    if (attempt < 8) {
+      swipeResultsUp();
+      await sleep(500);
+      currentLayout = dumpLayout(
+        `query-${index + 1}-hotel-${actionName}-scan-${attempt + 1}-layout.json`
+      );
+    }
+  }
+  return {
+    center: null,
+    layout: currentLayout
+  };
+}
+
+async function exerciseHotelSystemAction(
+  layout,
+  index,
+  actionId,
+  label,
+  actionName,
+  expectedScheme,
+  appPid,
+  actionContext
+) {
+  const located = await locateHotelSystemAction(layout, label, index, actionName);
+  const runtime = {
+    buttonVisible: located.center !== null,
+    systemSurfaceOpened: false,
+    evidenceCaptured: false,
+    returnedToApp: false
+  };
+  if (located.center === null) {
+    return {
+      runtime,
+      reason: `exact ${actionId} action button not found`,
+      restoredLayout: located.layout
+    };
+  }
+
+  clearHilog();
+  const capturedActionLogs = await captureAppLogsFor(appPid, async () => {
+    hdc([
+      'shell',
+      'uitest',
+      'uiInput',
+      'click',
+      String(located.center.x),
+      String(located.center.y)
+    ]);
+    await sleep(1800);
+  });
+  const rawActionLogs = capturedActionLogs.join('\n');
+  const actionLogs = sanitizeExternalUrlLogs(rawActionLogs);
+  const multiAgentAction = multiAgentActionEvidence(
+    actionLogs,
+    exactActionOptions(actionId, 'hotel.search', actionContext)
+  );
+  const logPath = join(outDir, `query-${index + 1}-hotel-${actionName}.log`);
+  writeFileSync(logPath, actionLogs + '\n');
+  const schemeOpened = hasSafeHotelSystemIntentOpen(actionLogs, expectedScheme);
+  const externalForeground = captureForegroundAbility(
+    `query-${index + 1}-hotel-${actionName}-external-ability.txt`
+  );
+  const systemSurfaceRecognized = isExpectedHotelSystemBundle(actionId, externalForeground.bundleName);
+  const screenPath = captureCurrentScreen(
+    `query-${index + 1}-hotel-${actionName}-system-screen.png`
+  );
+  runtime.systemSurfaceOpened = Boolean(actionContext?.surfaceId) &&
+    multiAgentAction.ok && schemeOpened && systemSurfaceRecognized;
+  runtime.evidenceCaptured = screenPath.length > 0;
+  runtime.multiAgentAction = multiAgentAction;
+
+  // The only injected events on the external surface are bounded Back presses.
+  let backPressCount = 0;
+  let restoredForeground = {
+    bundleName: externalForeground.bundleName,
+    path: externalForeground.path
+  };
+  do {
+    hdc(['shell', 'uitest', 'uiInput', 'keyEvent', 'Back']);
+    backPressCount += 1;
+    await sleep(1400);
+    restoredForeground = captureForegroundAbility(
+      `query-${index + 1}-hotel-${actionName}-restored-ability-${backPressCount}.txt`
+    );
+  } while (shouldRetryHotelReturnToApp(restoredForeground.bundleName, backPressCount));
+  runtime.returnedToApp = restoredForeground.bundleName === 'com.example.aiphonedemo';
+  let restoredLayout = located.layout;
+  let restoredLayoutPath = '';
+  let restoredScreenPath = '';
+  if (runtime.returnedToApp) {
+    restoredLayoutPath = join(
+      outDir,
+      `query-${index + 1}-hotel-${actionName}-restored-layout.json`
+    );
+    restoredLayout = dumpLayout(
+      `query-${index + 1}-hotel-${actionName}-restored-layout.json`
+    );
+    restoredScreenPath = captureScreen(
+      `query-${index + 1}-hotel-${actionName}-restored-screen.png`
+    );
+  }
+  return {
+    runtime,
+    actionEvidence: multiAgentAction,
+    schemeOpened,
+    systemSurfaceRecognized,
+    foregroundBundle: externalForeground.bundleName,
+    restoredBundle: restoredForeground.bundleName,
+    backPressCount,
+    interactionPolicy: 'system map screenshot then Back',
+    logPath,
+    abilityPath: externalForeground.path,
+    screenPath,
+    restoredAbilityPath: restoredForeground.path,
+    restoredLayoutPath,
+    restoredScreenPath,
+    restoredLayout
+  };
+}
+
+async function verifyHotelSystemActions(layout, index, actionEvidence, appPid, actionContext) {
+  const validated = validateHotelSearchActionEvidence(actionEvidence);
+  let currentLayout = layout;
+  const runtime = {};
+  let navigationEvidence = {
+    skipped: true,
+    reason: `hotel.navigate action is ${validated.navigation.status}`
+  };
+  if (validated.navigation.status === 'visible') {
+    navigationEvidence = await exerciseHotelSystemAction(
+      currentLayout,
+      index,
+      'hotel.navigate',
+      '导航到酒店',
+      'navigate',
+      'petalmaps',
+      appPid,
+      actionContext
+    );
+    runtime.navigation = navigationEvidence.runtime;
+    currentLayout = navigationEvidence.restoredLayout;
+  }
+  const navigationReport = { ...navigationEvidence };
+  delete navigationReport.restoredLayout;
+  return {
+    ...evaluateHotelSystemActionEvidence(actionEvidence, runtime),
+    navigationEvidence: navigationReport
+  };
+}
+
+async function verifyHotelBookingAction(layout, index, appPid, actionEvidence, actionContext) {
+  const validated = validateHotelDetailBookingEvidence(actionEvidence);
+  const located = await locateHotelSystemAction(
+    layout,
+    '在 App 内继续预订',
+    index,
+    'booking'
+  );
+  const report = {
+    capability: 'hotel.booking.open',
+    actionEvidence: validated,
+    buttonVisible: located.center !== null,
+    foregroundBundle: '',
+    headerVisible: false,
+    domainVisible: false,
+    loginBoundaryReached: false,
+    returnedToRoom: false,
+    roomSurfaceRestored: false,
+    screenPath: '',
+    layoutPath: '',
+    restoredLayout: located.layout
+  };
+  if (!validated.ok) {
+    report.reason = 'detail surface does not contain exactly one valid hotel.booking.open action';
+    return { ...report, ok: false };
+  }
+  if (located.center === null) {
+    report.reason = '在 App 内继续预订 button not found';
+    return { ...report, ok: false };
+  }
+
+  clearHilog();
+  const capturedBookingLogs = await captureAppLogsFor(appPid, async () => {
+    hdc(['shell', 'uitest', 'uiInput', 'click', String(located.center.x), String(located.center.y)]);
+    await sleep(2200);
+  });
+  const bookingLogs = sanitizeExternalUrlLogs(capturedBookingLogs.join('\n'));
+  const multiAgentAction = multiAgentActionEvidence(
+    bookingLogs,
+    exactActionOptions('hotel.booking.open', 'hotel.detail', actionContext)
+  );
+  const logPath = join(outDir, `query-${index + 1}-hotel-booking.log`);
+  writeFileSync(logPath, bookingLogs + '\n');
+  const foreground = captureForegroundAbility(`query-${index + 1}-hotel-booking-ability.txt`);
+  report.foregroundBundle = foreground.bundleName;
+  report.multiAgentAction = multiAgentAction;
+  report.screenPath = captureCurrentScreen(`query-${index + 1}-hotel-booking-screen.png`);
+  report.layoutPath = join(outDir, `query-${index + 1}-hotel-booking-layout.json`);
+  let bookingLayout = dumpLayout(`query-${index + 1}-hotel-booking-layout.json`);
+  const bookingText = collectLayoutText(bookingLayout).join('\n');
+  report.headerVisible = bookingText.includes('RollingGo 酒店预订');
+  report.domainVisible = /rollinggo\.cn/i.test(bookingText) || /rollinggo\.cn/i.test(bookingLogs);
+  report.returnedToRoom = foreground.bundleName === 'com.example.aiphonedemo';
+
+  const loginCenter = findExactTextCenter(bookingLayout, '登录查看价格');
+  if (loginCenter !== null) {
+    hdc(['shell', 'uitest', 'uiInput', 'click', String(loginCenter.x), String(loginCenter.y)]);
+    await sleep(1400);
+    bookingLayout = dumpLayout(`query-${index + 1}-hotel-booking-login-layout.json`);
+    const loginText = collectLayoutText(bookingLayout).join('\n');
+    report.loginBoundaryReached = /登录|手机号|验证码/.test(loginText);
+    captureCurrentScreen(`query-${index + 1}-hotel-booking-login-screen.png`);
+  } else {
+    report.loginBoundaryReached = report.headerVisible && report.domainVisible;
+  }
+
+  const backToRoom = findExactTextCenter(bookingLayout, '返回房型');
+  if (backToRoom !== null) {
+    hdc(['shell', 'uitest', 'uiInput', 'click', String(backToRoom.x), String(backToRoom.y)]);
+    await sleep(1000);
+    report.restoredLayout = dumpLayout(`query-${index + 1}-hotel-booking-restored-room-layout.json`);
+    const roomText = collectLayoutText(report.restoredLayout).join('\n');
+    report.returnedToRoom = report.returnedToRoom && !roomText.includes('RollingGo 酒店预订');
+    report.roomSurfaceRestored = /房型与价格规则|价格与取消规则/.test(roomText);
+  }
+  report.logPath = logPath;
+  report.ok = Boolean(actionContext?.surfaceId) && multiAgentAction.ok && report.returnedToRoom &&
+    report.headerVisible && report.domainVisible &&
+    report.loginBoundaryReached && report.roomSurfaceRestored;
+  report.blocked = !report.ok && report.returnedToRoom && report.screenPath.length > 0;
+  if (!report.ok && report.reason === undefined) {
+    report.reason = 'booking Web surface or room restoration evidence was incomplete';
+  }
+  return report;
+}
+
+async function verifyHotelDetailAction(layout, index, appPid, queryLogs, queryContext) {
   let currentLayout = layout;
   let detailCenter = null;
+  let detailLabel = '';
+  const searchLayoutText = collectLayoutText(layout).join('\n');
+  const pendingSearchCardAbsent =
+    !/正在查询 RollingGo|正在等待 RollingGo/.test(searchLayoutText);
+  const rawSearchActionEvidence = hotelActionEvidenceFromLogs(queryLogs.join('\n'));
+  const searchActionEvidence = validateHotelSearchActionEvidence(rawSearchActionEvidence);
+  const unverifiedSystemActions = evaluateHotelSystemActionEvidence(
+    rawSearchActionEvidence,
+    {}
+  );
+  const detailClickLocator = hotelDetailClickLocator(rawSearchActionEvidence);
+  if (!detailClickLocator.ok) {
+    return {
+      ok: false,
+      capability: 'hotel.detail',
+      reason: 'current hotel surface has no exact valid hotel.detail click locator',
+      actionEvidence: searchActionEvidence,
+      systemActions: unverifiedSystemActions
+    };
+  }
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    detailCenter = findTextCenter(currentLayout, '查看房型');
+    for (const label of detailClickLocator.labels) {
+      detailCenter = findHotelDetailTextCenter(currentLayout, label);
+      if (detailCenter !== null) {
+        detailLabel = label;
+        break;
+      }
+    }
     if (detailCenter !== null) {
       break;
     }
@@ -1783,16 +2640,38 @@ async function verifyHotelDetailAction(layout, index, appPid) {
     currentLayout = dumpLayout(`query-${index + 1}-hotel-search-scroll-${attempt + 1}.json`);
   }
   if (detailCenter === null) {
-    return { ok: false, capability: 'hotel.detail', reason: '查看房型 button not found' };
+    return {
+      ok: false,
+      capability: 'hotel.detail',
+      reason: 'exact hotel.detail action click label not found in current layout',
+      actionEvidence: searchActionEvidence,
+      systemActions: unverifiedSystemActions
+    };
   }
 
   clearHilog();
   const detailLogs = await captureWhile(appPid, async () => {
     hdc(['shell', 'uitest', 'uiInput', 'click', String(detailCenter.x), String(detailCenter.y)]);
+    await sleep(1200);
   });
-  const detailLogText = detailLogs.join('\n');
+  const rawDetailLogText = detailLogs.join('\n');
+  const detailLogText = sanitizeExternalUrlLogs(rawDetailLogText);
   const detailLogPath = join(outDir, `query-${index + 1}-hotel-detail.log`);
   writeFileSync(detailLogPath, detailLogText + '\n');
+  const detailEvidence = hotelMultiAgentDetailEvidence(detailLogText, {
+    expectedConversationId: queryContext?.conversationId || 'invalid',
+    currentSurfaceId: searchActionEvidence.surfaceId
+  });
+  const multiAgentDetailAction = multiAgentActionEvidence(
+    detailLogText,
+    exactActionOptions('hotel.detail', visibleSourceToolId(queryContext), queryContext)
+  );
+  const detailUiContext = detailEvidence.ok ? {
+    conversationId: detailEvidence.conversationId,
+    turnId: detailEvidence.turnId,
+    taskId: detailEvidence.taskId,
+    surfaceId: detailEvidence.surfaceId
+  } : null;
   await sleep(700);
   currentLayout = dumpLayout(`query-${index + 1}-hotel-rates-layout.json`);
 
@@ -1808,7 +2687,8 @@ async function verifyHotelDetailAction(layout, index, appPid) {
       ok: false,
       capability: 'hotel.detail',
       reason: '价格与取消规则 button not found',
-      detailLogPath
+      detailLogPath,
+      systemActions: unverifiedSystemActions
     };
   }
   hdc(['shell', 'uitest', 'uiInput', 'click', String(rateExpand.x), String(rateExpand.y)]);
@@ -1820,6 +2700,18 @@ async function verifyHotelDetailAction(layout, index, appPid) {
   const textPath = join(outDir, `query-${index + 1}-hotel-rate-expanded-layout-text.txt`);
   writeFileSync(textPath, text + '\n');
   const screenPath = captureScreen(`query-${index + 1}-hotel-rate-expanded-screen.png`);
+
+  const detailActionEvidence = hotelActionEvidenceFromLogs(rawDetailLogText);
+  const bookingAction = await verifyHotelBookingAction(
+    currentLayout,
+    index,
+    appPid,
+    detailActionEvidence,
+    detailUiContext
+  );
+  currentLayout = bookingAction.restoredLayout;
+  const bookingReport = { ...bookingAction };
+  delete bookingReport.restoredLayout;
 
   let backCenter = findTextCenter(currentLayout, '返回酒店结果');
   for (let attempt = 0; backCenter === null && attempt < 8; attempt += 1) {
@@ -1835,26 +2727,63 @@ async function verifyHotelDetailAction(layout, index, appPid) {
       reason: '返回酒店结果 button not found',
       detailLogPath,
       textPath,
-      screenPath
+      screenPath,
+      systemActions: unverifiedSystemActions
     };
   }
-  hdc(['shell', 'uitest', 'uiInput', 'click', String(backCenter.x), String(backCenter.y)]);
+  clearHilog();
+  const restoreLogs = await captureWhile(appPid, async () => {
+    hdc(['shell', 'uitest', 'uiInput', 'click', String(backCenter.x), String(backCenter.y)]);
+    await sleep(1200);
+  });
+  const restoreLogText = restoreLogs.join('\n');
   await sleep(700);
   const restoredLayout = dumpLayout(`query-${index + 1}-hotel-restored-layout.json`);
   const restoredText = collectLayoutText(restoredLayout).join('\n');
   const restoredTextPath = join(outDir, `query-${index + 1}-hotel-restored-layout-text.txt`);
   writeFileSync(restoredTextPath, restoredText + '\n');
   const restoredScreenPath = captureScreen(`query-${index + 1}-hotel-restored-screen.png`);
-  const detailRequested = /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel)\][^\n]*toolId=hotel\.detail/.test(detailLogText) ||
-    /\[AIPhone\]\[LocalToolRequest\][^\n]*toolId=hotel\.detail/.test(detailLogText);
-  const detailOk = /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult|LocalToolResult)\][^\n]*ok=true/.test(detailLogText);
-  const restoredOk = /酒店结果/.test(restoredText) && /查看房型/.test(restoredText);
+  const detailLifecycle = detailEvidence;
+  const detailRequested = detailEvidence.ok;
+  const detailOk = Boolean(queryContext?.surfaceId) && Boolean(detailUiContext?.surfaceId) &&
+    detailEvidence.ok;
+  const restoredOk = /酒店结果/.test(restoredText);
+  const rawRestoredActionEvidence = hotelActionEvidenceFromLogs(restoreLogText);
+  const restoredActionEvidence = validateHotelSearchActionEvidence(rawRestoredActionEvidence);
+  const restoredUiContext = restoredHotelSearchSurface(queryContext, rawRestoredActionEvidence);
+  const surfaceIdentity = validateHotelSurfaceIdentity(
+    searchActionEvidence.surfaceId,
+    typeof detailActionEvidence.surfaceId === 'string' ? detailActionEvidence.surfaceId : '',
+    restoredActionEvidence.surfaceId
+  );
+  const systemActions = await verifyHotelSystemActions(
+    restoredLayout,
+    index,
+    rawRestoredActionEvidence,
+    appPid,
+    restoredUiContext
+  );
   return {
-    ok: detailRequested && detailOk && /房型与价格规则/.test(text) &&
-      /床型|餐食|取消政策/.test(text) && restoredOk,
+    ok: pendingSearchCardAbsent &&
+      detailRequested && detailOk && hasVisibleHotelRateRuleEvidence(text) && restoredOk &&
+      searchActionEvidence.ok && restoredActionEvidence.ok && surfaceIdentity.ok &&
+      bookingAction.ok && systemActions.ok,
     capability: 'hotel.detail',
+    detailLabel,
+    actionEvidence: searchActionEvidence,
+    navigation: searchActionEvidence.navigation,
+    booking: bookingAction.actionEvidence.booking,
+    bookingAction: bookingReport,
+    systemActions,
+    surfaceIdentity,
+    searchSurfaceId: surfaceIdentity.searchSurfaceId,
+    detailSurfaceId: surfaceIdentity.detailSurfaceId,
+    restoredSurfaceId: surfaceIdentity.restoredSurfaceId,
+    pendingSearchCardAbsent,
     detailRequested,
     detailOk,
+    detailLifecycle,
+    multiAgentDetailAction,
     restoredOk,
     detailLogPath,
     textPath,
@@ -2156,17 +3085,30 @@ async function verifyMailExpandedActions(layout, index, appPid, targetMarker = '
   };
 }
 
-async function runQuery(query, index, expectedTool) {
+async function runQuery(query, index, expectedTool, expectedCaseOverride = null, preserveAppSession = false) {
+  const expectedCase = expectedCaseOverride || (useDefaultCases ? selectedDefaultCases[index] : expectedCaseForQuery(query));
+  const expectsDirectText = expectedTool === false && !isPersonaMemoryUpdateQuery(query);
+  const expectedToolId = expectedCase.expectedToolId || '';
+  const lifecycle = lifecycleOptions(expectedCase);
+  const expectedToolIds = lifecycle.expectedToolIds;
+  const minimumDataRounds = lifecycle.minimumDataRounds;
+  const expectedDependencies = lifecycle.expectedDependencies;
+  const expectedDataRounds = lifecycle.expectedDataRounds;
+  const expectedParallelDataToolIds = lifecycle.expectedParallelDataToolIds;
   clearHilog();
-  hdc(['shell', 'aa', 'force-stop', 'com.example.aiphonedemo']);
-  if (cleanData) {
-    cleanBundleData();
+  if (!preserveAppSession) {
+    hdc(['shell', 'aa', 'force-stop', 'com.example.aiphonedemo']);
+    if (cleanData) {
+      cleanBundleData();
+    }
+    hdc(['shell', 'aa', 'start', '-a', 'EntryAbility', '-b', 'com.example.aiphonedemo']);
   }
-  hdc(['shell', 'aa', 'start', '-a', 'EntryAbility', '-b', 'com.example.aiphonedemo']);
   await sleep(3000);
   moveAppWindowIntoScreenshot();
   const appPid = hdc(['shell', 'pidof', 'com.example.aiphonedemo']).trim().split(/\s+/)[0] || '';
   const controls = await waitForControls();
+  const directTextBaselineName = `query-${index + 1}-direct-text-baseline-layout.json`;
+  let directTextBaselineLayout = null;
   const logs = await captureWhile(appPid, async () => {
     let typed = false;
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -2185,23 +3127,77 @@ async function runQuery(query, index, expectedTool) {
       throw new Error(`Could not type full query into AIPhone input: ${query}`);
     }
     const submitControls = await waitForControls(`query-${index + 1}-submit-layout.json`, 2);
+    if (expectsDirectText) {
+      directTextBaselineLayout = dumpLayout(directTextBaselineName);
+      if (!collectInputText(directTextBaselineLayout).includes(query)) {
+        throw new Error(`Direct-text baseline lost the typed query: ${query}`);
+      }
+    }
     hdc(['shell', 'uitest', 'uiInput', 'click', String(submitControls.generate.x), String(submitControls.generate.y)]);
+  }, {
+    expectedToolIds,
+    minimumDataRounds,
+    expectedDependencies,
+    expectedDataRounds,
+    expectedParallelDataToolIds,
+    postCompletionWaitMs: multiAgentPostCompletionWaitMs(expectedCase.id)
   });
+  const safeLogText = sanitizeExternalUrlLogs(logs.join('\n'));
+  const safeLogs = safeLogText.split('\n');
   const logPath = join(outDir, `query-${index + 1}.log`);
-  writeFileSync(logPath, logs.join('\n') + '\n');
-  const expectedCase = useDefaultCases ? selectedDefaultCases[index] : expectedCaseForQuery(query);
-  const expectedToolId = expectedCase.expectedToolId || '';
+  writeFileSync(logPath, safeLogText + '\n');
   const expectedDiscoveredToolId = expectedCase.expectedDiscoveredToolId || '';
+  const expectedDynamicQualifiedName = expectedCase.expectedDynamicQualifiedName || '';
   const expectedPersonaMemory = expectedCase.expectedPersonaMemory || '';
-  const summary = analyze(query, logs, expectedTool, expectedToolId, expectedDiscoveredToolId);
+  const summary = analyze(
+    query,
+    safeLogs,
+    expectedTool,
+    expectedToolId,
+    expectedDiscoveredToolId,
+    expectedDynamicQualifiedName,
+    expectedToolIds,
+    minimumDataRounds,
+    expectedDependencies,
+    expectedDataRounds,
+    expectedParallelDataToolIds
+  );
   summary.caseId = expectedCase.id || '';
   summary.expectedPersonaMemory = expectedPersonaMemory;
+  summary.hotelCapabilities = expectedCase.hotelCapabilities || [];
   summary.logPath = logPath;
   const layout = dumpLayout(`query-${index + 1}-final-layout.json`);
   const layoutTextValues = collectLayoutText(layout);
   const layoutText = layoutTextValues.join('\n');
   const layoutTextPath = join(outDir, `query-${index + 1}-final-layout-text.txt`);
   writeFileSync(layoutTextPath, layoutText + '\n');
+  const directTextEvidence = expectsDirectText && directTextBaselineLayout !== null ? directTextVisibleEvidence(
+    safeLogText,
+    directTextBaselineLayout,
+    layout,
+    query,
+    {
+      conversationId: summary.multiAgentLifecycle.conversationId,
+      turnId: summary.multiAgentLifecycle.turnId,
+      expectedToolIds,
+      minimumDataRounds,
+      expectedDependencies
+    }
+  ) : (expectsDirectText ?
+    { ok: false, replyChars: 0, baselineMessageCount: 0, finalMessageCount: 0,
+      failures: ['missing_direct_text_baseline'], skipped: false } :
+    { ok: true, replyChars: 0, baselineMessageCount: 0, finalMessageCount: 0,
+      failures: [], skipped: true });
+  summary.directTextBaselineLayoutPath = expectsDirectText ?
+    join(outDir, directTextBaselineName) : '';
+  summary.directTextVisible = {
+    ok: directTextEvidence.ok,
+    replyChars: directTextEvidence.replyChars,
+    baselineMessageCount: directTextEvidence.baselineMessageCount,
+    finalMessageCount: directTextEvidence.finalMessageCount,
+    failures: directTextEvidence.failures,
+    skipped: directTextEvidence.skipped === true
+  };
   const expectedMarkers = layoutExpectationsForQuery(query);
   const scrollEvidence = await collectScrolledLayoutEvidence(
     layout,
@@ -2218,7 +3214,7 @@ async function runQuery(query, index, expectedTool) {
       summary.basePassedWithoutTransport === true &&
       summary.modelPassed === true &&
       summary.toolRequested &&
-      summary.localToolRequest &&
+      summary.toolExecutionObserved &&
       summary.toolOk &&
       summary.hasExpectedToolId &&
       summary.hasExpectedDiscoveredToolId &&
@@ -2228,8 +3224,17 @@ async function runQuery(query, index, expectedTool) {
   }
   const expectedHits = expectedMarkers.filter((marker) => evidenceText.includes(marker));
   const expectedMisses = expectedMarkers.filter((marker) => !evidenceText.includes(marker));
+  const dynamicAuthOutcome = dynamicAuthOutcomeAssessment({
+    discovery: summary.dynamicDiscovery,
+    lifecycle: summary.multiAgentLifecycle,
+    expectedQualifiedName: expectedDynamicQualifiedName,
+    layoutText: evidenceText
+  });
+  summary.dynamicAuthOutcome = dynamicAuthOutcome;
+  summary.allowsCorrelatedDynamicAuth = dynamicAuthOutcome.allowsCorrelatedDynamicAuth;
   const calendarMarkersOk = !isCalendarQuery(query) || expectedMisses.length === 0;
-  const composioCardMarkersOk = !isComposioCardQuery(query) || expectedMisses.length === 0;
+  const composioCardMarkersOk = summary.allowsCorrelatedDynamicAuth ||
+    !isComposioCardQuery(query) || expectedMisses.length === 0;
   const forbiddenSocialHubLegacyHits = forbiddenSocialHubLegacyMarkers.filter((marker) => evidenceText.includes(marker));
   const isSocialHubCase = isSocialHubExpectedToolId(expectedToolId);
   const socialHubVisibleOutput = isSocialHubCase && hasVisibleSocialHubOutput(evidenceText, expectedToolId);
@@ -2264,7 +3269,7 @@ async function runQuery(query, index, expectedTool) {
   if (expectedToolId === 'gmail.mail.search' && hasTechnicalGmailArgsCard(evidenceText)) {
     layoutBlockingHits.push('gmail-technical-args-card');
   }
-  if (expectedToolId === 'gmail.message.send') {
+  if (expectedToolId === 'gmail.draft.create') {
     for (const blockingPattern of forbiddenGmailSendSuccessPatterns) {
       if (blockingPattern.pattern.test(evidenceText)) {
         layoutBlockingHits.push(blockingPattern.name);
@@ -2289,13 +3294,16 @@ async function runQuery(query, index, expectedTool) {
   summary.layoutBlockingHits = layoutBlockingHits;
   summary.gmailEccvKeywordVisible = !isGmailEccvQuery(query) || /eccv/i.test(evidenceText);
   const aggregateMediaMarkersOk = expectedToolId !== 'media.aggregate.search' || expectedMisses.length === 0;
-  summary.layoutTextExposed = isSocialHubCase ?
-    socialHubVisibleOutput :
-    (worldCupVisibleOutput || expectedMarkers.length === 0 || expectedHits.length > 0) &&
-    calendarMarkersOk &&
-    composioCardMarkersOk &&
-    aggregateMediaMarkersOk &&
-    summary.gmailEccvKeywordVisible;
+  summary.layoutTextExposed = expectsDirectText ?
+    summary.directTextVisible.ok :
+    (summary.allowsCorrelatedDynamicAuth ||
+      (isSocialHubCase ?
+        socialHubVisibleOutput :
+        (worldCupVisibleOutput || expectedMarkers.length === 0 || expectedHits.length > 0) &&
+        calendarMarkersOk &&
+        composioCardMarkersOk &&
+        aggregateMediaMarkersOk &&
+        summary.gmailEccvKeywordVisible));
   if (expectedPersonaMemory === 'luckin_only') {
     summary.personaExpectedMemoryProof = hasLuckinMemoryEvidence(evidenceText);
     summary.layoutTextExposed = summary.layoutTextExposed && summary.personaExpectedMemoryProof;
@@ -2315,21 +3323,43 @@ async function runQuery(query, index, expectedTool) {
       draftVisible: true
     };
   summary.mailExpandedBody = expectedCase.verifyMailBody === true
-    ? await verifyMailExpandedBody(evidenceLayout, index)
+    ? await verifyMailExpandedBody(evidenceLayout, index, appPid, summary.multiAgentLifecycle)
     : { ok: true, skipped: true };
   summary.socialDraftAction = expectedCase.verifySocialDraft === true
     ? await verifySocialDraftAction(evidenceLayout, index)
     : { ok: true, skipped: true };
+  summary.calendarCreateAction = expectedCase.verifyCalendarCreate === true
+    ? await verifyCalendarWriteAction(
+      evidenceLayout, index, appPid, summary.multiAgentLifecycle,
+      'calendar.event.create', '确认创建', '', () => { c19CleanupRequired = true; }
+    )
+    : { ok: true, skipped: true };
+  summary.calendarUpdateAction = expectedCase.verifyCalendarUpdate === true
+    ? await verifyCalendarWriteAction(
+      evidenceLayout, index, appPid, summary.multiAgentLifecycle,
+      'calendar.event.update', '确认更新', '16:00'
+    )
+    : { ok: true, skipped: true };
   summary.calendarDeleteAction = expectedCase.verifyCalendarDelete === true
-    ? await verifyCalendarDeleteAction(evidenceLayout, index, appPid)
+    ? await verifyCalendarDeleteAction(evidenceLayout, index, appPid, summary.multiAgentLifecycle)
     : { ok: true, skipped: true };
   summary.hotelDetailAction = expectedCase.verifyHotelDetail === true
-    ? await verifyHotelDetailAction(evidenceLayout, index, appPid)
+    ? await verifyHotelDetailAction(evidenceLayout, index, appPid, safeLogs, summary.multiAgentLifecycle)
     : { ok: true, skipped: true };
+  summary.providerFailed = summary.providerFailed || summary.hotelDetailAction.bookingAction?.blocked === true;
+  const combinedHotelSearchEvidence = expectedCase.verifyHotelDetail === true
+    ? hotelMultiAgentSearchEvidence(safeLogText)
+    : null;
+  summary.hotelSearchLifecycle = combinedHotelSearchEvidence?.lifecycle || summary.multiAgentLifecycle;
+  summary.hotelProviderEvidence = combinedHotelSearchEvidence?.provider ||
+    { requested: false, ok: false, surfaceId: '', providerResponse: false, blocks: 0 };
   summary.expectedAbsentText = expectedCase.expectAbsentText || '';
-  summary.absenceVerified = summary.expectedAbsentText.length === 0 ||
-    !evidenceText.includes(summary.expectedAbsentText) ||
-    /无结果|没有找到|不存在|0 条|0个/.test(evidenceText);
+  summary.absenceEvidence = summary.expectedAbsentText.length === 0 ? { ok: true, skipped: true } :
+    calendarProviderAbsenceEvidence(safeLogText, summary.multiAgentLifecycle, {
+      title: summary.expectedAbsentText,
+      date: qaDateIso
+    });
+  summary.absenceVerified = summary.absenceEvidence.ok;
   if (isPersonaMemoryUpdateQuery(query)) {
     summary.mailAggregateVisible = true;
     summary.layoutTextExposed = summary.personaMemoryUpdateProof === true;
@@ -2339,6 +3369,8 @@ async function runQuery(query, index, expectedTool) {
     summary.ok = summary.ok && summary.layoutOk &&
       summary.mailExpandedBody.ok &&
       summary.socialDraftAction.ok &&
+      summary.calendarCreateAction.ok &&
+      summary.calendarUpdateAction.ok &&
       summary.calendarDeleteAction.ok &&
       summary.hotelDetailAction.ok &&
       summary.absenceVerified;
@@ -2357,7 +3389,7 @@ async function runQuery(query, index, expectedTool) {
   } else {
     summary.layoutTextExposed = summary.layoutTextExposed && summary.mailAggregateVisible;
   }
-  const allowsHtmlDocumentOnly = !isSocialHubCase && !expectsMailDraftAction && expectedToolId !== 'mail.search' &&
+  const allowsHtmlDocumentOnly = !expectsDirectText && !isSocialHubCase && !expectsMailDraftAction && expectedToolId !== 'mail.search' &&
     expectedToolId !== 'media.aggregate.search' && summary.htmlHomeDocument.ok;
   summary.layoutOk = layoutBlockingHits.length === 0 &&
     forbiddenSocialHubLegacyHits.length === 0 &&
@@ -2369,7 +3401,16 @@ async function runQuery(query, index, expectedTool) {
     !summary.syntheticFallback &&
     summary.layoutOk;
   summary.layoutEvidenceRecovered = layoutEvidenceRecovered;
-  if (isSocialHubCase) {
+  if (expectedCase.verifyHotelDetail === true) {
+    summary.ok = combinedHotelSearchEvidence?.ok === true &&
+      summary.htmlHomeSurfaceLoad.ok &&
+      !summary.htmlLoadError &&
+      !summary.syntheticFallback &&
+      !summary.providerFailed &&
+      expectedMisses.length === 0 &&
+      summary.layoutOk &&
+      summary.hotelDetailAction.ok;
+  } else if (isSocialHubCase) {
     const socialHubRecovered = socialHubVisibleOutput &&
       summary.htmlHomeSurfaceLoad.ok &&
       !summary.htmlLoadError &&
@@ -2381,7 +3422,7 @@ async function runQuery(query, index, expectedTool) {
     summary.ok = summary.basePassedWithoutTransport === true &&
       summary.modelPassed === true &&
       summary.toolRequested &&
-      summary.localToolRequest &&
+      summary.toolExecutionObserved &&
       summary.toolOk &&
       summary.hasExpectedToolId &&
       summary.hasExpectedDiscoveredToolId &&
@@ -2401,7 +3442,7 @@ async function runQuery(query, index, expectedTool) {
     summary.ok = summary.modelPassed === true &&
       summary.transportPassed === true &&
       summary.toolRequested &&
-      summary.localToolRequest &&
+      summary.toolExecutionObserved &&
       summary.toolOk &&
       summary.hasExpectedToolId &&
       summary.hasExpectedDiscoveredToolId &&
@@ -2413,6 +3454,8 @@ async function runQuery(query, index, expectedTool) {
   summary.ok = summary.ok &&
     summary.mailExpandedBody.ok &&
     summary.socialDraftAction.ok &&
+    summary.calendarCreateAction.ok &&
+    summary.calendarUpdateAction.ok &&
     summary.calendarDeleteAction.ok &&
     summary.hotelDetailAction.ok &&
     summary.absenceVerified;
@@ -2420,7 +3463,7 @@ async function runQuery(query, index, expectedTool) {
 }
 
 async function waitForComposioAuthEvidence() {
-  const requiredMarkers = ['Composio 授权', '当前用户'];
+  const requiredMarkers = ['应用授权', '当前用户'];
   const authActionLabels = ['授权', '重新授权'];
   const authStatusLabels = [
     '待授权',
@@ -2437,6 +3480,31 @@ async function waitForComposioAuthEvidence() {
     'OAuth',
     'Composio ·'
   ];
+  const appNames = [
+    'Gmail',
+    'GitHub',
+    'Google Calendar',
+    'Google Drive',
+    'Google Docs',
+    'Slack',
+    'Notion',
+    'Linear',
+    'Asana',
+    'Trello',
+    'Outlook',
+    'Discord',
+    'LinkedIn',
+    'WhatsApp',
+    'Instagram',
+    'YouTube',
+    'X',
+    'Spotify',
+    'TikTok',
+    'Ticketmaster',
+    'HubSpot',
+    'Salesforce',
+    'Reddit'
+  ];
   let last = null;
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const layout = dumpLayout(`composio-auth-page-${attempt + 1}.json`);
@@ -2452,11 +3520,15 @@ async function waitForComposioAuthEvidence() {
       markerHits: requiredMarkers.filter((marker) => text.includes(marker)),
       authActionHits: authActionLabels.filter((marker) => layoutTextValues.includes(marker)),
       authStatusHits: authStatusLabels.filter((marker) => layoutTextValues.includes(marker)),
-      toolkitHits: toolkitMarkers.filter((marker) => text.includes(marker))
+      toolkitHits: toolkitMarkers.filter((marker) => text.includes(marker)),
+      appNameHits: appNames.filter((marker) => layoutTextValues.includes(marker)),
+      authConfigNameLeaks: layoutTextValues.filter((value) => /^auth_config_/i.test(value))
     };
     if (last.markerHits.length === requiredMarkers.length &&
       last.authActionHits.length > 0 &&
-      last.authStatusHits.length > 0) {
+      last.authStatusHits.length > 0 &&
+      last.appNameHits.length > 0 &&
+      last.authConfigNameLeaks.length === 0) {
       return last;
     }
     await sleep(1000);
@@ -2482,11 +3554,15 @@ async function runComposioAuthSmoke() {
   }
   hdc(['shell', 'uitest', 'uiInput', 'click', String(settings.x), String(settings.y)]);
   await sleep(1200);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    swipeResultsDown();
+    await sleep(300);
+  }
 
   const configLayout = dumpLayout('composio-auth-config-collapsed.json');
   const configText = collectLayoutText(configLayout).join('\n');
   writeFileSync(join(outDir, 'composio-auth-config-collapsed-text.txt'), configText + '\n');
-  if (!configText.includes('Composio 授权')) {
+  if (!configText.includes('管理授权')) {
     const expandAuth = findTextCenter(configLayout, '展开');
     if (expandAuth !== null) {
       hdc(['shell', 'uitest', 'uiInput', 'click', String(expandAuth.x), String(expandAuth.y)]);
@@ -2494,9 +3570,12 @@ async function runComposioAuthSmoke() {
     }
   }
 
-  const authButton = await findTextCenterWithScroll('Composio 授权', 'composio-auth-config-layout');
+  let authButton = findTextCenter(configLayout, '管理授权');
   if (authButton === null) {
-    throw new Error('Could not locate the Config page Composio 授权 button.');
+    authButton = await findTextCenterWithScroll('管理授权', 'composio-auth-config-layout');
+  }
+  if (authButton === null) {
+    throw new Error('Could not locate the Config page 管理授权 button.');
   }
   hdc(['shell', 'uitest', 'uiInput', 'click', String(authButton.x), String(authButton.y)]);
 
@@ -2504,15 +3583,92 @@ async function runComposioAuthSmoke() {
   if (evidence === null) {
     throw new Error('Could not capture Composio auth page layout evidence.');
   }
+  const externalAuthAppHits = [];
+  const externalApps = [
+    {
+      name: 'QQ 邮箱',
+      url: 'https://wx.mail.qq.com/list/readtemplate?name=app_intro.html#/agreement/authorizationCode'
+    },
+    {
+      name: '瑞幸咖啡',
+      url: 'https://open01.luckincoffeecdn.com/'
+    },
+    {
+      name: '滴滴出行',
+      url: 'https://mcp.didichuxing.com'
+    }
+  ];
+  const externalAuthJumps = await collectExternalAuthJumps(externalApps, async (app, index) => {
+    const actionCenter = await findExternalAuthActionWithScroll(app.name, `external-auth-${index + 1}`, 10);
+    if (actionCenter !== null) {
+      externalAuthAppHits.push(app.name);
+      clearHilog();
+      hdc(['shell', 'uitest', 'uiInput', 'click', String(actionCenter.x), String(actionCenter.y)]);
+      await sleep(1500);
+      const logs = hdc(['shell', 'hilog', '-d']);
+      const windowDump = hdc(['shell', 'hidumper', '-s', 'WindowManagerService', '-a', '-a']);
+      const focusMatch = /Focus window:\s*(\d+)/.exec(windowDump);
+      const focusWindowId = focusMatch === null ? '' : focusMatch[1];
+      const focusWindowLine = focusWindowId.length === 0 ? '' :
+        (windowDump.split('\n').find((line) => line.includes(` ${focusWindowId} `)) || '');
+      const intentLogSeen = logs.includes(`[AIPhone][A2uiHomeOpenUrl] ok=true url=${app.url}`);
+      const browserFocused = /browser|quark/i.test(focusWindowLine);
+      const opened = intentLogSeen || browserFocused;
+      const logPath = join(outDir, `external-auth-${index + 1}-open.log`);
+      writeFileSync(logPath,
+        logs.split('\n').filter((line) => line.includes('[AIPhone][A2uiHomeOpenUrl]')).join('\n') +
+        `\nfocusWindow=${focusWindowLine}\n`);
+      const jump = {
+        app: app.name,
+        url: app.url,
+        opened,
+        intentLogSeen,
+        browserFocused,
+        logPath
+      };
+      let backPressCount = 0;
+      let restoredForeground = { bundleName: '', path: '' };
+      do {
+        hdc(['shell', 'uitest', 'uiInput', 'keyEvent', 'Back']);
+        backPressCount += 1;
+        await sleep(1400);
+        restoredForeground = captureForegroundAbility(
+          `external-auth-${index + 1}-return-ability-${backPressCount}.txt`
+        );
+      } while (shouldRetryHotelReturnToApp(restoredForeground.bundleName, backPressCount));
+      return Object.assign(jump, {
+        returned: restoredForeground.bundleName === 'com.example.aiphonedemo',
+        backPressCount,
+        returnAbilityPath: restoredForeground.path
+      });
+    }
+    return {
+      app: app.name,
+      url: app.url,
+      opened: false,
+      reason: 'authorization action not found'
+    };
+  });
   const screenPath = captureScreen('composio-auth-page-screen.png');
+  const assessment = composioAuthEvidence({
+    textValues: collectLayoutText(evidence.layout),
+    externalAuthJumps
+  });
   const summary = {
     mode: 'composio-auth',
-    ok: evidence.markerHits.length === 2 && evidence.authActionHits.length > 0 && evidence.authStatusHits.length > 0,
-    requiredMarkers: ['Composio 授权', '当前用户'],
+    ok: assessment.status === 'PASS',
+    uiOk: assessment.uiOk,
+    providerOk: assessment.providerOk,
+    status: assessment.status,
+    requiredMarkers: ['应用授权', '当前用户'],
     markerHits: evidence.markerHits,
     authActionHits: evidence.authActionHits,
     authStatusHits: evidence.authStatusHits,
     toolkitHits: evidence.toolkitHits,
+    appNameHits: evidence.appNameHits,
+    externalAuthAppHits,
+    externalAuthJumps,
+    authConfigNameLeaks: evidence.authConfigNameLeaks,
     layoutPath: evidence.layoutPath,
     textPath: evidence.textPath,
     screenPath
@@ -2537,6 +3693,10 @@ const modelHealth = await ensureLocalModel();
 console.log(`modelHealth: ${JSON.stringify(modelHealth, null, 2)}`);
 
 const summaries = [];
+let c19CreateSucceeded = true;
+let c19UpdateSucceeded = true;
+let c19CleanupRequired = false;
+const c19Requested = useDefaultCases && selectedDefaultCases.some((testCase) => /^C19/.test(testCase.id || ''));
 let personaMemoryBackup = null;
 let personaMemoryRestore = { ok: true, skipped: true };
 if (useDefaultCases && selectedDefaultCases.some((testCase) => /^C11/.test(testCase.id || ''))) {
@@ -2567,6 +3727,7 @@ for (let index = 0; index < queries.length; index += 1) {
       reason: `Persona memory could not be backed up safely: ${personaMemoryRestore.reason || 'unknown backup failure'}`
     };
     summaries.push(blockedSummary);
+    captureBlockedCase(inferredCase.id || `query-${index + 1}`, 1, blockedSummary);
     console.log(JSON.stringify(blockedSummary, null, 2));
     continue;
   }
@@ -2581,36 +3742,132 @@ for (let index = 0; index < queries.length; index += 1) {
       reason: 'AIPHONE_WHATSAPP_TEST_TO is missing; no recipient was guessed and no message action was opened.'
     };
     summaries.push(blockedSummary);
+    captureBlockedCase(inferredCase.id || `query-${index + 1}`, 1, blockedSummary);
+    console.log(JSON.stringify(blockedSummary, null, 2));
+    continue;
+  }
+  if (inferredCase.verifyComposioSettings === true) {
+    const settingsSummary = await runComposioAuthSmoke();
+    settingsSummary.caseId = inferredCase.id || '';
+    settingsSummary.query = inferredCase.query;
+    settingsSummary.expectedTool = false;
+    settingsSummary.expectedToolId = '';
+    settingsSummary.expectedToolIds = [];
+    settingsSummary.status = settingsSummary.status || (settingsSummary.ok ? 'PASS' : 'FAIL');
+    summaries.push(settingsSummary);
+    snapshotCaseArtifacts(
+      inferredCase.id || `query-${index + 1}`,
+      1,
+      ['composio-auth', 'external-auth'],
+      settingsSummary
+    );
+    console.log(JSON.stringify(settingsSummary, null, 2));
+    continue;
+  }
+  const blockedC19Write = (['C19c', 'C19d', 'C19e'].includes(inferredCase.id || '') && !c19CreateSucceeded) ||
+    (['C19d', 'C19e'].includes(inferredCase.id || '') && !c19UpdateSucceeded);
+  if (blockedC19Write) {
+    const reason = !c19CreateSucceeded ?
+      'C19 create did not produce a real provider Event ID; later C19 writes were not attempted.' :
+      'C19 update did not produce a real provider Event ID; later C19 writes were not attempted.';
+    const blockedSummary = {
+      caseId: inferredCase.id || '',
+      query,
+      expectedTool: inferredCase.expectsTool,
+      expectedToolId: inferredCase.expectedToolId || '',
+      status: 'BLOCKED',
+      ok: false,
+      reason
+    };
+    summaries.push(blockedSummary);
+    captureBlockedCase(inferredCase.id || `query-${index + 1}`, 1, blockedSummary);
     console.log(JSON.stringify(blockedSummary, null, 2));
     continue;
   }
   const expectedTool = inferredCase.expectsTool;
+  const previousCase = index > 0 ?
+    (useDefaultCases ? selectedDefaultCases[index - 1] : expectedCaseForQuery(queries[index - 1])) : null;
+  const preserveAppSession = shouldPreserveSmokeAppSession(
+    inferredCase,
+    previousCase,
+    summaries.at(-1) || null
+  );
+  const caseRetryLimit = inferredCase.retryLimit ?? queryRetryLimit;
   let summary = null;
-  for (let attempt = 0; attempt <= queryRetryLimit; attempt += 1) {
-    summary = await runQuery(query, index, expectedTool);
+  for (let attempt = 0; attempt <= caseRetryLimit; attempt += 1) {
+    summary = await runQuery(query, index, expectedTool, inferredCase, preserveAppSession);
     summary.attempt = attempt + 1;
-    summary.retryLimit = queryRetryLimit;
+    summary.retryLimit = caseRetryLimit;
+    snapshotCaseArtifacts(
+      inferredCase.id || `query-${index + 1}`,
+      attempt + 1,
+      [`query-${index + 1}`],
+      summary
+    );
     const missingScrolledMarkers = Array.isArray(summary.layoutScrolledRequiredMarkers) &&
       Array.isArray(summary.layoutScrolledFoundMarkers) &&
       summary.layoutScrolledRequiredMarkers.some((marker) => !summary.layoutScrolledFoundMarkers.includes(marker));
     const retryableFailure = summary.providerFailed || summary.modelFailed || missingScrolledMarkers;
-    if (summary.ok || !retryableFailure || attempt === queryRetryLimit) {
+    if (summary.ok || summary.allowsCorrelatedDynamicAuth || !retryableFailure || attempt === caseRetryLimit) {
       break;
     }
-    console.warn(`retryable failure for query ${index + 1}, retrying attempt ${attempt + 2}/${queryRetryLimit + 1}`);
+    console.warn(`retryable failure for query ${index + 1}, retrying attempt ${attempt + 2}/${caseRetryLimit + 1}`);
   }
   if (summary === null) {
     throw new Error(`No summary produced for query: ${query}`);
   }
-  summary.status = summary.ok ? 'PASS' : (summary.providerFailed ? 'BLOCKED' : 'FAIL');
+  summary.status = summary.ok ? 'PASS' : (summary.allowsCorrelatedDynamicAuth ? 'BLOCKED' :
+    (summary.providerFailed ? 'BLOCKED' : 'FAIL'));
   summaries.push(summary);
   console.log(JSON.stringify(summary, null, 2));
+  if (inferredCase.id === 'C19b') {
+    c19CreateSucceeded = summary.calendarCreateAction?.ok === true;
+    c19CleanupRequired = c19CreateSucceeded;
+  }
+  if (inferredCase.id === 'C19c') {
+    c19UpdateSucceeded = summary.calendarUpdateAction?.ok === true;
+  }
+  if (inferredCase.id === 'C19e' && summary.calendarDeleteAction?.ok === true) {
+    c19CleanupRequired = false;
+  }
   if (inferredCase.id === 'C11c' && personaMemoryBackup !== null) {
     personaMemoryRestore = restorePersonaMemoryStore(personaMemoryBackup);
     personaMemoryBackup = null;
   }
 }
 } finally {
+  if (c19Requested) {
+    const cleanupDelete = coreRegressionCases.find((testCase) => testCase.id === 'C19e');
+    const cleanupAbsence = coreRegressionCases.find((testCase) => testCase.id === 'C19f');
+    const finalizer = await runC19CleanupFinalizer({
+      cleanupRequired: c19CleanupRequired && cleanupDelete !== undefined,
+      runDelete: async () => {
+        if (cleanupDelete === undefined) throw new Error('C19 cleanup delete case missing');
+        const cleanup = await runQuery(cleanupDelete.query, queries.length, cleanupDelete.expectsTool, cleanupDelete);
+        cleanup.caseId = 'C19e-cleanup';
+        cleanup.status = cleanup.ok ? 'PASS' : (cleanup.providerFailed ? 'BLOCKED' : 'FAIL');
+        snapshotCaseArtifacts(cleanup.caseId, 1, [`query-${queries.length + 1}`], cleanup);
+        return cleanup;
+      },
+      runAbsence: async () => {
+        if (cleanupAbsence === undefined) throw new Error('C19 final absence case missing');
+        const absence = await runQuery(cleanupAbsence.query, queries.length + 1, cleanupAbsence.expectsTool, cleanupAbsence);
+        absence.caseId = 'C19f-final-cleanup';
+        absence.status = absence.ok ? 'PASS' : (absence.providerFailed ? 'BLOCKED' : 'FAIL');
+        snapshotCaseArtifacts(absence.caseId, 1, [`query-${queries.length + 2}`], absence);
+        return absence;
+      }
+    });
+    if (finalizer.cleanup.skipped !== true) {
+      summaries.push(finalizer.cleanup);
+      c19CleanupRequired = finalizer.cleanup.calendarDeleteAction?.ok !== true;
+      console.log(JSON.stringify(finalizer.cleanup, null, 2));
+    }
+    if (finalizer.absence !== undefined) {
+      summaries.push(finalizer.absence);
+      console.log(JSON.stringify(finalizer.absence, null, 2));
+    }
+  }
   if (personaMemoryBackup !== null) {
     personaMemoryRestore = restorePersonaMemoryStore(personaMemoryBackup);
     personaMemoryBackup = null;
@@ -2633,6 +3890,9 @@ const finalAllowsPersonaMemoryUpdate = finalSummary !== null && finalSummary.per
 const finalAllowsExternalGmailWeb = isGmailWebQuery(finalQuery) &&
   finalSummary !== null &&
   finalSummary.gmailWebOpened === true;
+const finalAllowsCorrelatedDynamicAuth =
+  finalSummary !== null &&
+  finalSummary.allowsCorrelatedDynamicAuth === true;
 const finalAllowsSocialHubTruthfulState =
   finalSummary !== null &&
   isSocialHubExpectedToolId(finalSummary.expectedToolId) &&
@@ -2653,6 +3913,10 @@ const finalAllowsSourceFailure =
   (finalLayoutText.includes('来源状态') || finalLayoutText.includes('飞常准')) &&
   finalLayoutText.includes('耗时');
 const finalLayoutBlockingHits = finalLayoutBlockingMarkers.filter((marker) => {
+  if (finalAllowsCorrelatedDynamicAuth &&
+    (marker === '需要供应商配置' || marker === '需要配置：')) {
+    return false;
+  }
   if (finalAllowsPartialTravel && (marker === '需要供应商配置' || marker === '需要配置：')) {
     return false;
   }
@@ -2688,7 +3952,7 @@ for (const blockingPattern of finalLayoutBlockingPatterns) {
     finalLayoutBlockingHits.push(blockingPattern.name);
   }
 }
-if (finalSummary !== null && finalSummary.expectedToolId === 'gmail.message.send') {
+if (finalSummary !== null && finalSummary.expectedToolId === 'gmail.draft.create') {
   for (const blockingPattern of forbiddenGmailSendSuccessPatterns) {
     if (blockingPattern.pattern.test(finalLayoutText)) {
       finalLayoutBlockingHits.push(blockingPattern.name);
@@ -2697,6 +3961,49 @@ if (finalSummary !== null && finalSummary.expectedToolId === 'gmail.message.send
 }
 const finalLayoutRouteHits = finalLayoutRouteMarkers.filter((marker) => finalLayoutText.includes(marker));
 const hilogProcesses = activeHilogProcesses();
+const finalExpectsDirectText = finalSummary !== null && finalSummary.expectedTool === false &&
+  !isPersonaMemoryUpdateQuery(finalQuery);
+let finalDirectTextVisible = {
+  ok: false, replyChars: 0, baselineMessageCount: 0, finalMessageCount: 0,
+  failures: ['not_direct_text'], skipped: true
+};
+if (finalExpectsDirectText && typeof finalSummary.logPath === 'string' &&
+  typeof finalSummary.directTextBaselineLayoutPath === 'string') {
+  try {
+    const evidence = directTextVisibleEvidence(
+      readFileSync(finalSummary.logPath, 'utf8'),
+      JSON.parse(readFileSync(finalSummary.directTextBaselineLayoutPath, 'utf8')),
+      finalLayout,
+      finalQuery,
+      {
+        conversationId: finalSummary.multiAgentLifecycle?.conversationId || '',
+        turnId: finalSummary.multiAgentLifecycle?.turnId || '',
+        expectedToolIds: finalSummary.expectedToolIds || []
+      }
+    );
+    finalDirectTextVisible = {
+      ok: evidence.ok,
+      replyChars: evidence.replyChars,
+      baselineMessageCount: evidence.baselineMessageCount,
+      finalMessageCount: evidence.finalMessageCount,
+      failures: evidence.failures,
+      skipped: false
+    };
+  } catch (_error) {
+    finalDirectTextVisible = {
+      ok: false, replyChars: 0, baselineMessageCount: 0, finalMessageCount: 0,
+      failures: ['direct_text_baseline_unavailable'], skipped: false
+    };
+  }
+}
+const finalOutputPresent = finalExpectsDirectText ? finalDirectTextVisible.ok :
+  (finalAllowsCorrelatedDynamicAuth || finalAllowsSocialHubTruthfulState ||
+    finalAllowsExternalGmailWeb || finalAllowsPersonaMemoryUpdate ||
+    finalLayoutDomainHits.length > 0 ||
+    (finalSummary !== null &&
+      !isSocialHubExpectedToolId(finalSummary.expectedToolId) &&
+      finalSummary.htmlHomeDocument !== undefined &&
+      finalSummary.htmlHomeDocument.ok === true));
 const visibleOutput = {
   layoutPath: join(outDir, 'final-layout.json'),
   screenPath: finalScreenPath,
@@ -2706,11 +4013,8 @@ const visibleOutput = {
   syntheticHits: finalLayoutSyntheticHits,
   forbiddenActionHits: finalLayoutForbiddenActionHits,
   blockingHits: finalLayoutBlockingHits,
-  ok: (finalAllowsSocialHubTruthfulState || finalAllowsExternalGmailWeb || finalAllowsPersonaMemoryUpdate || finalLayoutDomainHits.length > 0 ||
-    (finalSummary !== null &&
-      !isSocialHubExpectedToolId(finalSummary.expectedToolId) &&
-      finalSummary.htmlHomeDocument !== undefined &&
-      finalSummary.htmlHomeDocument.ok === true)) &&
+  directTextVisible: finalDirectTextVisible,
+  ok: finalOutputPresent &&
     finalLayoutSyntheticHits.length === 0 &&
     finalLayoutForbiddenActionHits.length === 0 &&
     finalLayoutBlockingHits.length === 0
@@ -2721,6 +4025,7 @@ const processCleanup = {
 };
 
 const summaryPath = join(outDir, 'summary.json');
+const screenshotIndexPath = writeScreenshotIndex();
 writeFileSync(summaryPath, JSON.stringify({
   target,
   timeoutMs,
@@ -2732,6 +4037,7 @@ writeFileSync(summaryPath, JSON.stringify({
   processCleanup
 }, null, 2));
 console.log(`\nsummary: ${summaryPath}`);
+console.log(`screenshots: ${screenshotIndexPath}`);
 console.log(`personaMemoryRestore: ${JSON.stringify(personaMemoryRestore, null, 2)}`);
 console.log(`visibleOutput: ${JSON.stringify(visibleOutput, null, 2)}`);
 console.log(`processCleanup: ${JSON.stringify(processCleanup, null, 2)}`);

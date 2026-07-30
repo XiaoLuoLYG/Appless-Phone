@@ -1,6 +1,8 @@
 import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
+import { webview } from '@kit.ArkWeb';
+import { preferences } from '@kit.ArkData';
 import util from '@ohos.util';
 import {
   aiLogError,
@@ -11,12 +13,19 @@ import {
   configureLocalProviderConfigFromRawJson,
   gmailOAuthConfigFromProvider,
   handleGmailOAuthRedirect,
-  handleXOAuthRedirect,
   localModelSettingsDebugSummary,
-  localProviderConfigDebugSummary,
-  xOAuthConfigFromProvider
+  localProviderConfigDebugSummary
 } from '@loop/agent-core';
 import { configurePersonaStoreFromRaw } from '../model/PersonaStore';
+import {
+  claimDueTrainPresaleTask,
+  parseTrainPresaleTaskList,
+  serializeTrainPresaleTaskList,
+  TRAIN_PRESALE_TASK_STORE_NAME,
+  TrainPresaleTask,
+  TrainPresaleTaskState,
+  updateTrainPresaleTask
+} from '../pages/A2uiHome/train/TrainPresaleTaskStore';
 
 const DOMAIN = 0x0000;
 const LOCAL_PROVIDER_CONFIG_RAWFILE = 'aiphone_provider_config.json';
@@ -47,14 +56,23 @@ const GMAIL_OAUTH_URI_HINTS: string[] = [
   'aiphone://oauth/google',
   GMAIL_REVERSED_CLIENT_SCHEME
 ];
-const X_OAUTH_URI_HINTS: string[] = [
-  'aiphone://oauth/x',
-  'com.example.aiphonedemo:/oauth/x',
-  'com.example.aiphonedemo://oauth/x'
-];
 const COMPOSIO_CALLBACK_URI_HINTS: string[] = [
   'aiphone://composio/callback'
 ];
+export const TRAIN_PRESALE_TASKS_KEY: string = 'tasks';
+export const TRAIN_PRESALE_PENDING_TASK_KEY: string = 'pending_execution_task_id';
+export const TRAIN_PRESALE_HANDOFF_EVENT: string = 'trainPresaleHandoffChanged';
+const TRAIN_PRESALE_REPLACED_REASON: string = '新的开售提醒已到达；请重新打开此任务继续。';
+
+export interface TrainPresaleHandoffClaimResult {
+  taskId: string;
+  changed: boolean;
+}
+
+export interface TrainPresaleHandoffTransitionResult {
+  task: TrainPresaleTask | undefined;
+  cleared: boolean;
+}
 
 function hasUriHint(uri: string, hints: string[]): boolean {
   for (let index = 0; index < hints.length; index++) {
@@ -67,10 +85,6 @@ function hasUriHint(uri: string, hints: string[]): boolean {
 
 function isGmailOAuthRedirectUri(uri: string): boolean {
   return hasUriHint(uri, GMAIL_OAUTH_URI_HINTS);
-}
-
-function isXOAuthRedirectUri(uri: string): boolean {
-  return hasUriHint(uri, X_OAUTH_URI_HINTS);
 }
 
 function isComposioCallbackUri(uri: string): boolean {
@@ -91,7 +105,7 @@ function describeError(error: Error | Object | string | number | boolean | null 
 }
 
 function allOAuthUriHints(): string[] {
-  return GMAIL_OAUTH_URI_HINTS.concat(X_OAUTH_URI_HINTS).concat(COMPOSIO_CALLBACK_URI_HINTS);
+  return GMAIL_OAUTH_URI_HINTS.concat(COMPOSIO_CALLBACK_URI_HINTS);
 }
 
 function shouldInspectPotentialOAuthText(value: string): boolean {
@@ -189,11 +203,135 @@ function oauthUriFromWant(want: Want): string {
   }
   for (let index = 0; index < candidates.length; index++) {
     const candidate = candidates[index];
-    if (isGmailOAuthRedirectUri(candidate) || isXOAuthRedirectUri(candidate) || isComposioCallbackUri(candidate)) {
+    if (isGmailOAuthRedirectUri(candidate) || isComposioCallbackUri(candidate)) {
       return candidate;
     }
   }
   return '';
+}
+
+function preferenceText(value: preferences.ValueType): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function trainPresaleTaskIdFromWant(want: Want): string | undefined {
+  const params = want.parameters;
+  if (params === undefined || params === null) {
+    return undefined;
+  }
+  const value = params['trainPresaleTaskId'];
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function trainPresaleTasks(store: preferences.Preferences): TrainPresaleTask[] {
+  return parseTrainPresaleTaskList(preferenceText(store.getSync(TRAIN_PRESALE_TASKS_KEY, '')));
+}
+
+function trainPresaleTaskIndex(tasks: TrainPresaleTask[], taskId: string): number {
+  for (let index = 0; index < tasks.length; index++) {
+    if (tasks[index].taskId === taskId) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+export function claimTrainPresaleHandoff(
+  store: preferences.Preferences,
+  nowIso: string,
+  explicitTaskId?: string
+): TrainPresaleHandoffClaimResult {
+  const tasks = trainPresaleTasks(store);
+  const previousPending = preferenceText(store.getSync(TRAIN_PRESALE_PENDING_TASK_KEY, '')).trim();
+  const explicit = explicitTaskId === undefined ? '' : explicitTaskId.trim();
+  if (explicit.length > 0) {
+    const targetIndex = trainPresaleTaskIndex(tasks, explicit);
+    if (targetIndex < 0) {
+      return { taskId: previousPending, changed: false };
+    }
+    let updatedTasks = tasks;
+    let target = tasks[targetIndex];
+    if (target.state === 'scheduled') {
+      const claimed = claimDueTrainPresaleTask(tasks, nowIso, explicit);
+      if (claimed.task === undefined) {
+        return { taskId: previousPending, changed: false };
+      }
+      updatedTasks = claimed.tasks;
+      target = claimed.task;
+    } else if (target.state !== 'executing') {
+      return { taskId: previousPending, changed: false };
+    }
+    if (previousPending.length > 0 && previousPending !== explicit) {
+      const replacedIndex = trainPresaleTaskIndex(updatedTasks, previousPending);
+      if (replacedIndex >= 0 && updatedTasks[replacedIndex].state === 'executing') {
+        updatedTasks[replacedIndex] = updateTrainPresaleTask(updatedTasks[replacedIndex], {
+          state: 'needs_user',
+          lastError: TRAIN_PRESALE_REPLACED_REASON
+        });
+      }
+    }
+    store.putSync(TRAIN_PRESALE_TASKS_KEY, serializeTrainPresaleTaskList(updatedTasks));
+    store.putSync(TRAIN_PRESALE_PENDING_TASK_KEY, target.taskId);
+    store.flushSync();
+    return { taskId: target.taskId, changed: previousPending !== target.taskId || tasks[targetIndex].state === 'scheduled' };
+  }
+  const pendingIndex = trainPresaleTaskIndex(tasks, previousPending);
+  if (pendingIndex >= 0 && tasks[pendingIndex].state === 'executing') {
+    return { taskId: previousPending, changed: false };
+  }
+  const claimed = claimDueTrainPresaleTask(tasks, nowIso);
+  if (claimed.task === undefined) {
+    if (previousPending.length > 0) {
+      store.deleteSync(TRAIN_PRESALE_PENDING_TASK_KEY);
+      store.flushSync();
+    }
+    return { taskId: '', changed: false };
+  }
+  store.putSync(TRAIN_PRESALE_TASKS_KEY, serializeTrainPresaleTaskList(claimed.tasks));
+  store.putSync(TRAIN_PRESALE_PENDING_TASK_KEY, claimed.task.taskId);
+  store.flushSync();
+  return { taskId: claimed.task.taskId, changed: true };
+}
+
+export function transitionTrainPresaleHandoff(
+  store: preferences.Preferences,
+  taskId: string,
+  state: TrainPresaleTaskState,
+  reason: string
+): TrainPresaleHandoffTransitionResult {
+  const pending = preferenceText(store.getSync(TRAIN_PRESALE_PENDING_TASK_KEY, '')).trim();
+  const tasks = trainPresaleTasks(store);
+  const index = trainPresaleTaskIndex(tasks, taskId);
+  const current = index < 0 ? undefined : tasks[index];
+  if (state === 'executing' || pending !== taskId || current === undefined) {
+    return { task: current, cleared: false };
+  }
+  const updated = updateTrainPresaleTask(current, { state: state, lastError: reason });
+  if (updated.state !== state) {
+    return { task: current, cleared: false };
+  }
+  tasks[index] = updated;
+  store.putSync(TRAIN_PRESALE_TASKS_KEY, serializeTrainPresaleTaskList(tasks));
+  store.flushSync();
+  const pendingAfterTaskFlush = preferenceText(store.getSync(TRAIN_PRESALE_PENDING_TASK_KEY, '')).trim();
+  if (pendingAfterTaskFlush !== taskId) {
+    return { task: tasks[index], cleared: false };
+  }
+  store.deleteSync(TRAIN_PRESALE_PENDING_TASK_KEY);
+  store.flushSync();
+  return { task: tasks[index], cleared: true };
+}
+
+export function transitionBoundTrainPresaleCheckout(
+  store: preferences.Preferences,
+  boundCheckoutTaskId: string,
+  closingTaskId: string,
+  reason: string
+): TrainPresaleHandoffTransitionResult {
+  if (boundCheckoutTaskId.length === 0 || closingTaskId !== boundCheckoutTaskId) {
+    return { task: undefined, cleared: false };
+  }
+  return transitionTrainPresaleHandoff(store, closingTaskId, 'needs_user', reason);
 }
 
 export default class EntryAbility extends UIAbility {
@@ -207,6 +345,7 @@ export default class EntryAbility extends UIAbility {
     this.loadComposioConfig();
     this.loadPersonaPacks();
     this.handleOAuthWant(want);
+    this.claimTrainPresaleTask(want);
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
   }
 
@@ -289,6 +428,26 @@ export default class EntryAbility extends UIAbility {
     }
     this.loadPersonaPacks();
     this.handleOAuthWant(want);
+    const result = this.claimTrainPresaleTask(want);
+    if (result.changed) {
+      this.context.getApplicationContext().eventHub.emit(TRAIN_PRESALE_HANDOFF_EVENT);
+    }
+  }
+
+  private claimTrainPresaleTask(want: Want): TrainPresaleHandoffClaimResult {
+    try {
+      const store = preferences.getPreferencesSync(this.context, { name: TRAIN_PRESALE_TASK_STORE_NAME });
+      const result = claimTrainPresaleHandoff(store, new Date().toISOString(), trainPresaleTaskIdFromWant(want));
+      if (result.taskId.length > 0) {
+        aiLogInfo('[AIPhone][TrainPresaleClaim] taskId=' + result.taskId +
+          ' changed=' + (result.changed ? 'true' : 'false'));
+      }
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : JSON.stringify(error);
+      aiLogError('[AIPhone][TrainPresaleClaim] error=' + message.substring(0, 240));
+      return { taskId: '', changed: false };
+    }
   }
 
   private handleOAuthWant(want: Want): void {
@@ -296,10 +455,6 @@ export default class EntryAbility extends UIAbility {
     const uri = oauthUriFromWant(want);
     if (isComposioCallbackUri(uri)) {
       aiLogInfo('[AIPhone][ComposioCallbackWantReceived] uriChars=' + uri.length.toString());
-      return;
-    }
-    if (isXOAuthRedirectUri(uri)) {
-      this.handleXOAuthUri(uri);
       return;
     }
     if (!isGmailOAuthRedirectUri(uri)) {
@@ -333,26 +488,6 @@ export default class EntryAbility extends UIAbility {
       });
   }
 
-  private handleXOAuthUri(uri: string): void {
-    const config = xOAuthConfigFromProvider();
-    aiLogInfo('[AIPhone][XOAuthWantReceived] uriChars=' + uri.length.toString() +
-      ' hasCode=' + (uri.indexOf('code=') >= 0 ? 'true' : 'false') +
-      ' hasState=' + (uri.indexOf('state=') >= 0 ? 'true' : 'false') +
-      ' hasError=' + (uri.indexOf('error=') >= 0 ? 'true' : 'false') +
-      ' clientConfigured=' + (config.clientId.length > 0 ? 'true' : 'false') +
-      ' redirectChars=' + config.redirectUri.length.toString());
-    handleXOAuthRedirect(new AssetCredentialStore(), config, uri)
-      .then(() => {
-        aiLogInfo('[AIPhone][XOAuthWantSaved] ok=true');
-        hilog.info(DOMAIN, 'testTag', '%{public}s', 'X OAuth authorization saved.');
-      })
-      .catch((err: Error | Object | string | number | boolean | null | undefined) => {
-        const message = describeError(err);
-        aiLogError('[AIPhone][XOAuthWantFailed] ' + message);
-        hilog.error(DOMAIN, 'testTag', 'X OAuth callback failed. Cause: %{public}s', message);
-      });
-  }
-
   onWindowStageCreate(windowStage: window.WindowStage): void {
     // Main window is created, set main page for this ability
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onWindowStageCreate');
@@ -378,6 +513,10 @@ export default class EntryAbility extends UIAbility {
 
   onBackground(): void {
     // Ability has back to background
+    webview.WebCookieManager.saveCookieAsync()
+      .catch((_error: Error) => {
+        aiLogError('[AIPhone][WebCookieSaveOnBackground] ok=false');
+      });
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onBackground');
   }
 }

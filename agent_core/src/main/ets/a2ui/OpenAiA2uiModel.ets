@@ -1,7 +1,8 @@
 import http from '@ohos.net.http';
 import { ChatMessage, ConversationContext } from '../agent/ConversationContext';
 import { LlmProvider } from '../model/LlmProvider';
-import { AGENUI_CATALOG_ID, A2UI_VERSION } from './A2uiProtocol';
+import { AIPHONE_COMPONENT_CATALOG_JSON } from '../aiphone/runtime/A2uiComponentCatalogConst';
+import { A2UI_VERSION } from './A2uiProtocol';
 import { A2uiModel } from './A2uiModel';
 
 interface ChatRequest {
@@ -61,23 +62,17 @@ export class OpenAiA2uiModel implements A2uiModel {
   }
 
   private buildRequest(userTask: string, surfaceId: string, conversation?: ConversationContext): ChatRequest {
-    const exampleComponents =
-      `{"version":"${A2UI_VERSION}","updateComponents":{"surfaceId":"${surfaceId}",` +
-      `"components":[{"id":"root","component":"Card","child":"col"},` +
-      `{"id":"col","component":"Column","children":["title","body"],"align":"stretch"},` +
-      `{"id":"title","component":"Text","text":"Hello","variant":"h3"},` +
-      `{"id":"body","component":"Text","text":"Your message here","variant":"body"}]}}`;
-
     const systemPrompt =
-      `You output A2UI ${A2UI_VERSION} JSONL for a mobile UI renderer.\n` +
+      `You plan one constrained A2UI ${A2UI_VERSION} component layout for a mobile UI renderer.\n` +
       'Rules:\n' +
-      '- Output ONLY JSON lines. No markdown, no explanation.\n' +
-      `- Line 1: createSurface with surfaceId "${surfaceId}" and catalogId "${AGENUI_CATALOG_ID}"\n` +
-      '- Line 2: updateComponents with a flat components array and id "root"\n' +
-      '- Use only: Card, Column, Row, Text, Button, Divider\n' +
-      '- Text must use plain string "text", not markdown\n' +
-      '- Keep 4-8 components maximum\n' +
-      `Example line 2:\n${exampleComponents}`;
+      '- Output exactly one compact JSON line. No markdown or explanation.\n' +
+      `- The only envelope is updateComponents for surfaceId "${surfaceId}".\n` +
+      '- Never output createSurface, updateDataModel, deleteSurface, provider facts, action IDs, or action args.\n' +
+      '- The root component id must be "root" and all children must form one connected acyclic tree.\n' +
+      '- Bind content only through dataPath values explicitly listed in the user task.\n' +
+      '- An action slot contains only {"offerId":"an offered id"}; never invent or alter an offer.\n' +
+      '- Keep at most 24 components. Use only this catalog:\n' +
+      AIPHONE_COMPONENT_CATALOG_JSON;
 
     const messages: ChatMessage[] = [
       { role: 'system', content: systemPrompt }
@@ -92,9 +87,7 @@ export class OpenAiA2uiModel implements A2uiModel {
 
     messages.push({
       role: 'user',
-      content:
-        `Build a simple Card UI for: ${userTask}\n` +
-        'Include a title Text (variant h3) and body Text (variant body).'
+      content: userTask
     });
 
     return {

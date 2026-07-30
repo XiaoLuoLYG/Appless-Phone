@@ -179,6 +179,21 @@ export function connectCardA2ui(
   return a2uiJsonl(envelopes);
 }
 
+export function dynamicProviderAuthorizationA2ui(surfaceId: string, provider: string, message: string): string {
+  const manifest: DynamicToolManifest = {
+    id: 'dynamic.provider.authorization',
+    displayName: provider.trim().substring(0, 80),
+    sourceUrl: '',
+    hosted: true,
+    fromSiteUrl: '',
+    capabilities: [],
+    requiredCredentials: [],
+    transports: [],
+    tools: []
+  };
+  return connectCardA2ui(surfaceId, 'dynamic.search', manifest, 'needs_auth', message);
+}
+
 export function unsupportedTransportA2ui(surfaceId: string, toolId: string, manifest: DynamicToolManifest, prompt: string = ''): string {
   return connectCardA2ui(surfaceId, toolId, manifest, 'unsupported_transport', '该候选工具只提供本地命令型配置，当前鸿蒙 HAP 不会执行 npx、uvx 或 stdio 工具。', prompt);
 }

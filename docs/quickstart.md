@@ -74,6 +74,8 @@ QQ_MAIL_AUTH_CODE=
 QQ_MAIL_IMAP_HOST=imap.qq.com
 QQ_MAIL_IMAP_PORT=993
 QQ_MAIL_DRAFTS_MAILBOX=
+FIRECRAWL_API_KEY=
+FIRECRAWL_MCP_URL=https://mcp.firecrawl.dev/v2/mcp
 ```
 
 构建或安装 HAP 前，把本地值同步到被忽略的 rawfile：
@@ -130,23 +132,24 @@ Gmail：
 搜索 X 上关于 AIPhone 的公开帖子
 ```
 
-SocialHub v1 通过 Node Social Bridge 读取已授权 X/Slack 来源和企业微信回调缓存，并只生成本地草稿；缺少 gateway、token、scope 或回调缓存时应该显示连接/错误状态，不应该显示示例联系人、消息或帖子。
+SocialHub 通过当前用户的 Composio connected account 读取 X/Slack，企业微信仍使用本地回调缓存。它先生成本地草稿；只有用户点击发送时才会通过 Composio 提交 Slack 回复。缺少授权、工具、scope 或回调缓存时应显示真实连接/错误状态。
 
-## 6. Node Social Bridge 和 gateway smoke
+Firecrawl 开放网页：
 
-出行、航班、火车、餐饮等默认 HAP 路径仍使用 `local://aiphone-tools` 和设备直连 provider。SocialHub v1 例外：真实 feed/draft bridge 调用需要本机 Node gateway 暴露在 `127.0.0.1:8787`。设备测试前启动 gateway 并设置 HDC reverse：
-
-```bash
-cd tool-gateway
-TOOL_GATEWAY_PORT=8787 npm start
-hdc -t <target> rport tcp:8787 tcp:8787
+```text
+研究 Firecrawl Monitor 的工作方式、限制和适用场景，给出多个公开来源
+读取 https://www.firecrawl.dev/monitor 并总结它如何监控网页变化
+搜索小红书上关于鸿蒙应用开发的公开讨论，只展示公开可验证内容
 ```
 
-gateway smoke：
+Firecrawl 固定工具由 HAP 携带 key 直连 Hosted MCP，不依赖 Mac gateway。Credit 和 Monitor 检查由 Firecrawl 账号/套餐提供和计费，可在 [Firecrawl pricing](https://www.firecrawl.dev/pricing) 与账号后台查看；部分外网页面需要可用的国际网络或 VPN。小红书仅作为公开索引网页补充，不绕过登录/CAPTCHA，也不读取私密内容，结果可以如实显示 `PARTIAL`。
+
+## 6. Provider 配置同步
+
+默认 HAP 使用 `local://aiphone-tools` 和设备直连 provider。构建或设备测试前同步本地 provider 与 Composio 配置：
 
 ```bash
-cd tool-gateway
-npm run smoke
+node scripts/sync-provider-config.mjs
 ```
 
 ## 7. 设备 smoke
@@ -164,4 +167,5 @@ node scripts/aiphone-device-smoke.mjs
 - 不订票、不支付、不抢票、不出票。
 - 不下餐饮订单、不创建购物车、不兑换积分、不自动领券。
 - 不伪造 SocialHub、X、Slack 或企业微信消息/帖子/联系人，也不会伪造发送成功。
-- SocialHub v1 没有社交发送工具；草稿只保存在本地等待用户检查。
+- SocialHub 不会自动发送；Slack 仅在用户确认后走 Composio，X 和企业微信草稿不发送。
+- Firecrawl 不登录站点、不处理 CAPTCHA、不抓私密账号，不把 Monitor 云状态冒充 HarmonyOS 原生推送。

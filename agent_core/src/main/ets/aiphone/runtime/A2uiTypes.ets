@@ -2,7 +2,8 @@ import {
   SocialHubConnectionData,
   SocialHubData,
   SocialHubDraftData,
-  SocialHubItemData
+  SocialHubItemData,
+  SocialHubPublicationData
 } from './SocialHubTypes';
 import { AggregateSearchResult } from './AggregateSearchTypes';
 
@@ -37,6 +38,7 @@ export interface A2uiAction {
   variant: string;
   kind: string;
   args?: Object;
+  sourceSectionId?: string;
 }
 
 export interface A2uiLabelValueData {
@@ -60,6 +62,13 @@ export interface A2uiTrainData {
   noSeat: string;
   hardSeat: string;
   sleeperSoft: string;
+  price?: string;
+  bookingUrl?: string;
+  travelDate?: string;
+  saleState?: string;
+  saleAt?: string;
+  fromCode?: string;
+  toCode?: string;
 }
 
 export interface A2uiFlightData {
@@ -98,6 +107,36 @@ export interface A2uiFoodData {
   distance: string;
   location?: string;
   sourceTags?: string[];
+}
+
+export interface TravelStructuredData {
+  title: string;
+  body: string;
+  summary: string;
+  options: A2uiTravelOptionData[];
+  rows: A2uiLabelValueData[];
+}
+
+export interface TrainStructuredData {
+  title: string;
+  body: string;
+  summary: string;
+  trains: A2uiTrainData[];
+}
+
+export interface FlightStructuredData {
+  title: string;
+  body: string;
+  summary: string;
+  flights: A2uiFlightData[];
+}
+
+export interface FoodStructuredData {
+  title: string;
+  body: string;
+  summary: string;
+  foods: A2uiFoodData[];
+  rows: A2uiLabelValueData[];
 }
 
 export interface A2uiSummaryData {
@@ -265,6 +304,7 @@ export type A2uiDataValue =
   SocialHubItemData[] |
   SocialHubItemData |
   SocialHubDraftData |
+  SocialHubPublicationData |
   SocialHubConnectionData[] |
   A2uiToolRequestData[] |
   A2uiMultiTaskBoardData |
@@ -336,6 +376,8 @@ export interface A2uiSurfaceState {
   dataModelJson: string;
   error: string;
   sequence: number;
+  runtimeOwner?: 'multi_agent' | 'legacy';
+  runtimeGeneration?: number;
 }
 
 export interface A2uiApplyResult {

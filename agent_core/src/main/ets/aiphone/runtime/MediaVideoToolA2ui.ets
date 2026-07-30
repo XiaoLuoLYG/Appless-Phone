@@ -1,4 +1,14 @@
 import { A2uiAction, A2uiGenericToolResultData, A2uiGenericToolResultRowData } from './A2uiTypes';
+import { genericToolResultsA2ui } from './DynamicToolA2ui';
+import { GenericStructuredData } from './DynamicToolTypes';
+
+export function mediaVideoStructuredDataA2ui(
+  surfaceId: string,
+  toolId: string,
+  data: GenericStructuredData
+): string {
+  return genericToolResultsA2ui(surfaceId, toolId, data.results);
+}
 
 export function officialMediaVideoPlaybackUrl(value: string): string {
   const url = value.trim();

@@ -1,5 +1,19 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { parseComposioSocialFeed, parseSocialHubDraftPayload, parseSocialHubFeedPayload, socialHubBridgeDraftError, socialHubBridgeHeaders, socialHubBridgeUnavailableFeed, socialHubPrivateItems, socialHubXPostResult, xSearchQuery } from '@loop/agent-core';
+import {
+  createSocialHubPublicationPreview,
+  parseComposioCommunityFeed,
+  parseComposioSocialFeed,
+  parseSocialHubDraftPayload,
+  parseSocialHubFeedPayload,
+  SocialHubClient,
+  SocialHubProviderConfig,
+  socialHubBridgeDraftError,
+  socialHubBridgeHeaders,
+  socialHubBridgeUnavailableFeed,
+  socialHubPrivateItems,
+  socialHubXPostResult,
+  xSearchQuery
+} from '@loop/agent-core';
 
 export default function socialHubClientTest() {
   describe('socialHubClient', () => {
@@ -68,6 +82,55 @@ export default function socialHubClientTest() {
       expect(xSearchQuery('帮我搜索 X 上 openai 最近的公开 post', '')).assertEqual('from:openai');
     });
 
+    it('maps real community payloads and preserves provider failures', 0, () => {
+      const reddit = parseComposioCommunityFeed(
+        'reddit',
+        '{"data":{"children":[{"data":{"name":"t3_real","title":"Real Reddit post",' +
+          '"author":"dev_user","selftext":"Real discussion",' +
+          '"subreddit_name_prefixed":"r/OpenAI","permalink":"/r/OpenAI/comments/real"}}]}}'
+      );
+      const failed = parseComposioCommunityFeed(
+        'reddit',
+        '{"data":null,"error":{"message":"Reddit account is not connected"}}'
+      );
+      const unsuccessful = parseComposioCommunityFeed(
+        'reddit',
+        '{"successful":false,"data":null,"error":null}'
+      );
+
+      expect(reddit.items.length).assertEqual(1);
+      expect(reddit.items[0].id).assertEqual('t3_real');
+      expect(reddit.items[0].text).assertContain('Real discussion');
+      expect(failed.items.length).assertEqual(0);
+      expect(failed.connections[0].status).assertEqual('error');
+      expect(failed.connections[0].message).assertEqual('Reddit account is not connected');
+      expect(unsuccessful.items.length).assertEqual(0);
+      expect(unsuccessful.connections[0].status).assertEqual('error');
+      expect(unsuccessful.connections[0].message).assertEqual(
+        'Provider returned an unsuccessful execution status.'
+      );
+    });
+
+    it('creates a preview only for one real provider identity', 0, () => {
+      const preview = createSocialHubPublicationPreview({
+        platform: 'x',
+        operation: 'publish',
+        accountId: 'x-real',
+        accountName: '@real',
+        text: 'Appless preview'
+      }, '2026-07-18T02:00:00.000Z');
+      const missingIdentity = createSocialHubPublicationPreview({
+        platform: 'x',
+        operation: 'publish',
+        text: 'Appless preview'
+      });
+
+      expect(preview.status).assertEqual('preview');
+      expect(preview.accountName).assertEqual('@real');
+      expect(missingIdentity.status).assertEqual('error');
+      expect(missingIdentity.error.indexOf('真实账号 ID')).assertLarger(-1);
+    });
+
     it('parses real Composio social message payloads without turning errors into messages', 0, () => {
       const x = parseComposioSocialFeed(
         'x',
@@ -105,6 +168,40 @@ export default function socialHubClientTest() {
       expect(failed.items.length).assertEqual(0);
       expect(failed.connections[0].status).assertEqual('error');
       expect(failed.connections[0].message).assertEqual('Account not registered');
+    });
+
+    it('does not send X replies through the legacy direct OAuth path', 0, async () => {
+      const feed = parseSocialHubFeedPayload('{"items":[{"id":"x-dm","platform":"x","kind":"message","text":"hello","channel":"私信","channelId":"dm-1","threadId":"dm-1"}],"connections":[]}');
+      const draft = await new SocialHubClient().sendReply(feed.items[0], '收到');
+
+      expect(draft.status).assertEqual('error');
+      expect(draft.error.indexOf('Composio')).assertLarger(-1);
+      expect(draft.error.indexOf('X OAuth')).assertEqual(-1);
+      expect(draft.sent).assertFalse();
+    });
+
+    it('fails closed on every legacy direct X and Slack entry point', 0, async () => {
+      const client = new SocialHubClient();
+      const legacyConfig: SocialHubProviderConfig = {
+        xBearerToken: 'legacy-x-bearer',
+        xUsername: 'legacy-user',
+        xUserAccessToken: 'legacy-x-user',
+        slackUserToken: 'legacy-slack-user',
+        slackBotToken: 'legacy-slack-bot'
+      };
+      const feed = await client.feed('查看 X 和 Slack 消息', '', legacyConfig);
+      const xPosts = await client.xPostSearch('X 公开 post 搜索关键词: codex', '', legacyConfig);
+      const slackItem = parseSocialHubFeedPayload('{"items":[{"id":"slack-1","platform":"slack","kind":"message","text":"hello","channel":"general","channelId":"C123","threadId":"123.456"}],"connections":[]}').items[0];
+      const reply = await client.sendReply(slackItem, '收到', '', legacyConfig);
+
+      expect(feed.items.length).assertEqual(0);
+      expect(feed.connections[0].message.indexOf('Composio')).assertLarger(-1);
+      expect(feed.connections[1].message.indexOf('Composio')).assertLarger(-1);
+      expect(xPosts.items.length).assertEqual(0);
+      expect(xPosts.connections[0].message.indexOf('Composio')).assertLarger(-1);
+      expect(reply.status).assertEqual('error');
+      expect(reply.error.indexOf('Composio')).assertLarger(-1);
+      expect(reply.sent).assertFalse();
     });
   });
 }

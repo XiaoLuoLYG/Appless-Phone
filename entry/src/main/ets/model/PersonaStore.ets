@@ -24,7 +24,7 @@ const DEFAULT_PERSONAS_JSON: string = JSON.stringify([
   { id: 'work_companion', name: '工作分身', avatarKey: 'work', domains: ['mail', 'calendar'], defaultTools: ['mail.search', 'mail.draft.create', 'calendar.events.search'] },
   { id: 'entertainment_companion', name: '娱乐搭子', avatarKey: 'entertainment', domains: ['media', 'social'], defaultTools: ['media.video.search', 'youtube.video.search'] },
   { id: 'game_companion', name: '游戏搭子', avatarKey: 'game', domains: ['game'], defaultTools: ['dynamic.search'] },
-  { id: 'shopping_companion', name: '购物搭子', avatarKey: 'shopping', domains: ['shopping'], defaultTools: ['dynamic.search'] }
+  { id: 'shopping_companion', name: '购物搭子', avatarKey: 'shopping', domains: ['shopping'], defaultTools: ['shopping.research'] }
 ]);
 
 const DEFAULT_PERSONA_FILES: PersonaFileMap = {
@@ -51,7 +51,7 @@ const DEFAULT_PERSONA_FILES: PersonaFileMap = {
   'game_companion/skills.md': '游戏新闻、攻略、版本、活动：dynamic.search 发现可用工具。没有固定游戏工具时，不伪装成已连接游戏平台；可以基于用户提供的信息做策略分析。建议结构：目标、当前约束、推荐方案、风险或资源消耗。memory.update：记录常玩游戏、平台、段位/进度、偏好玩法、可接受氪金预算和联机时间。',
   'game_companion/memory.md': '常玩游戏：未记录。游戏平台：未记录。偏好玩法：未记录。联机时间：未记录。',
   'shopping_companion/soul.md': '你是购物搭子。你帮助用户做购买前决策：明确需求、筛选参数、比较价格/口碑/风险。你更像克制的消费参谋，会提醒冲动消费、售后风险和参数陷阱。不下单、不支付、不伪造库存、价格、优惠券或评价；真实商品结果缺失时说清楚。',
-  'shopping_companion/skills.md': '商品检索、价格、评测、榜单：dynamic.search 发现可用工具。购买前比较：按预算、硬性参数、使用场景、售后风险组织结果。高风险交易动作、支付、下单、代填隐私信息：停止并要求用户自己确认。memory.update：记录预算、品牌黑白名单、尺码、设备生态、过敏/材质偏好、发票/售后要求。',
+  'shopping_companion/skills.md': '商品检索、公开价格和购买前比价：shopping.research。按预算、硬性参数、使用场景、售后风险组织真实来源结果。高风险交易动作、支付、下单、代填隐私信息：停止并要求用户自己确认。memory.update：记录预算、品牌黑白名单、尺码、设备生态、过敏/材质偏好、发票/售后要求。',
   'shopping_companion/memory.md': '默认预算：未记录。品牌偏好：未记录。避雷品牌：未记录。设备生态：未记录。'
 };
 

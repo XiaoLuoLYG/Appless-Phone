@@ -1,7 +1,9 @@
 import { A2uiSurfaceState } from '../aiphone/runtime/A2uiTypes';
-import { mergeSectionIntoDataModel } from './MultiTaskDataModel';
-import { ingestToolObservation } from './MultiToolSectionAdapters';
-import { MultiTaskBoardData, MultiToolSectionValue } from './MultiToolTypes';
+import { summarizeAppliedA2uiSurface } from './A2uiObservationDigest';
+import { mergeSectionIntoDataModel, readySectionCount } from './MultiTaskDataModel';
+import { ingestToolObservation, serialStepCompletionReply } from './MultiToolSectionAdapters';
+import { MultiTaskBoardData, MultiToolSectionContent, MultiToolSectionValue } from './MultiToolTypes';
+import { MultiToolSurfaceComposer } from './MultiToolSurfaceComposer';
 
 function toolIdMatchesSlot(slotToolId: string, actionToolId: string): boolean {
   if (slotToolId === actionToolId) {
@@ -72,16 +74,132 @@ export function mergeSlotObservationIntoMultiTaskSurface(
     parsed = {};
   }
   parsed = mergeSectionIntoDataModel(parsed, slotId, content, activateSlot);
+  const board = parsed.multiTask as MultiTaskBoardData | undefined;
+  const status = board !== undefined &&
+    readySectionCount(board) === board.sections.length ? 'ready' : 'calling_tool';
 
   return {
     surfaceId: composite.surfaceId,
     rootId: composite.rootId.length > 0 ? composite.rootId : 'root',
     title: composite.title.length > 0 ? composite.title : '并行任务',
     intent: 'multi-task',
-    status: composite.status,
+    status,
     components: composite.components,
     dataModelJson: JSON.stringify(parsed),
     error: composite.error,
     sequence: composite.sequence + 1
   };
+}
+
+export function mergeSurfaceIntoMultiTaskSurface(
+  composite: A2uiSurfaceState,
+  slotId: string,
+  toolId: string,
+  surface: A2uiSurfaceState,
+  activateSlot: boolean = false
+): A2uiSurfaceState {
+  const digest = summarizeAppliedA2uiSurface('', surface);
+  const content: MultiToolSectionContent = {
+    slotId,
+    toolId,
+    title: surface.title,
+    status: surface.status === 'error' ? 'error' : 'ready',
+    summary: digest.text.split('\n').slice(0, 3).join(' '),
+    completionReply: '',
+    observationDigest: digest.text,
+    failureKey: digest.failureKey,
+    embeddedSurface: surface
+  };
+  content.completionReply = serialStepCompletionReply(toolId, content);
+  let parsed = JSON.parse(composite.dataModelJson) as Record<string, Object | null | undefined>;
+  parsed = mergeSectionIntoDataModel(parsed, slotId, content, activateSlot);
+  const board = parsed.multiTask as MultiTaskBoardData;
+  return {
+    surfaceId: composite.surfaceId,
+    rootId: composite.rootId,
+    title: composite.title,
+    intent: composite.intent,
+    status: readySectionCount(board) === board.sections.length ? 'ready' : 'calling_tool',
+    components: composite.components,
+    dataModelJson: JSON.stringify(parsed),
+    error: composite.error,
+    sequence: composite.sequence + 1
+  };
+}
+
+export function appendMultiTaskSlot(
+  composite: A2uiSurfaceState,
+  toolId: string
+): A2uiSurfaceState {
+  const parsed = JSON.parse(composite.dataModelJson) as
+    Record<string, Object | null | undefined>;
+  const board = parsed.multiTask as MultiTaskBoardData;
+  const sections = parsed.sections as Record<string, MultiToolSectionValue>;
+  let slotIndex = board.sections.length;
+  let slotId = 'slot_' + slotIndex.toString();
+  while (sections[slotId] !== undefined) {
+    slotIndex++;
+    slotId = 'slot_' + slotIndex.toString();
+  }
+  if (board.mode !== 'serial') {
+    board.sections.push({
+      slotId,
+      toolId,
+      title: toolId,
+      status: 'queued',
+      summary: ''
+    });
+  }
+  sections[slotId] = {
+    slotId,
+    toolId,
+    title: toolId,
+    status: 'queued',
+    summary: '',
+    observationDigest: '',
+    failureKey: '',
+    embeddedSurface: null
+  };
+  parsed.multiTask = board as Object;
+  parsed.sections = sections as Object;
+  const summary = parsed.summary as
+    Record<string, Object | string | number | boolean | null | undefined>;
+  summary.text = '串行任务进度 ' + readySectionCount(board).toString() + '/' +
+    Object.keys(sections).length.toString();
+  summary.count = readySectionCount(board);
+  parsed.summary = summary as Object;
+  return {
+    surfaceId: composite.surfaceId,
+    rootId: composite.rootId,
+    title: composite.title,
+    intent: composite.intent,
+    status: 'calling_tool',
+    components: composite.components,
+    dataModelJson: JSON.stringify(parsed),
+    error: composite.error,
+    sequence: composite.sequence + 1
+  };
+}
+
+export function wrapSurfaceWithMultiTaskAction(
+  surface: A2uiSurfaceState,
+  sourceToolId: string,
+  actionId: string
+): A2uiSurfaceState {
+  let composite: A2uiSurfaceState = surface;
+  const composer = new MultiToolSurfaceComposer(
+    surface.surfaceId,
+    (next: A2uiSurfaceState): void => {
+      composite = next;
+    }
+  );
+  composer.setExecutionMode('serial');
+  composer.registerSlots([
+    { name: sourceToolId, input: '' },
+    { name: actionId, input: '' }
+  ]);
+  composer.emitShell();
+  composer.ingestSurface('slot_0', surface);
+  composer.markRunning('slot_1');
+  return composite;
 }

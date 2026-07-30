@@ -25,37 +25,12 @@ import { parsePersonaMarkdown, PersonaMarkdownSection, PersonaSkillMarkdown } fr
 import { connectionStatusLabel } from '../state/A2uiHomeState';
 import { DebugTextPanel } from './DebugTextPanel';
 import { personaAvatarResource } from './PersonaAvatar';
+import {
+  COMPOSIO_SUPPORTED_TOOLKITS,
+  composioToolkitDisplayName,
+  ComposioToolkitSummary
+} from './ComposioAuthViewData';
 import { composioToolkitLogoResource } from './ComposioLogoResource';
-
-interface ComposioToolkitSummary {
-  slug: string;
-  name: string;
-}
-
-const COMPOSIO_SUPPORTED_TOOLKITS: ComposioToolkitSummary[] = [
-  { slug: 'gmail', name: 'Gmail' },
-  { slug: 'github', name: 'GitHub' },
-  { slug: 'googlecalendar', name: 'Google Calendar' },
-  { slug: 'googledrive', name: 'Google Drive' },
-  { slug: 'googledocs', name: 'Google Docs' },
-  { slug: 'slack', name: 'Slack' },
-  { slug: 'notion', name: 'Notion' },
-  { slug: 'linear', name: 'Linear' },
-  { slug: 'asana', name: 'Asana' },
-  { slug: 'trello', name: 'Trello' },
-  { slug: 'outlook', name: 'Outlook' },
-  { slug: 'discord', name: 'Discord' },
-  { slug: 'linkedin', name: 'LinkedIn' },
-  { slug: 'whatsapp', name: 'WhatsApp' },
-  { slug: 'instagram', name: 'Instagram' },
-  { slug: 'youtube', name: 'YouTube' },
-  { slug: 'x', name: 'X' },
-  { slug: 'spotify', name: 'Spotify' },
-  { slug: 'tiktok', name: 'TikTok' },
-  { slug: 'ticketmaster', name: 'Ticketmaster' },
-  { slug: 'hubspot', name: 'HubSpot' },
-  { slug: 'salesforce', name: 'Salesforce' }
-];
 
 @Component
 export struct ConfigPage {
@@ -239,7 +214,7 @@ export struct ConfigPage {
       if (slug.length > 0 && !this.hasToolkit(previews, slug)) {
         previews.push({
           slug: slug,
-          name: item.toolkitName.length > 0 ? item.toolkitName : item.toolkitSlug
+          name: composioToolkitDisplayName(slug, item.toolkitName)
         });
       }
     }
@@ -251,11 +226,22 @@ export struct ConfigPage {
     if (item !== null && (item.status === 'connected' || item.connectedAccountId.length > 0)) {
       return 'connected';
     }
+    for (let index = 0; index < COMPOSIO_SUPPORTED_TOOLKITS.length; index++) {
+      const toolkit = COMPOSIO_SUPPORTED_TOOLKITS[index];
+      if (this.normalizedToolkitSlug(toolkit.slug) === this.normalizedToolkitSlug(slug) &&
+        toolkit.requiresAuth === false) {
+        return 'success';
+      }
+    }
     return 'needs_auth';
   }
 
   private composioStatusLabel(slug: string): string {
-    return this.composioStatus(slug) === 'connected' ? '已连接' : '待授权';
+    const status = this.composioStatus(slug);
+    if (status === 'connected') {
+      return '已连接';
+    }
+    return status === 'success' ? '无需授权' : '待授权';
   }
 
   private composioConnectedCount(): number {
@@ -398,7 +384,7 @@ export struct ConfigPage {
             .onClick(() => {
               this.onRefreshComposioAuth();
             })
-          Button('Composio 授权')
+          Button('管理授权')
             .height(38)
             .layoutWeight(1)
             .fontSize(12)
@@ -1046,7 +1032,6 @@ export struct ConfigPage {
           }
 
           Button(this.isBusy ? '检查中' : '测试连接')
-            .enabled(!this.isBusy)
             .height(44)
             .width('100%')
             .fontSize(15)
@@ -1056,7 +1041,9 @@ export struct ConfigPage {
             .border({ width: 1, color: COLOR_ACCENT })
             .margin({ top: 16 })
             .onClick(() => {
-              this.onTestConnection();
+              if (!this.isBusy) {
+                this.onTestConnection();
+              }
             })
 
           Divider()

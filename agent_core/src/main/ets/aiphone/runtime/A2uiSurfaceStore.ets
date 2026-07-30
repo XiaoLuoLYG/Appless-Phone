@@ -34,6 +34,7 @@ import {
   normalizeSocialHubConnection,
   normalizeSocialHubDraft,
   normalizeSocialHubItem,
+  normalizeSocialHubPublication,
   SocialHubConnectionData,
   SocialHubItemData
 } from './SocialHubTypes';
@@ -648,6 +649,8 @@ function setKnownDataPath(model: A2uiRuntimeDataModel, path: string, value: A2ui
     next.socialHub.selected = normalizeSocialHubItem(value as Object);
   } else if (path === '/socialHub/draft') {
     next.socialHub.draft = normalizeSocialHubDraft(value as Object);
+  } else if (path === '/socialHub/publication') {
+    next.socialHub.publication = normalizeSocialHubPublication(value as Object);
   } else if (path === '/socialHub/connections') {
     const connections: SocialHubConnectionData[] = [];
     if (Array.isArray(value)) {
@@ -706,7 +709,9 @@ export class A2uiSurfaceStore {
       components: cloneComponents(this.surface.components),
       dataModelJson: this.surface.dataModelJson,
       error: this.surface.error,
-      sequence: this.surface.sequence
+      sequence: this.surface.sequence,
+      runtimeOwner: this.surface.runtimeOwner,
+      runtimeGeneration: this.surface.runtimeGeneration
     };
   }
 
@@ -725,7 +730,9 @@ export class A2uiSurfaceStore {
       components: cloneComponents(surface.components),
       dataModelJson: surface.dataModelJson,
       error: surface.error,
-      sequence: surface.sequence
+      sequence: surface.sequence,
+      runtimeOwner: surface.runtimeOwner,
+      runtimeGeneration: surface.runtimeGeneration
     };
     return this.getSurface();
   }
@@ -776,7 +783,9 @@ export class A2uiSurfaceStore {
           components: [],
           dataModelJson: JSON.stringify(nextDataModel),
           error: '',
-          sequence: this.surface.sequence + 1
+          sequence: this.surface.sequence + 1,
+          runtimeOwner: this.surface.runtimeOwner,
+          runtimeGeneration: this.surface.runtimeGeneration
         };
         return { ok: true, error: '' };
       }
@@ -830,7 +839,9 @@ export class A2uiSurfaceStore {
       ],
       dataModelJson: '{}',
       error: detail,
-      sequence: this.surface.sequence + 1
+      sequence: this.surface.sequence + 1,
+      runtimeOwner: this.surface.runtimeOwner,
+      runtimeGeneration: this.surface.runtimeGeneration
     };
     return this.getSurface();
   }

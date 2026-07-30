@@ -10,6 +10,7 @@ import { SkillReadTool } from '../skill/SkillReadTool';
 import { SkillSnapshot } from '../skill/SkillSnapshot';
 import { AgentTool } from './AgentTool';
 import { AgentToolRunOptions } from './AgentToolRunOptions';
+import { TimeTool } from './TimeTool';
 import { UiTool } from './UiTool';
 
 export type ToolRegistryCloseHandler = () => Promise<void>;
@@ -29,31 +30,14 @@ class NoteTool implements AgentTool {
   }
 }
 
-class TimeTool implements AgentTool {
-  name(): string {
-    return 'time';
-  }
-
-  description(): string {
-    return 'Returns the device\'s local date and time.';
-  }
-
-  async run(_input: string, _options?: AgentToolRunOptions): Promise<string> {
-    return new Date().toLocaleString();
-  }
-}
-
 export class ToolRegistry {
   private tools: Map<string, AgentTool> = new Map();
   private parallelSafeTools: Set<string> = new Set();
   private closeHandlers: ToolRegistryCloseHandler[] = [];
-
-  constructor() {
-    this.register(new NoteTool(), true);
-    this.register(new TimeTool(), true);
-  }
+  private sealed: boolean = false;
 
   register(tool: AgentTool, parallelSafe: boolean = false): void {
+    this.ensureMutable();
     this.tools.set(tool.name(), tool);
     if (parallelSafe) {
       this.parallelSafeTools.add(tool.name());
@@ -71,7 +55,12 @@ export class ToolRegistry {
   }
 
   registerCloseHandler(handler: ToolRegistryCloseHandler): void {
+    this.ensureMutable();
     this.closeHandlers.push(handler);
+  }
+
+  seal(): void {
+    this.sealed = true;
   }
 
   describeTools(): string {
@@ -98,6 +87,12 @@ export class ToolRegistry {
       }
     }
   }
+
+  private ensureMutable(): void {
+    if (this.sealed) {
+      throw new Error('ToolRegistry is sealed and cannot be modified after Agent construction.');
+    }
+  }
 }
 
 export async function createConfiguredLoopToolRegistry(
@@ -121,6 +116,8 @@ export async function createConfiguredLoopToolRegistry(
 
 export function createLoopToolRegistry(skillSnapshot?: SkillSnapshot | null): ToolRegistry {
   const registry = new ToolRegistry();
+  registry.register(new NoteTool());
+  registry.register(new TimeTool());
   registry.register(new UiTool());
   if (skillSnapshot !== undefined && skillSnapshot !== null && !skillSnapshot.isEmpty()) {
     registry.register(new SkillReadTool(skillSnapshot), true);

@@ -9,6 +9,7 @@ import {
   A2uiSurfaceState
 } from '../aiphone/runtime/A2uiTypes';
 import { ingestToolObservation, serialStepCompletionReply } from './MultiToolSectionAdapters';
+import { summarizeAppliedA2uiSurface } from './A2uiObservationDigest';
 import {
   MultiTaskBoardData,
   MultiToolExecutionMode,
@@ -147,6 +148,24 @@ export class MultiToolSurfaceComposer {
       return;
     }
     const content = ingestToolObservation(slotId, this.toolIdForSlot(slotId), raw);
+    this.applySlotContent(slotId, content, content.status);
+  }
+
+  ingestSurface(slotId: string, surface: A2uiSurfaceState): void {
+    const toolId = this.toolIdForSlot(slotId);
+    const digest = summarizeAppliedA2uiSurface('', surface);
+    const content: MultiToolSectionContent = {
+      slotId,
+      toolId,
+      title: surface.title.trim().length > 0 ? surface.title.trim() : this.titleForSlot(slotId),
+      status: digest.failureKey.indexOf(':error') >= 0 ? 'error' : 'ready',
+      summary: digest.text.split('\n').slice(0, 3).join(' '),
+      completionReply: '',
+      observationDigest: digest.text,
+      failureKey: digest.failureKey,
+      embeddedSurface: surface
+    };
+    content.completionReply = serialStepCompletionReply(toolId, content);
     this.applySlotContent(slotId, content, content.status);
   }
 
@@ -310,14 +329,6 @@ export class MultiToolSurfaceComposer {
   }
 
   private syncActiveSectionFromCompletion(): void {
-    if (this.executionMode === 'serial') {
-      if (this.completionOrder.length === 0) {
-        this.activeSectionId = '';
-        return;
-      }
-      this.activeSectionId = this.completionOrder[this.completionOrder.length - 1];
-      return;
-    }
     if (this.completionOrder.length === 0) {
       this.activeSectionId = '';
       return;
@@ -350,6 +361,9 @@ export class MultiToolSurfaceComposer {
     const ordered = this.orderedSlots();
     for (let index = 0; index < ordered.length; index++) {
       const slot = ordered[index];
+      if (this.executionMode === 'serial' && this.completionOrder.indexOf(slot.slotId) < 0) {
+        continue;
+      }
       sections.push({
         slotId: slot.slotId,
         toolId: slot.toolId,

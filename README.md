@@ -65,7 +65,7 @@ The app surface is designed around real providers and recognizable app entry poi
 <table>
   <tr>
     <td align="center"><img src="docs/assets/app-icons/gmail.svg" width="34" alt="Gmail" /><br><sub>Gmail</sub></td>
-    <td align="center"><img src="docs/assets/app-icons/qqmail.png" width="34" alt="QQ Mail" /><br><sub>QQ Mail</sub></td>
+    <td align="center"><img src="docs/assets/app-icons/qqmail.svg" width="34" alt="QQ Mail" /><br><sub>QQ Mail</sub></td>
     <td align="center"><img src="docs/assets/app-icons/outlook.svg" width="34" alt="Outlook" /><br><sub>Outlook</sub></td>
     <td align="center"><img src="docs/assets/app-icons/google-calendar.svg" width="34" alt="Google Calendar" /><br><sub>Calendar</sub></td>
     <td align="center"><img src="docs/assets/app-icons/google-maps.svg" width="34" alt="Google Maps" /><br><sub>Maps</sub></td>
@@ -106,11 +106,15 @@ The app surface is designed around real providers and recognizable app entry poi
     <td align="center"><img src="docs/assets/app-icons/tencent-maps.jpg" width="34" alt="Tencent Maps" /><br><sub>Tencent Maps</sub></td>
     <td align="center"><img src="docs/assets/app-icons/meituan.jpg" width="34" alt="Meituan" /><br><sub>Meituan</sub></td>
     <td align="center"><img src="docs/assets/app-icons/taobao.jpg" width="34" alt="Taobao" /><br><sub>Taobao</sub></td>
-    <td align="center"><img src="docs/assets/app-icons/luckin.jpg" width="34" alt="Luckin Coffee" /><br><sub>Luckin</sub></td>
+    <td align="center"><img src="docs/assets/app-icons/luckin.svg" width="34" alt="Luckin Coffee" /><br><sub>Luckin</sub></td>
   </tr>
   <tr>
     <td align="center"><img src="docs/assets/app-icons/mcdonalds.jpg" width="34" alt="McDonald's" /><br><sub>McDonald's</sub></td>
     <td align="center"><img src="docs/assets/app-icons/kfc.jpg" width="34" alt="KFC" /><br><sub>KFC</sub></td>
+    <td align="center"><img src="docs/assets/app-icons/reddit.svg" width="34" alt="Reddit" /><br><sub>Reddit</sub></td>
+    <td align="center"><img src="docs/assets/app-icons/hackernews.svg" width="34" alt="Hacker News" /><br><sub>Hacker News</sub></td>
+    <td align="center"><img src="docs/assets/app-icons/zhihu.svg" width="34" alt="Zhihu" /><br><sub>Zhihu</sub></td>
+    <td align="center"><img src="docs/assets/app-icons/didi.svg" width="34" alt="Didi" /><br><sub>Didi</sub></td>
   </tr>
 </table>
 

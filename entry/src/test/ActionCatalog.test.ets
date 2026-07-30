@@ -1,0 +1,740 @@
+import { describe, it, expect } from '@ohos/hypium';
+import {
+  ActionArgsValidator,
+  ActionCatalog,
+  ActionCatalogResult,
+  ActionValidationResult,
+  ClientActionAuthorizer,
+  SurfaceActionAuthorizer,
+  ToolDefinitionLookup
+} from '@loop/agent-core';
+import { ToolBackendType, ToolDefinition, ToolRiskLevel } from '@loop/agent-core';
+
+function args(raw: string): Object {
+  return JSON.parse(raw) as Object;
+}
+
+function definition(
+  toolId: string,
+  riskLevel: ToolRiskLevel,
+  backend: ToolBackendType,
+  actions: string[]
+): ToolDefinition {
+  return {
+    toolId: toolId,
+    domain: 'hotel',
+    intent: toolId,
+    riskLevel: riskLevel,
+    backendPriority: backend.length === 0 ? [] : [backend],
+    authModes: ['provider_key'],
+    inputSchema: toolId + 'Request',
+    outputSchema: toolId + 'Result',
+    a2uiComponent: 'GenericToolResults',
+    actions: actions.slice()
+  };
+}
+
+class FakeToolDefinitionLookup implements ToolDefinitionLookup {
+  sourceActions: string[];
+  targetRisk: ToolRiskLevel = 'read';
+  targetBackend: ToolBackendType = 'local_adapter';
+  targetHasBackend: boolean = true;
+  targetInputSchema: string = '';
+  calls: number = 0;
+
+  constructor(sourceActions: string[]) {
+    this.sourceActions = sourceActions;
+  }
+
+  find(toolId: string): ToolDefinition | null {
+    this.calls += 1;
+    if (toolId === 'hotel.search') {
+      return definition('hotel.search', 'read', 'local_adapter', this.sourceActions);
+    }
+    if (toolId === 'hotel.detail' || toolId === 'hotel.navigate' ||
+      toolId === 'hotel.booking.open' || toolId === 'worldcup.open' ||
+      toolId === 'maps.route.open' || toolId === 'calendar.event.create' ||
+      toolId === 'luckin.order.preview' || toolId === 'payment.send' ||
+      toolId === 'payment.account.setup' || toolId === 'whatsapp.message.send' ||
+      toolId === 'web.monitor.create' ||
+      toolId === 'luckin.order.create' || toolId === 'whatsapp.message.send.confirm' ||
+      toolId === 'payment.confirm' || toolId === 'payment.capture' ||
+      toolId === 'ride.order.create' || toolId === 'memory.update') {
+      const target = definition(toolId, this.targetRisk, this.targetBackend, []);
+      if (!this.targetHasBackend) {
+        target.backendPriority = [];
+      }
+      if (this.targetInputSchema.length > 0) {
+        target.inputSchema = this.targetInputSchema;
+      }
+      return target;
+    }
+    return null;
+  }
+}
+
+class ExactSurfaceAuthorizer implements SurfaceActionAuthorizer {
+  conversationId: string;
+  turnId: string;
+  surfaceId: string;
+  actionId: string;
+  serializedArgs: string;
+  calls: number = 0;
+
+  constructor(
+    conversationId: string,
+    turnId: string,
+    surfaceId: string,
+    actionId: string,
+    expectedArgs: Object
+  ) {
+    this.conversationId = conversationId;
+    this.turnId = turnId;
+    this.surfaceId = surfaceId;
+    this.actionId = actionId;
+    this.serializedArgs = JSON.stringify(expectedArgs);
+  }
+
+  allows(
+    conversationId: string,
+    turnId: string,
+    surfaceId: string,
+    actionId: string,
+    actualArgs: Object
+  ): boolean {
+    this.calls += 1;
+    return conversationId === this.conversationId &&
+      turnId === this.turnId &&
+      surfaceId === this.surfaceId &&
+      actionId === this.actionId &&
+      JSON.stringify(actualArgs) === this.serializedArgs;
+  }
+}
+
+class ExactClientAuthorizer implements ClientActionAuthorizer {
+  actionId: string;
+  serializedArgs: string;
+
+  constructor(actionId: string, expectedArgs: Object) {
+    this.actionId = actionId;
+    this.serializedArgs = JSON.stringify(expectedArgs);
+  }
+
+  allows(actionId: string, actualArgs: Object): boolean {
+    return actionId === this.actionId && JSON.stringify(actualArgs) === this.serializedArgs;
+  }
+}
+
+class RejectClientAuthorizer implements ClientActionAuthorizer {
+  calls: number = 0;
+
+  allows(_actionId: string, _args: Object): boolean {
+    this.calls += 1;
+    return false;
+  }
+}
+
+class ThrowingToolDefinitionLookup implements ToolDefinitionLookup {
+  find(_toolId: string): ToolDefinition | null {
+    throw new Error('lookup failed');
+  }
+}
+
+class ThrowingSurfaceAuthorizer implements SurfaceActionAuthorizer {
+  allows(
+    _conversationId: string,
+    _turnId: string,
+    _surfaceId: string,
+    _actionId: string,
+    _args: Object
+  ): boolean {
+    throw new Error('surface policy failed');
+  }
+}
+
+class ThrowingClientAuthorizer implements ClientActionAuthorizer {
+  allows(_actionId: string, _args: Object): boolean {
+    throw new Error('client policy failed');
+  }
+}
+
+class ThrowingArgsValidator implements ActionArgsValidator {
+  validate(_actionId: string, _args: Object): ActionValidationResult {
+    throw new Error('args validator failed');
+  }
+}
+
+class ControlledArgsValidator implements ActionArgsValidator {
+  allowed: boolean = true;
+  calls: number = 0;
+
+  validate(_actionId: string, _args: Object): ActionValidationResult {
+    this.calls += 1;
+    if (this.allowed) {
+      return {
+        ok: true,
+        code: '',
+        message: ''
+      };
+    }
+    return {
+      ok: false,
+      code: 'ARGS_INVALID',
+      message: 'Target args are invalid.'
+    };
+  }
+}
+
+function catalog(
+  lookup: ToolDefinitionLookup,
+  surface: SurfaceActionAuthorizer,
+  client: ClientActionAuthorizer,
+  validator: ActionArgsValidator
+): ActionCatalog {
+  return new ActionCatalog(lookup, surface, client, validator);
+}
+
+export default function actionCatalogTest() {
+  describe('actionCatalog', () => {
+    it('allows a declared registered hotel detail and returns fresh metadata', 0, () => {
+      const detailArgs = args('{"hotelId":47675}');
+      const lookup = new FakeToolDefinitionLookup(['hotel.detail']);
+      const surface = new ExactSurfaceAuthorizer('conversation-1', 'turn-1', 'surface-1', 'hotel.detail', detailArgs);
+      const validator = new ControlledArgsValidator();
+      const actionCatalog = catalog(lookup, surface, new RejectClientAuthorizer(), validator);
+
+      const placement: ActionCatalogResult =
+        actionCatalog.validatePlacement('hotel.search', 'hotel.detail', detailArgs);
+      expect(placement.ok).assertTrue();
+      expect((placement.definition as ToolDefinition).riskLevel).assertEqual('read');
+      expect((placement.definition as ToolDefinition).backendPriority[0]).assertEqual('local_adapter');
+
+      lookup.targetRisk = 'draft';
+      lookup.targetBackend = 'system_intent';
+      const execution: ActionCatalogResult = actionCatalog.validateSurfaceExecution(
+        'conversation-1',
+        'turn-1',
+        'surface-1',
+        'hotel.search',
+        'hotel.detail',
+        detailArgs
+      );
+      expect(execution.ok).assertTrue();
+      expect((execution.definition as ToolDefinition).riskLevel).assertEqual('draft');
+      expect((execution.definition as ToolDefinition).backendPriority[0]).assertEqual('system_intent');
+    });
+
+    it('fingerprints only the current executable definition authority', 0, () => {
+      const lookup = new FakeToolDefinitionLookup(['hotel.detail']);
+      const actionCatalog = catalog(
+        lookup,
+        new ExactSurfaceAuthorizer('conversation-1', 'turn-1', 'surface-1', 'hotel.detail', args('{"hotelId":47675}')),
+        new RejectClientAuthorizer(),
+        new ControlledArgsValidator()
+      );
+
+      const baseline = actionCatalog.definitionFingerprint('hotel.detail');
+      expect(baseline).assertEqual(actionCatalog.definitionFingerprint('hotel.detail'));
+      lookup.targetRisk = 'draft';
+      expect(baseline === actionCatalog.definitionFingerprint('hotel.detail')).assertFalse();
+      lookup.targetRisk = 'read';
+      lookup.targetBackend = 'system_intent';
+      expect(baseline === actionCatalog.definitionFingerprint('hotel.detail')).assertFalse();
+      lookup.targetBackend = 'local_adapter';
+      lookup.targetInputSchema = 'ChangedHotelDetailRequest';
+      expect(baseline === actionCatalog.definitionFingerprint('hotel.detail')).assertFalse();
+    });
+
+    it('rejects invented hotel book even when declared and allowed by the surface', 0, () => {
+      const bookArgs = args('{"hotelId":47675,"ratePlanId":"provider-rate-1"}');
+      const lookup = new FakeToolDefinitionLookup(['hotel.book']);
+      const surface = new ExactSurfaceAuthorizer('conversation-1', 'turn-1', 'surface-1', 'hotel.book', bookArgs);
+      const actionCatalog = catalog(
+        lookup,
+        surface,
+        new RejectClientAuthorizer(),
+        new ControlledArgsValidator()
+      );
+
+      expect(actionCatalog.validatePlacement('hotel.search', 'hotel.book', bookArgs).ok).assertFalse();
+      expect(actionCatalog.validateSurfaceExecution(
+        'conversation-1',
+        'turn-1',
+        'surface-1',
+        'hotel.search',
+        'hotel.book',
+        bookArgs
+      ).ok).assertFalse();
+      expect(surface.calls).assertEqual(0);
+    });
+
+    it('rejects placement not declared by the source without consulting surface policy', 0, () => {
+      const detailArgs = args('{"hotelId":47675}');
+      const lookup = new FakeToolDefinitionLookup([]);
+      const surface = new ExactSurfaceAuthorizer('conversation-1', 'turn-1', 'surface-1', 'hotel.detail', detailArgs);
+      const actionCatalog = catalog(
+        lookup,
+        surface,
+        new RejectClientAuthorizer(),
+        new ControlledArgsValidator()
+      );
+
+      const result: ActionCatalogResult =
+        actionCatalog.validatePlacement('hotel.search', 'hotel.detail', detailArgs);
+      expect(result.ok).assertFalse();
+      expect(result.code).assertEqual('ACTION_NOT_DECLARED');
+      expect(surface.calls).assertEqual(0);
+    });
+
+    it('rejects self-source placement and limits actionIntent authority to deterministic registered actions', 0, () => {
+      const detailArgs = args('{"hotelId":47675}');
+      const lookup = new FakeToolDefinitionLookup([]);
+      const surface = new ExactSurfaceAuthorizer(
+        'conversation-1',
+        'turn-1',
+        'virtual:request-1',
+        'hotel.detail',
+        detailArgs
+      );
+      const actionCatalog = catalog(
+        lookup,
+        surface,
+        new RejectClientAuthorizer(),
+        new ControlledArgsValidator()
+      );
+
+      const placement = actionCatalog.validatePlacement(
+        'hotel.detail',
+        'hotel.detail',
+        detailArgs
+      );
+      const surfaceExecution = actionCatalog.validateSurfaceExecution(
+        'conversation-1',
+        'turn-1',
+        'virtual:request-1',
+        'hotel.detail',
+        'hotel.detail',
+        detailArgs
+      );
+      const worldCupIntent: ActionCatalogResult =
+        actionCatalog.validateActionIntentExecution('worldcup.open', new Object());
+      const mapsIntent: ActionCatalogResult = actionCatalog.validateActionIntentExecution(
+        'maps.route.open',
+        args('{"origin":"深圳北","destination":"香港西九龙"}')
+      );
+      const calendarIntent: ActionCatalogResult = actionCatalog.validateActionIntentExecution(
+        'calendar.event.create',
+        args('{"title":"QA","start":"2026-07-30T15:00:00+08:00",' +
+          '"end":"2026-07-30T15:30:00+08:00","timezone":"Asia/Shanghai"}')
+      );
+      const hotelIntent: ActionCatalogResult =
+        actionCatalog.validateActionIntentExecution('hotel.detail', detailArgs);
+      const memoryIntent: ActionCatalogResult =
+        actionCatalog.validateActionIntentExecution('memory.update', new Object());
+
+      expect(placement.ok).assertFalse();
+      expect(placement.code).assertEqual('ACTION_NOT_DECLARED');
+      expect(surfaceExecution.ok).assertFalse();
+      expect(surface.calls).assertEqual(0);
+      expect(worldCupIntent.ok).assertTrue();
+      expect(mapsIntent.ok).assertTrue();
+      expect(calendarIntent.ok).assertTrue();
+      expect(hotelIntent.code).assertEqual('ACTION_INTENT_DENIED');
+      expect(memoryIntent.code).assertEqual('ACTION_INTENT_DENIED');
+    });
+
+    it('limits actionIntent execution to safe initial surfaces', 0, () => {
+      const actionCatalog = catalog(
+        new FakeToolDefinitionLookup([]),
+        new ExactSurfaceAuthorizer('', '', '', '', new Object()),
+        new RejectClientAuthorizer(),
+        new ControlledArgsValidator()
+      );
+      const allowed: string[] = [
+        'worldcup.open',
+        'maps.route.open',
+        'calendar.event.create',
+        'luckin.order.preview',
+        'payment.send',
+        'payment.account.setup',
+        'whatsapp.message.send',
+        'web.monitor.create'
+      ];
+      const denied: string[] = [
+        'luckin.order.create',
+        'whatsapp.message.send.confirm',
+        'payment.confirm',
+        'payment.capture',
+        'ride.order.create',
+        'memory.update'
+      ];
+
+      for (let index = 0; index < allowed.length; index++) {
+        const intentArgs = allowed[index] === 'payment.send' ?
+          args('{"originalQuery":"用 PayPal 给罗一格转 1 美元"}') : new Object();
+        expect(actionCatalog.validateActionIntentExecution(
+          allowed[index], intentArgs
+        ).ok).assertTrue();
+      }
+      for (let index = 0; index < denied.length; index++) {
+        expect(actionCatalog.validateActionIntentExecution(
+          denied[index], new Object()
+        ).code).assertEqual('ACTION_INTENT_DENIED');
+      }
+    });
+
+    it('allows only the resolver-owned payment preview shape from actionIntent', 0, () => {
+      const actionCatalog = catalog(
+        new FakeToolDefinitionLookup([]),
+        new ExactSurfaceAuthorizer('', '', '', '', new Object()),
+        new RejectClientAuthorizer(),
+        new ControlledArgsValidator()
+      );
+      const preview = args('{"originalQuery":"用 PayPal 给罗一格转 1 美元"}');
+      const confirm = args(
+        '{"originalQuery":"用 PayPal 给罗一格转 1 美元","phase":"confirm"}'
+      );
+      const capture = args(
+        '{"originalQuery":"用 PayPal 给罗一格转 1 美元","phase":"capture",' +
+          '"providerSessionId":"provider-order-forged"}'
+      );
+      const structured = args(
+        '{"provider":"paypal","recipient":"罗一格","amountText":"1","currency":"USD"}'
+      );
+
+      expect(actionCatalog.validateActionIntentExecution('payment.send', preview).ok).assertTrue();
+      expect(actionCatalog.validateActionIntentExecution(
+        'payment.send', confirm
+      ).code).assertEqual('ACTION_INTENT_ARGS_DENIED');
+      expect(actionCatalog.validateActionIntentExecution(
+        'payment.send', capture
+      ).code).assertEqual('ACTION_INTENT_ARGS_DENIED');
+      expect(actionCatalog.validateActionIntentExecution(
+        'payment.send', structured
+      ).code).assertEqual('ACTION_INTENT_ARGS_DENIED');
+      expect(actionCatalog.validateRegisteredStep('payment.send', confirm).ok).assertTrue();
+      expect(actionCatalog.validateRegisteredStep('payment.send', capture).ok).assertTrue();
+    });
+
+    it('recognizes only workflow run as the fixed workflow entry', 0, () => {
+      const workflowArgs = args('{"planId":"plan-1"}');
+      const lookup = new FakeToolDefinitionLookup(['workflow.run', 'workflow.start']);
+      const surface = new ExactSurfaceAuthorizer(
+        'conversation-1',
+        'turn-1',
+        'surface-1',
+        'workflow.run',
+        workflowArgs
+      );
+      const actionCatalog = catalog(
+        lookup,
+        surface,
+        new RejectClientAuthorizer(),
+        new ControlledArgsValidator()
+      );
+
+      expect(actionCatalog.validatePlacement('hotel.search', 'workflow.run', workflowArgs).ok).assertTrue();
+      expect(actionCatalog.validateSurfaceExecution(
+        'conversation-1',
+        'turn-1',
+        'surface-1',
+        'hotel.search',
+        'workflow.run',
+        workflowArgs
+      ).ok).assertTrue();
+      expect(actionCatalog.validateRegisteredStep('workflow.run', workflowArgs).ok).assertFalse();
+      expect(actionCatalog.validatePlacement('hotel.search', 'workflow.start', workflowArgs).ok).assertFalse();
+    });
+
+    it('rejects exact surface identity action and argument tampering', 0, () => {
+      const exactArgs = args(
+        '{"hotelId":47675,"bookingUrl":"https://rollinggo.cn/pages/hotel/detail/index?id=47675&checkInDate=2026-08-15&checkOutDate=2026-08-17&roomCount=1&adultCount=2&childCount=0"}'
+      );
+      const lookup = new FakeToolDefinitionLookup(['hotel.navigate', 'hotel.booking.open']);
+      const surface = new ExactSurfaceAuthorizer(
+        'conversation-1',
+        'turn-1',
+        'surface-1',
+        'hotel.navigate',
+        exactArgs
+      );
+      const actionCatalog = catalog(
+        lookup,
+        surface,
+        new RejectClientAuthorizer(),
+        new ControlledArgsValidator()
+      );
+
+      expect(actionCatalog.validateSurfaceExecution(
+        'conversation-1',
+        'turn-1',
+        'surface-1',
+        'hotel.search',
+        'hotel.navigate',
+        exactArgs
+      ).ok).assertTrue();
+      expect(actionCatalog.validateSurfaceExecution(
+        'conversation-1',
+        'turn-2',
+        'surface-1',
+        'hotel.search',
+        'hotel.navigate',
+        exactArgs
+      ).ok).assertFalse();
+      expect(actionCatalog.validateSurfaceExecution(
+        'conversation-2',
+        'turn-1',
+        'surface-1',
+        'hotel.search',
+        'hotel.navigate',
+        exactArgs
+      ).ok).assertFalse();
+      expect(actionCatalog.validateSurfaceExecution(
+        'conversation-1',
+        'turn-1',
+        'surface-2',
+        'hotel.search',
+        'hotel.navigate',
+        exactArgs
+      ).ok).assertFalse();
+      expect(actionCatalog.validateSurfaceExecution(
+        'conversation-1',
+        'turn-1',
+        'surface-1',
+        'hotel.search',
+        'hotel.booking.open',
+        exactArgs
+      ).ok).assertFalse();
+      expect(actionCatalog.validateSurfaceExecution(
+        'conversation-1',
+        'turn-1',
+        'surface-1',
+        'hotel.search',
+        'hotel.navigate',
+        args('{"hotelId":9,"bookingUrl":"https://rollinggo.cn/pages/hotel/detail/index?id=47675&checkInDate=2026-08-15&checkOutDate=2026-08-17&roomCount=1&adultCount=2&childCount=0"}')
+      ).ok).assertFalse();
+      expect(actionCatalog.validateSurfaceExecution(
+        'conversation-1',
+        'turn-1',
+        'surface-1',
+        'hotel.search',
+        'hotel.navigate',
+        args('{"hotelId":47675,"bookingUrl":"https://rollinggo.cn/pages/hotel/detail/index?id=999&checkInDate=2026-08-15&checkOutDate=2026-08-17&roomCount=1&adultCount=2&childCount=0"}')
+      ).ok).assertFalse();
+      expect(actionCatalog.validateSurfaceExecution(
+        'conversation-1',
+        'turn-1',
+        'surface-1',
+        'hotel.search',
+        'hotel.navigate',
+        args('{"hotelId":47675,"bookingUrl":"https://evil.example/pages/hotel/detail/index?id=47675&checkInDate=2026-08-15&checkOutDate=2026-08-17&roomCount=1&adultCount=2&childCount=0"}')
+      ).ok).assertFalse();
+      expect(actionCatalog.validateSurfaceExecution(
+        'conversation-1',
+        'turn-1',
+        'surface-1',
+        'hotel.search',
+        'hotel.navigate',
+        args('{"hotelId":47675,"bookingUrl":"https://rollinggo.cn/pages/hotel/detail/index?id=47675&checkInDate=bad&checkOutDate=2026-08-17&roomCount=1&adultCount=2&childCount=0"}')
+      ).ok).assertFalse();
+    });
+
+    it('accepts a client action only through the exact injected client policy', 0, () => {
+      const restoreArgs = args('{"surfaceId":"hotel-search-1"}');
+      const lookup = new FakeToolDefinitionLookup(['hotel.search.restore']);
+      const surface = new ExactSurfaceAuthorizer(
+        'conversation-1',
+        'turn-1',
+        'surface-1',
+        'hotel.search.restore',
+        restoreArgs
+      );
+      const actionCatalog = catalog(
+        lookup,
+        surface,
+        new ExactClientAuthorizer('hotel.search.restore', restoreArgs),
+        new ControlledArgsValidator()
+      );
+
+      expect(actionCatalog.validatePlacement('hotel.search', 'hotel.search.restore', restoreArgs).ok).assertTrue();
+      expect(actionCatalog.validatePlacement(
+        'hotel.search',
+        'hotel.search.restore',
+        args('{"surfaceId":"other-surface"}')
+      ).ok).assertFalse();
+      expect(actionCatalog.validateRegisteredStep('hotel.search.restore', restoreArgs).ok).assertFalse();
+    });
+
+    it('revalidates target input at execution time', 0, () => {
+      const detailArgs = args('{"hotelId":47675}');
+      const lookup = new FakeToolDefinitionLookup(['hotel.detail']);
+      const surface = new ExactSurfaceAuthorizer('conversation-1', 'turn-1', 'surface-1', 'hotel.detail', detailArgs);
+      const validator = new ControlledArgsValidator();
+      const actionCatalog = catalog(lookup, surface, new RejectClientAuthorizer(), validator);
+
+      expect(actionCatalog.validatePlacement('hotel.search', 'hotel.detail', detailArgs).ok).assertTrue();
+      validator.allowed = false;
+      const execution: ActionCatalogResult = actionCatalog.validateSurfaceExecution(
+        'conversation-1',
+        'turn-1',
+        'surface-1',
+        'hotel.search',
+        'hotel.detail',
+        detailArgs
+      );
+
+      expect(execution.ok).assertFalse();
+      expect(execution.code).assertEqual('ARGS_INVALID');
+      expect(validator.calls).assertEqual(2);
+      expect(surface.calls).assertEqual(0);
+    });
+
+    it('validates registered later steps against current risk and backend metadata', 0, () => {
+      const detailArgs = args('{"hotelId":47675}');
+      const lookup = new FakeToolDefinitionLookup([]);
+      const actionCatalog = catalog(
+        lookup,
+        new ExactSurfaceAuthorizer('conversation-1', 'turn-1', 'surface-1', 'hotel.detail', detailArgs),
+        new RejectClientAuthorizer(),
+        new ControlledArgsValidator()
+      );
+
+      expect(actionCatalog.validateRegisteredStep('hotel.detail', detailArgs).ok).assertTrue();
+      lookup.targetRisk = 'blocked';
+      expect(actionCatalog.validateRegisteredStep('hotel.detail', detailArgs).code).assertEqual('ACTION_BLOCKED');
+      lookup.targetRisk = 'read';
+      lookup.targetHasBackend = false;
+      expect(actionCatalog.validateRegisteredStep('hotel.detail', detailArgs).code).assertEqual('ACTION_BACKEND_MISSING');
+    });
+
+    it('preflights registered later steps without validating incomplete args', 0, () => {
+      const detailArgs = args('{}');
+      const lookup = new FakeToolDefinitionLookup([]);
+      const validator = new ControlledArgsValidator();
+      validator.allowed = false;
+      const actionCatalog = catalog(
+        lookup,
+        new ExactSurfaceAuthorizer(
+          'conversation-1',
+          'turn-1',
+          'surface-1',
+          'hotel.detail',
+          detailArgs
+        ),
+        new RejectClientAuthorizer(),
+        validator
+      );
+
+      expect(actionCatalog.validateRegisteredAction('hotel.detail').ok).assertTrue();
+      expect(validator.calls).assertEqual(0);
+      expect(actionCatalog.validateRegisteredStep('hotel.detail', detailArgs).code).assertEqual('ARGS_INVALID');
+      expect(validator.calls).assertEqual(1);
+    });
+
+    it('rejects malformed args before consulting any injected authority', 0, () => {
+      const validArgs = args('{"hotelId":47675}');
+      const lookup = new FakeToolDefinitionLookup(['hotel.detail']);
+      const surface = new ExactSurfaceAuthorizer(
+        'conversation-1',
+        'turn-1',
+        'surface-1',
+        'hotel.detail',
+        validArgs
+      );
+      const client = new RejectClientAuthorizer();
+      const validator = new ControlledArgsValidator();
+      const actionCatalog = catalog(lookup, surface, client, validator);
+
+      const nullResult = actionCatalog.validatePlacement(
+        'hotel.search',
+        'hotel.detail',
+        args('null')
+      );
+      const arrayResult = actionCatalog.validateSurfaceExecution(
+        'conversation-1',
+        'turn-1',
+        'surface-1',
+        'hotel.search',
+        'hotel.detail',
+        args('[]')
+      );
+      const primitiveResult = actionCatalog.validateRegisteredStep('hotel.detail', args('42'));
+
+      expect(nullResult.code).assertEqual('ACTION_ARGS_MALFORMED');
+      expect(arrayResult.code).assertEqual('ACTION_ARGS_MALFORMED');
+      expect(primitiveResult.code).assertEqual('ACTION_ARGS_MALFORMED');
+      expect(lookup.calls).assertEqual(0);
+      expect(surface.calls).assertEqual(0);
+      expect(client.calls).assertEqual(0);
+      expect(validator.calls).assertEqual(0);
+    });
+
+    it('contains failures from every injected authority as catalog rejections', 0, () => {
+      const detailArgs = args('{"hotelId":47675}');
+      let lookupResult: ActionCatalogResult = {
+        ok: true,
+        code: 'THREW',
+        message: '',
+        definition: null
+      };
+      let surfaceResult: ActionCatalogResult = lookupResult;
+      let clientResult: ActionCatalogResult = lookupResult;
+      let validatorResult: ActionCatalogResult = lookupResult;
+
+      try {
+        lookupResult = catalog(
+          new ThrowingToolDefinitionLookup(),
+          new ExactSurfaceAuthorizer('conversation-1', 'turn-1', 'surface-1', 'hotel.detail', detailArgs),
+          new RejectClientAuthorizer(),
+          new ControlledArgsValidator()
+        ).validatePlacement('hotel.search', 'hotel.detail', detailArgs);
+      } catch (_error) {
+      }
+      try {
+        surfaceResult = catalog(
+          new FakeToolDefinitionLookup(['hotel.detail']),
+          new ThrowingSurfaceAuthorizer(),
+          new RejectClientAuthorizer(),
+          new ControlledArgsValidator()
+        ).validateSurfaceExecution(
+          'conversation-1',
+          'turn-1',
+          'surface-1',
+          'hotel.search',
+          'hotel.detail',
+          detailArgs
+        );
+      } catch (_error) {
+      }
+      try {
+        clientResult = catalog(
+          new FakeToolDefinitionLookup(['hotel.search.restore']),
+          new ExactSurfaceAuthorizer(
+            'conversation-1',
+            'turn-1',
+            'surface-1',
+            'hotel.search.restore',
+            detailArgs
+          ),
+          new ThrowingClientAuthorizer(),
+          new ControlledArgsValidator()
+        ).validatePlacement('hotel.search', 'hotel.search.restore', detailArgs);
+      } catch (_error) {
+      }
+      try {
+        validatorResult = catalog(
+          new FakeToolDefinitionLookup([]),
+          new ExactSurfaceAuthorizer('conversation-1', 'turn-1', 'surface-1', 'hotel.detail', detailArgs),
+          new RejectClientAuthorizer(),
+          new ThrowingArgsValidator()
+        ).validateRegisteredStep('hotel.detail', detailArgs);
+      } catch (_error) {
+      }
+
+      expect(lookupResult.code).assertEqual('ACTION_AUTHORITY_FAILED');
+      expect(surfaceResult.code).assertEqual('ACTION_AUTHORITY_FAILED');
+      expect(clientResult.code).assertEqual('ACTION_AUTHORITY_FAILED');
+      expect(validatorResult.code).assertEqual('ACTION_AUTHORITY_FAILED');
+    });
+  });
+}

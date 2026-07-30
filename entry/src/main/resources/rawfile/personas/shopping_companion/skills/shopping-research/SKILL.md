@@ -2,7 +2,7 @@
 name: shopping-research
 description: Compare products, prices, reviews, and risks against user budget and preferences.
 tools:
-  - dynamic.search
+  - shopping.research
   - memory.update
 status: active
 ---
@@ -14,7 +14,7 @@ status: active
 
 ## Checklist
 - 读取 memory 中的预算、品牌黑白名单、尺码、生态、材质和售后要求。
-- 使用 dynamic.search 发现可用商品检索或评测路径。
+- 使用 shopping.research 查询公开商品价格和可核验来源。
 - 按预算、硬参数、场景、风险和售后组织结果。
 - 对冲动消费给出替代或延后购买建议。
 
