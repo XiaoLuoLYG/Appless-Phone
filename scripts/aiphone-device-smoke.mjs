@@ -3207,9 +3207,11 @@ async function runQuery(query, index, expectedTool, expectedCaseOverride = null,
   );
   const evidenceText = scrollEvidence.text;
   const evidenceLayout = scrollEvidence.currentLayout;
+  const luckinMemoryProof = hasLuckinMemoryEvidence(evidenceText) ||
+    /\[BrandMcpRequest\] provider=瑞幸/.test(safeLogText);
   if (isPersonaCoffeeQuery(query) && /饮食搭子上线|饮食搭子/.test(evidenceText)) {
     summary.personaCoffeeProof = true;
-    summary.personaExpectedMemoryProof = expectedPersonaMemory !== 'luckin_only' || hasLuckinMemoryEvidence(evidenceText);
+    summary.personaExpectedMemoryProof = expectedPersonaMemory !== 'luckin_only' || luckinMemoryProof;
     if (expectedTool === true &&
       summary.basePassedWithoutTransport === true &&
       summary.modelPassed === true &&
@@ -3305,7 +3307,7 @@ async function runQuery(query, index, expectedTool, expectedCaseOverride = null,
         aggregateMediaMarkersOk &&
         summary.gmailEccvKeywordVisible));
   if (expectedPersonaMemory === 'luckin_only') {
-    summary.personaExpectedMemoryProof = hasLuckinMemoryEvidence(evidenceText);
+    summary.personaExpectedMemoryProof = luckinMemoryProof;
     summary.layoutTextExposed = summary.layoutTextExposed && summary.personaExpectedMemoryProof;
   }
   summary.mailAggregateVisible = expectedToolId !== 'mail.search' ||

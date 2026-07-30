@@ -876,9 +876,23 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     }
     if (misplacedIds.length !== 1 ||
       originalScope.requestedCapabilityIds.indexOf(misplacedIds[0]) < 0 ||
-      !this.sameJsonValue(preservedTasks, rawRepairedTasks as Object[])) {
+      (!this.sameJsonValue(preservedTasks, rawRepairedTasks as Object[]) &&
+        !this.sameJsonValue(rawOriginalTasks as Object[], rawRepairedTasks as Object[]))) {
       return false;
     }
+    const missingActionIds: string[] = [];
+    for (let index = 0; index < originalScope.requestedCapabilityIds.length; index++) {
+      const capabilityId: string = originalScope.requestedCapabilityIds[index];
+      if (originalScope.dataCapabilityIds.indexOf(capabilityId) < 0 &&
+        originalScope.actionCapabilityIds.indexOf(capabilityId) < 0) {
+        if (!this.actionOnlyCapability(context, capabilityId) || missingActionIds.length > 0) {
+          return false;
+        }
+        missingActionIds.push(capabilityId);
+      }
+    }
+    const deferredNormalization: boolean = missingActionIds.length === 1 &&
+      this.sameJsonValue(rawOriginalTasks as Object[], rawRepairedTasks as Object[]);
     const originalAction = original['actionIntent'];
     const repairedAction = repaired['actionIntent'];
     if (repairedAction === null || typeof repairedAction !== 'object' || Array.isArray(repairedAction)) {
@@ -887,7 +901,10 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     const repairedActionRecord = repairedAction as
       Record<string, Object | string | number | boolean | null | undefined>;
     if (originalAction === undefined) {
-      if (repairedActionRecord['goal'] !== misplacedGoal) {
+      const repairedGoal = repairedActionRecord['goal'];
+      if ((missingActionIds.length === 0 && repairedGoal !== misplacedGoal) ||
+        (missingActionIds.length > 0 &&
+          (typeof repairedGoal !== 'string' || repairedGoal.trim().length === 0))) {
         return false;
       }
     } else {
@@ -905,6 +922,15 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     );
     const expectedActionIds: string[] = originalScope.actionCapabilityIds.slice();
     this.rememberScopeId(misplacedIds[0], expectedActionIds);
+    for (let index = 0; index < missingActionIds.length; index++) {
+      this.rememberScopeId(missingActionIds[index], expectedActionIds);
+    }
+    if (deferredNormalization) {
+      const rawExpectedActionIds: string[] = originalScope.actionCapabilityIds.slice();
+      this.rememberScopeId(missingActionIds[0], rawExpectedActionIds);
+      return this.sameStringSet(originalScope.dataCapabilityIds, repairedScope.dataCapabilityIds) &&
+        this.sameStringSet(rawExpectedActionIds, repairedScope.actionCapabilityIds);
+    }
     return this.sameStringSet(expectedDataIds, repairedScope.dataCapabilityIds) &&
       this.sameStringSet(expectedActionIds, repairedScope.actionCapabilityIds);
   }

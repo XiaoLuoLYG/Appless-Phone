@@ -3354,6 +3354,43 @@ export default function multiAgentLeaderPlannerTest() {
       expect(decision.actionIntent!.allowedActionIds[0]).assertEqual('payment.send');
     });
 
+    it('repairs one omitted Action while normalizing one mixed Action-owned Data task', 0, async () => {
+      const context = actionOwnerContext();
+      context.tools.push({
+        toolId: 'ride.estimate',
+        domain: 'ride',
+        intent: 'ride.estimate',
+        riskLevel: 'read',
+        registeredBackends: ['local_adapter'],
+        inputSchema: 'rideEstimateQuery',
+        outputSchema: 'genericToolResults',
+        actions: []
+      });
+      const missingPayment: string = MIXED_MISPLACED_ACTION_DECISION.replace(
+        ',"actionIntent":{"goal":"预览瑞幸订单，然后打开转账确认",' +
+          '"allowedActionIds":["payment.send"]}',
+        ''
+      );
+      const model = new QueueLocalModel([
+        missingPayment,
+        MIXED_MISPLACED_ACTION_DECISION
+      ]);
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: MIXED_DATA_ACTION_QUERY },
+        context,
+        1,
+        (): boolean => true
+      );
+
+      expect(model.prompts.length).assertEqual(2);
+      expect(decision.dataTasks.length).assertEqual(1);
+      expect(decision.dataTasks[0].toolId).assertEqual('ride.estimate');
+      expect(decision.actionIntent!.allowedActionIds.join(',')).assertEqual(
+        'luckin.order.preview,payment.send'
+      );
+    });
+
     it('gives Action ownership repair its one permitted Data-to-Action move', 0, async () => {
       const model = new QueueLocalModel([
         actionAsDataDecision('memory.update'),
