@@ -3191,6 +3191,34 @@ export default function multiAgentLeaderPlannerTest() {
       );
     });
 
+    it('completes a sequence after normalizing its last mixed Action-owned Data task', 0,
+      async () => {
+        const misplaced: string =
+          '{"personaId":"travel_companion","skillId":"","requestedCapabilityIds":[' +
+          '"luckin.order.preview","payment.send"],"roundAction":"execute",' +
+          '"continuationMode":"sequence","dataTasks":[{"localId":"luckin",' +
+          '"goal":"预览瑞幸订单","allowedToolIds":["luckin.order.preview"],' +
+          '"toolId":"luckin.order.preview","input":{"prompt":"帮我点一杯瑞幸生椰拿铁，半糖少冰"},' +
+          '"required":true}],"uiIntent":{"purpose":"展示瑞幸预览和转账确认",' +
+          '"preferredDensity":"comfortable","requiredSections":["luckin","payment"]},' +
+          '"actionIntent":{"goal":"预览瑞幸订单，然后打开转账确认",' +
+          '"allowedActionIds":["payment.send"]}}';
+        const decision = await new MultiAgentLeaderPlanner(
+          new QueueLocalModel([misplaced])
+        ).plan(
+          inputMessage(),
+          { text: MIXED_DATA_ACTION_QUERY },
+          actionOwnerContext(),
+          2
+        );
+
+        expect(decision.dataTasks.length).assertEqual(0);
+        expect(decision.actionIntent!.allowedActionIds.join(',')).assertEqual(
+          'luckin.order.preview,payment.send'
+        );
+        expect(decision.reasonCode).assertEqual('host_execute');
+      });
+
     it('does not request a second model decision while clearing an invalid skill', 0, async () => {
       const invalidSocialSkill: string = SOCIAL_ONLY_DECISION.replace(
         '"skillId":""',

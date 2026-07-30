@@ -2122,10 +2122,14 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     if (orderedActionIds.length !== existingActionIds.length + 1) {
       return;
     }
-    values['dataTasks'] = tasks.filter(
+    const retainedTasks: Object[] = tasks.filter(
       (_task: Object, index: number): boolean => index !== misplacedIndex
     );
+    values['dataTasks'] = retainedTasks;
     actionValues['allowedActionIds'] = orderedActionIds;
+    if (retainedTasks.length === 0 && values['continuationMode'] === 'sequence') {
+      values['continuationMode'] = 'complete';
+    }
   }
 
   private hostReasonCode(action: LeaderRoundAction): string {
