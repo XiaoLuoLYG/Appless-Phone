@@ -1691,6 +1691,28 @@ test('correlates one ordered multi-action virtual plan with one exact terminal r
   assert.deepEqual(result.actionIds, ['luckin.order.preview', 'payment.send']);
 });
 
+test('rejects a failed virtual tail even when Data and TurnResult succeeded', () => {
+  const result = multiAgentTurnEvidence(`
+    [AIPhone][MultiAgentInput] conversation=c1 turn=t1 task=input-1
+    [AIPhone][MultiAgentDataTask] conversation=c1 turn=t1 task=data-1 round=1 tool=ride.estimate predecessor=none path=none target=none binding=false
+    [AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 tool=ride.estimate status=success sources=2 error=false
+    [AIPhone][MultiAgentUiTask] conversation=c1 turn=t1 task=ui-1 dataTasks=data-1
+    [AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=ui-1 surface=s1 state=result
+    [AIPhone][MultiAgentActionPlan] conversation=c1 turn=t1 task=ui-1 uiTask=ui-1 dataTasks=none actions=luckin.order.preview,payment.send virtual=true
+    [AIPhone][MultiAgentActionResult] conversation=c1 turn=t1 task=ui-1 surface=virtual-v1 plan=p1 run=r1 status=error step=payment-send code=ACTION_INTENT_ARGS_DENIED
+    [AIPhone][MultiAgentTurnResult] conversation=c1 turn=t1 task=input-1 status=success surface=s1 roundCount=1 messageChars=8
+  `, {
+    expectedToolIds: [
+      'ride.estimate',
+      'luckin.order.preview',
+      'payment.send'
+    ]
+  });
+  assert.equal(result.complete, false);
+  assert.equal(result.ok, false);
+  assert.ok(result.failures.includes('action_failed'));
+});
+
 test('accepts the exact C11b virtual memory terminal with its invalid surface sentinel', () => {
   const result = multiAgentActionEvidence(`
     [AIPhone][MultiAgentActionPlan] conversation=c77776924 turn=t921f1276 task=k2 uiTask=k2 dataTasks=none actions=memory.update virtual=true

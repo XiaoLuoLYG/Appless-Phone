@@ -408,6 +408,9 @@ export function multiAgentTurnEvidence(logText, options = {}) {
   if (virtualPlans.length > 0 && !action.complete) {
     failures.push('missing_action_terminal');
   }
+  if (virtualPlans.length > 0 && action.complete && !action.ok) {
+    failures.push('action_failed');
+  }
   if (dataTasks.length === 0 && action.complete && status !== action.status) {
     failures.push('action_turn_status_mismatch');
   }

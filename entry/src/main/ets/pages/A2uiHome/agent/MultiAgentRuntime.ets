@@ -249,7 +249,10 @@ export class MultiAgentEvidenceFormatter {
         const payload = message.payload as ActionResultPayload;
         return '[AIPhone][MultiAgentActionResult]' + identity + ' surface=' + this.surfaceEvidence(this.actionResultSurfaceId(payload)) +
           ' plan=' + this.token('p', payload.planId) + ' run=' + this.token('r', payload.runId) +
-          ' status=' + evidenceAllowed(payload.status, ['success', 'error', 'canceled', 'paused']);
+          ' status=' + evidenceAllowed(payload.status, ['success', 'error', 'canceled', 'paused']) +
+          (payload.stepId === undefined ? '' : ' step=' + evidenceAllowed(payload.stepId)) +
+          (payload.errorCode === undefined ? '' :
+            ' code=' + evidenceAllowed(payload.errorCode, [], /^[A-Z][A-Z0-9_]*$/));
       }
       case AgentMessageType.TURN_RESULT: {
         const payload = message.payload as TurnResultPayload;

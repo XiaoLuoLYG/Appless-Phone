@@ -2052,6 +2052,12 @@ export default function registeredPageActionMigrationTest() {
         '{"platform":"x","operation":"publish","text":"介绍 Appless 新版本"}'
       );
       expect(JSON.stringify(resolveVirtualRegisteredPageAction(
+        'social.post.preview',
+        '帮我把“Appless 的多步骤流程今天跑通了”整理成一条 X 帖子的预览，预览后存进 Gmail 草稿'
+      )?.args)).assertEqual(
+        '{"platform":"x","operation":"publish","text":"Appless 的多步骤流程今天跑通了"}'
+      );
+      expect(JSON.stringify(resolveVirtualRegisteredPageAction(
         'social.post.preview', '帮我在 LinkedIn 发帖：从 X 迁移到 Appless'
       )?.args)).assertEqual(
         '{"platform":"linkedin","operation":"publish","text":"从 X 迁移到 Appless"}'

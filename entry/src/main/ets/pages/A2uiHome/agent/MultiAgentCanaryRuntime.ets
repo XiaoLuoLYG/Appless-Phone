@@ -540,6 +540,37 @@ class MailDetailInPlaceBridge implements UiTaskRenderer, UiSurfaceWriter, MailDe
     this.pruneCanceledState();
   }
 
+  async reportActionFailure(
+    request: MailDetailRequest,
+    message: string
+  ): Promise<void> {
+    if (this.disposed || this.callback === null) {
+      return;
+    }
+    const actionId = request.provider === 'gmail' ?
+      'gmail.thread.read' : 'mail.thread.read';
+    if (!validateRegisteredPageActionArgs(actionId, request).ok) {
+      return;
+    }
+    const generation = this.currentGeneration();
+    if (!Number.isSafeInteger(generation) || generation <= 0) {
+      return;
+    }
+    const expectedEpoch = this.epoch;
+    const lease = new MailDetailBridgeLease((): boolean =>
+      !this.disposed && this.epoch === expectedEpoch &&
+        this.currentGeneration() === generation
+    );
+    await this.callback({
+      requestKey: request.requestKey,
+      provider: request.provider,
+      identityDigest: mailDetailIdentityDigest(request),
+      status: 'error',
+      error: message.trim().length > 0 ?
+        message : 'Mail detail action could not start.'
+    }, generation, lease);
+  }
+
   dispose(): void {
     this.disposed = true;
     this.epoch++;
@@ -1704,11 +1735,18 @@ export class MultiAgentCanaryRuntime {
     const ownerRunId: string = action.id === 'hotel.detail' &&
       this.hotelDetailAdmissionSequence !== admissionSequence ? this.lastHotelDetailAdmissionRunId : '';
     return actionResult
-      .then((ok: boolean): boolean => {
+      .then(async (ok: boolean): Promise<boolean> => {
         if (action.id === 'hotel.detail' && !ok && ownerRunId.length > 0) {
           this.authority.clearHotelDetailFollowUp(ownerRunId);
         }
         this.mailDetailBridge.actionSettled(ok);
+        if (!ok && action.args !== undefined &&
+          (action.id === 'mail.thread.read' || action.id === 'gmail.thread.read')) {
+          await this.mailDetailBridge.reportActionFailure(
+            action.args as MailDetailRequest,
+            'Mail detail action was rejected before the read task started.'
+          );
+        }
         return ok;
       });
   }

@@ -134,6 +134,14 @@ function socialPostPreviewVirtualArgs(inputText: string): SocialPostPreviewVirtu
     markerLength = '起草'.length;
   }
   if (marker < 0) {
+    const preview = /把[“"]([^”"]+)[”"]整理成一条\s*(X|Twitter|LinkedIn|Instagram|Reddit)\s*帖子(?:的)?预览/i.exec(value);
+    if (preview !== null) {
+      const platform = preview[2].toLowerCase() === 'twitter' ?
+        'x' : preview[2].toLowerCase();
+      const text = preview[1].trim();
+      return text.length === 0 || text.length > 3000 ?
+        null : { platform, operation: 'publish', text };
+    }
     return null;
   }
   const target = value.substring(0, marker);
