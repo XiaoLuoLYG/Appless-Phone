@@ -80,11 +80,14 @@ function bindingSchema(): ActionPlanningJsonSchema {
 }
 
 function nullableOfferIdSchema(
-  offerIds: JsonValue[]
+  offerIds: JsonValue[],
+  tailOnly: boolean
 ): ActionPlanningJsonSchema {
   const nullSchema: ActionPlanningJsonSchema = {
     type: 'null',
-    description: 'Use null for a derived step without a ready Offer.'
+    description: tailOnly ?
+      'Every submitted tail step after the prebound entry must use null.' :
+      'Use null only for step 2 or later when deriving inputs without an Offer.'
   };
   if (offerIds.length === 0) {
     return nullSchema;
@@ -103,7 +106,8 @@ function nullableOfferIdSchema(
 
 function stepSchema(
   actionIds: JsonValue[],
-  offerIds: JsonValue[]
+  offerIds: JsonValue[],
+  tailOnly: boolean
 ): ActionPlanningJsonSchema {
   const actionIdSchema: ActionPlanningJsonSchema = {
     type: 'string',
@@ -128,7 +132,7 @@ function stepSchema(
     'A unique local id for this serial Action step.'
   );
   properties['actionId'] = actionIdSchema;
-  properties['offerId'] = nullableOfferIdSchema(offerIds);
+  properties['offerId'] = nullableOfferIdSchema(offerIds, tailOnly);
   properties['args'] = argsSchema;
   properties['inputFrom'] = inputFromSchema;
   return {
@@ -141,7 +145,9 @@ function stepSchema(
 
 function parametersSchema(
   actionIds: JsonValue[],
-  offerIds: JsonValue[]
+  offerIds: JsonValue[],
+  tailOnly: boolean,
+  exactStepCount: number = 0
 ): ActionPlanningJsonSchema {
   const versionSchema: ActionPlanningJsonSchema = {
     type: 'string',
@@ -149,9 +155,9 @@ function parametersSchema(
   };
   const stepsSchema: ActionPlanningJsonSchema = {
     type: 'array',
-    items: stepSchema(actionIds, offerIds),
-    minItems: 1,
-    maxItems: 5
+    items: stepSchema(actionIds, offerIds, tailOnly),
+    minItems: exactStepCount > 0 ? exactStepCount : 1,
+    maxItems: exactStepCount > 0 ? exactStepCount : 5
   };
   const properties: Record<string, ActionPlanningJsonSchema> = {};
   properties['protocolVersion'] = versionSchema;
@@ -175,7 +181,10 @@ function parametersSchema(
  * compatibility remain deterministic validator work.
  */
 export class ActionPlanSubmissionToolBuilder {
-  build(actions: AvailableAction[]): ActionPlanSubmissionToolBuildResult {
+  build(
+    actions: AvailableAction[],
+    tailOnly: boolean = false
+  ): ActionPlanSubmissionToolBuildResult {
     if (!Array.isArray(actions) || actions.length === 0) {
       return failure(
         'ACTION_PLAN_AVAILABLE_ACTIONS_EMPTY',
@@ -227,17 +236,25 @@ export class ActionPlanSubmissionToolBuilder {
           );
         }
         seenOffers.add(offer.offerId);
-        offerIds.push(offer.offerId);
+        if (!tailOnly) {
+          offerIds.push(offer.offerId);
+        }
       }
     }
     const tool: ActionPlanningFunctionTool = {
       type: 'function',
       function: {
         name: ACTION_PLAN_SUBMIT_TOOL_NAME,
-        description:
-          'Submit exactly one serial Action Plan using available Offer ids.',
+        description: tailOnly ?
+          'Submit only the serial tail steps after the runtime-owned prebound entry.' :
+          'Submit exactly one complete serial Action Plan using available Offer ids.',
         strict: true,
-        parameters: parametersSchema(actionIds, offerIds)
+        parameters: parametersSchema(
+          actionIds,
+          offerIds,
+          tailOnly,
+          tailOnly ? actionIds.length : 0
+        )
       }
     };
     return {

@@ -62,8 +62,12 @@ import {
   SchemaAwareActionDefinitionLookup
 } from '../main/ets/agent/action/schema/SchemaAwareActionDefinition';
 import {
+  createRegisteredActionDefinitionLookup,
   createRegisteredActionSchemaCatalog
 } from '../main/ets/agent/action/schema/RegisteredActionSchemas';
+import {
+  toolDefinitionForToolId
+} from '../main/ets/aiphone/runtime/ToolDefinitionRegistry';
 import {
   actionSchemasAssignable,
   resolveActionSchemaPath
@@ -109,6 +113,12 @@ class FixtureToolDefinitionLookup implements ToolDefinitionLookup {
       };
     }
     return null;
+  }
+}
+
+class RegisteredToolDefinitionLookup implements ToolDefinitionLookup {
+  find(toolId: string): ToolDefinition | null {
+    return toolDefinitionForToolId(toolId);
   }
 }
 
@@ -208,14 +218,16 @@ class FixtureExecutionObserver implements ActionStepExecutionObserver {
 
 class FixturePlanningModel implements ActionPlanningModel {
   private readonly argumentsJson: string;
+  request: ActionPlanningModelRequest | null = null;
 
   constructor(argumentsJson: string) {
     this.argumentsJson = argumentsJson;
   }
 
   submit(
-    _request: ActionPlanningModelRequest
+    request: ActionPlanningModelRequest
   ): Promise<ActionPlanningModelResult> {
+    this.request = request;
     return Promise.resolve({
       ok: true,
       argumentsJson: this.argumentsJson,
@@ -526,6 +538,68 @@ export default function testsuite(): void {
         }
         expect(rejected).assertTrue();
       });
+
+    it('prepends a resolver-owned entry and asks the model only for tail steps', 0,
+      async (): Promise<void> => {
+        const proposal = JSON.stringify({
+          protocolVersion: ACTION_PLAN_PROPOSAL_VERSION,
+          label: 'Open Bob contact',
+          steps: [{
+            stepId: 'open',
+            actionId: FIXTURE_DERIVED_ACTION_ID,
+            offerId: null,
+            args: {},
+            inputFrom: [{
+              target: '/address',
+              stepId: 'entry',
+              path: '/email'
+            }]
+          }]
+        });
+        const model = new FixturePlanningModel(proposal);
+        const compiler = new SchemaAwareActionPlanCompiler(
+          fixtureDefinitionLookup(true),
+          model,
+          new FixturePlanIdentityFactory()
+        );
+        const draft = await compiler.compile(
+          'Find Bob and open the contact',
+          [fixtureOffer('bob')],
+          [FIXTURE_ACTION_ID, FIXTURE_DERIVED_ACTION_ID],
+          { preboundEntryOfferId: 'bob' }
+        );
+        expect(draft.steps.length).assertEqual(2);
+        expect(draft.steps[0].stepId).assertEqual('entry');
+        expect(draft.steps[0].actionId).assertEqual(FIXTURE_ACTION_ID);
+        expect(draft.steps[0].offerId).assertEqual('bob');
+        expect((draft.steps[0].args as Record<string, string>)['name'])
+          .assertEqual('bob');
+        expect(draft.steps[1].actionId).assertEqual(
+          FIXTURE_DERIVED_ACTION_ID
+        );
+        expect(draft.steps[1].inputFrom[0].stepId).assertEqual('entry');
+        expect(model.request?.systemPrompt.includes(
+          'runtime has already selected'
+        )).assertTrue();
+        expect(model.request?.systemPrompt.includes(
+          'first step must select one ready Offer'
+        )).assertFalse();
+        const payload = JSON.parse(
+          model.request?.userPrompt as string
+        ) as ActionPlanningPromptPayload;
+        expect(payload.preboundEntryStep?.stepId).assertEqual('entry');
+        expect(payload.preboundEntryStep?.actionId).assertEqual(
+          FIXTURE_ACTION_ID
+        );
+        expect(payload.requiredRemainingActionOrder?.length).assertEqual(1);
+        expect(payload.requiredRemainingActionOrder?.[0]).assertEqual(
+          FIXTURE_DERIVED_ACTION_ID
+        );
+        expect(payload.availableActions.length).assertEqual(1);
+        expect(payload.availableActions[0].actionId).assertEqual(
+          FIXTURE_DERIVED_ACTION_ID
+        );
+      });
   });
 
   describe('ActionPlanningContextBuilder', (): void => {
@@ -613,8 +687,29 @@ export default function testsuite(): void {
         'The first step must select one ready Offer'
       )).assertTrue();
       expect(result.prompt?.systemPrompt.includes(
-        'use inputFrom with declared JSON Pointer paths'
+        'offerId=null is always invalid for step 1'
       )).assertTrue();
+      expect(result.prompt?.systemPrompt.includes(
+        'Only step 2 and later may use offerId=null'
+      )).assertTrue();
+      expect(result.prompt?.systemPrompt.includes(
+        'binding path must be a JSON Pointer explicitly declared'
+      )).assertTrue();
+      expect(result.prompt?.systemPrompt.includes(
+        'Execution order alone does not imply a data dependency'
+      )).assertTrue();
+      expect(result.prompt?.systemPrompt.includes(
+        'put those constants in args and set inputFrom=[]'
+      )).assertTrue();
+      expect(result.prompt?.systemPrompt.includes(
+        '/data/socialHub/publication/text to target /body'
+      )).assertTrue();
+      expect(result.prompt?.systemPrompt.includes(
+        'do not bind /conversationId to /conversationId'
+      )).assertTrue();
+      expect(result.prompt?.systemPrompt.includes(
+        'preboundEntryStep'
+      )).assertFalse();
       const payload = JSON.parse(
         result.prompt?.userPrompt as string
       ) as ActionPlanningPromptPayload;
@@ -630,6 +725,50 @@ export default function testsuite(): void {
       expect(payload.availableActions[0].offers.length).assertEqual(2);
       expect(payload.availableActions[0].offers[0].offerId).assertEqual('bob');
     });
+
+    it('keeps prebound tail instructions isolated from candidate Offer rules', 0,
+      (): void => {
+        const context = new ActionPlanningContextBuilder(
+          fixtureDefinitionLookup(true)
+        ).build([
+          fixtureOffer('bob')
+        ], [
+          FIXTURE_ACTION_ID,
+          FIXTURE_DERIVED_ACTION_ID
+        ]);
+        expect(context.ok).assertTrue();
+        const result = new ActionPlanningPromptBuilder().build(
+          'Find Bob and open the contact',
+          context.actions.slice(1),
+          {
+            stepId: 'entry',
+            actionId: FIXTURE_ACTION_ID,
+            outputSchema: context.actions[0].definition.outputSchema
+          }
+        );
+        expect(result.ok).assertTrue();
+        expect(result.prompt?.systemPrompt.includes(
+          'runtime has already selected'
+        )).assertTrue();
+        expect(result.prompt?.systemPrompt.includes(
+          'do not include the prebound entry'
+        )).assertTrue();
+        expect(result.prompt?.systemPrompt.includes(
+          'first step must select one ready Offer'
+        )).assertFalse();
+        expect(result.prompt?.systemPrompt.includes(
+          'offerId=null is always invalid for step 1'
+        )).assertFalse();
+        const payload = JSON.parse(
+          result.prompt?.userPrompt as string
+        ) as ActionPlanningPromptPayload;
+        expect(payload.preboundEntryStep?.stepId).assertEqual('entry');
+        expect(payload.requiredRemainingActionOrder?.length).assertEqual(1);
+        expect(payload.availableActions.length).assertEqual(1);
+        expect(payload.availableActions[0].actionId).assertEqual(
+          FIXTURE_DERIVED_ACTION_ID
+        );
+      });
 
     it('omits runtime fingerprints from the model payload', 0, (): void => {
       const context = new ActionPlanningContextBuilder(
@@ -706,6 +845,9 @@ export default function testsuite(): void {
       expect(result.ok).assertTrue();
       expect(result.tool?.function.name).assertEqual('submit_action_plan');
       expect(result.tool?.function.strict).assertTrue();
+      expect(result.tool?.function.description.includes(
+        'prebound'
+      )).assertFalse();
       const parameters = result.tool?.function.parameters as
         ActionPlanningJsonSchema;
       expect(parameters.properties?.['protocolVersion'].const)
@@ -720,6 +862,9 @@ export default function testsuite(): void {
       expect(offerIds?.length).assertEqual(2);
       expect(offerIds?.[0]).assertEqual('bob');
       expect(offerIds?.[1]).assertEqual('alice');
+      expect(step?.properties?.['offerId'].anyOf?.[1].description.includes(
+        'prebound'
+      )).assertFalse();
       expect(step?.required?.join(','))
         .assertEqual('stepId,actionId,offerId,args,inputFrom');
       expect(step?.additionalProperties).assertFalse();
@@ -744,6 +889,36 @@ export default function testsuite(): void {
       expect(step?.properties?.['args'].type).assertEqual('object');
     });
 
+    it('forces null Offer ids when submitting a prebound plan tail', 0,
+      (): void => {
+        const context = new ActionPlanningContextBuilder(
+          fixtureDefinitionLookup(true)
+        ).build([], [
+          FIXTURE_DERIVED_ACTION_ID
+        ]);
+        const result = new ActionPlanSubmissionToolBuilder().build(
+          context.actions,
+          true
+        );
+        expect(result.ok).assertTrue();
+        expect(result.tool?.function.description.includes(
+          'runtime-owned prebound entry'
+        )).assertTrue();
+        const parameters = result.tool?.function.parameters as
+          ActionPlanningJsonSchema;
+        expect(parameters.properties?.['steps'].minItems).assertEqual(1);
+        expect(parameters.properties?.['steps'].maxItems).assertEqual(1);
+        const step = parameters.properties?.['steps'].items;
+        expect(step?.properties?.['actionId'].enum?.length).assertEqual(1);
+        expect(step?.properties?.['actionId'].enum?.[0])
+          .assertEqual(FIXTURE_DERIVED_ACTION_ID);
+        expect(step?.properties?.['offerId'].type).assertEqual('null');
+        expect(step?.properties?.['offerId'].anyOf === undefined).assertTrue();
+        expect(step?.properties?.['offerId'].description.includes(
+          'prebound entry'
+        )).assertTrue();
+      });
+
     it('fails closed without available Actions', 0, (): void => {
       const result = new ActionPlanSubmissionToolBuilder().build([]);
       expect(result.ok).assertFalse();
@@ -753,6 +928,97 @@ export default function testsuite(): void {
   });
 
   describe('Registered Action schemas', (): void => {
+    it('resolves the Luckin preview and payment Actions used by C22', 0, (): void => {
+      const definitions = createRegisteredActionDefinitionLookup(
+        new RegisteredToolDefinitionLookup()
+      );
+      const luckin = definitions.find('luckin.order.preview');
+      const payment = definitions.find('payment.send');
+      expect(luckin.ok).assertTrue();
+      expect(payment.ok).assertTrue();
+      expect(luckin.definition?.inputSchemaId)
+        .assertEqual('luckinOrderPreviewRequest');
+      expect(luckin.definition?.outputSchemaId)
+        .assertEqual('genericToolResults');
+      expect(payment.definition?.inputSchemaId)
+        .assertEqual('paymentSendRequest');
+      expect(payment.definition?.outputSchemaId)
+        .assertEqual('paymentCheckout');
+    });
+
+    it('accepts both prompt-derived and exact page Action inputs for C22', 0, (): void => {
+      const schemas = createRegisteredActionSchemaCatalog();
+      const luckin = schemas.find('luckinOrderPreviewRequest');
+      const payment = schemas.find('paymentSendRequest');
+      expect(luckin !== null).assertTrue();
+      expect(payment !== null).assertTrue();
+      if (luckin === null || payment === null) {
+        return;
+      }
+      expect(validateActionValue(luckin.schema, {
+        originalQuery: '点一杯生椰拿铁，半糖少冰'
+      }).ok).assertTrue();
+      expect(validateActionValue(luckin.schema, {
+        deptId: 'shop-1',
+        location: '114.0,22.5'
+      }).ok).assertTrue();
+      expect(validateActionValue(payment.schema, {
+        originalQuery: '转账给罗一格 5 美金'
+      }).ok).assertTrue();
+      expect(validateActionValue(payment.schema, {
+        recipient: '罗一格',
+        provider: 'paypal',
+        fundingSource: '',
+        amountText: '5',
+        currency: 'USD',
+        note: '',
+        phase: 'confirm',
+        accountId: 'luoyige',
+        targetType: 'paypal',
+        checkoutUrl: '',
+        providerSessionId: '',
+        paypalClientId: '',
+        paypalEnvironment: '',
+        paypalEmail: 'alice@example.com',
+        paypalMerchantId: ''
+      }).ok).assertTrue();
+    });
+
+    it('validates the registered page output envelope for C22 Actions', 0, (): void => {
+      const schemas = createRegisteredActionSchemaCatalog();
+      const generic = schemas.find('genericToolResults');
+      const payment = schemas.find('paymentCheckout');
+      expect(generic !== null).assertTrue();
+      expect(payment !== null).assertTrue();
+      if (generic === null || payment === null) {
+        return;
+      }
+      const output = {
+        actionId: 'luckin.order.preview',
+        pageActionId: 'luckin.order.preview',
+        conversationId: 'conversation-1',
+        turnId: 'turn-1',
+        surfaceId: 'surface-1',
+        status: 'ready',
+        data: {
+          genericToolResults: [{
+            sourceTag: 'Luckin',
+            toolName: 'luckin.order.preview',
+            title: 'Order preview',
+            status: 'success',
+            summary: 'Ready for confirmation.',
+            rows: [],
+            rawPreview: ''
+          }]
+        }
+      };
+      expect(validateActionValue(generic.schema, output).ok).assertTrue();
+      output.actionId = 'payment.send';
+      output.pageActionId = 'payment.send';
+      output.data.genericToolResults[0].toolName = 'payment.send';
+      expect(validateActionValue(payment.schema, output).ok).assertTrue();
+    });
+
     it('declares the Social preview text as assignable to the Gmail body', 0, (): void => {
       const schemas = createRegisteredActionSchemaCatalog();
       const social = schemas.find('socialHubPublication');

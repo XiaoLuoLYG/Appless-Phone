@@ -78,11 +78,20 @@ export interface ActionPlanDraft {
   steps: ActionPlanStep[];
 }
 
+export interface ActionPlanCompileOptions {
+  /**
+   * Resolver-owned entry Offer. When present, the model compiles only the
+   * remaining steps and the compiler prepends this immutable entry.
+   */
+  preboundEntryOfferId?: string;
+}
+
 export interface ActionPlanCompiler {
   compile(
     goal: string,
     offers: ActionOffer[],
-    allowedActionIds: string[]
+    allowedActionIds: string[],
+    options?: ActionPlanCompileOptions
   ): Promise<ActionPlanDraft>;
 }
 

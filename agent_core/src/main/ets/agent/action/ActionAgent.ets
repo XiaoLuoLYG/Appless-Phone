@@ -249,7 +249,8 @@ function frozenPlan(
   steps: ActionPlanStep[],
   catalog: ActionCatalog,
   definitions: SchemaAwareActionDefinitionLookup | null,
-  authorityContext: FrozenPlanAuthorityContext
+  authorityContext: FrozenPlanAuthorityContext,
+  allowMissingDefinitions: boolean = false
 ): ActionPlan | null {
   const frozenSteps: FrozenActionPlanStep[] = [];
   const virtualEntryOffer: boolean =
@@ -265,24 +266,27 @@ function frozenPlan(
     if (definitions !== null) {
       const resolved = definitions.find(step.actionId);
       if (!resolved.ok || resolved.definition === null) {
-        return null;
-      }
-      const current = resolved.definition;
-      definition = {
-        definitionFingerprint: current.definitionFingerprint,
-        input: {
-          schemaId: current.inputSchemaId,
-          revision: current.inputSchemaRevision,
-          fingerprint: current.inputSchemaFingerprint,
-          schema: current.inputSchema
-        },
-        output: {
-          schemaId: current.outputSchemaId,
-          revision: current.outputSchemaRevision,
-          fingerprint: current.outputSchemaFingerprint,
-          schema: current.outputSchema
+        if (!allowMissingDefinitions) {
+          return null;
         }
-      };
+      } else {
+        const current = resolved.definition;
+        definition = {
+          definitionFingerprint: current.definitionFingerprint,
+          input: {
+            schemaId: current.inputSchemaId,
+            revision: current.inputSchemaRevision,
+            fingerprint: current.inputSchemaFingerprint,
+            schema: current.inputSchema
+          },
+          output: {
+            schemaId: current.outputSchemaId,
+            revision: current.outputSchemaRevision,
+            fingerprint: current.outputSchemaFingerprint,
+            schema: current.outputSchema
+          }
+        };
+      }
     }
     let authority: FrozenActionAuthority;
     if (authorityContext.mode === 'virtual_intent') {
@@ -373,7 +377,8 @@ function directPlan(
       dataTaskId: '',
       sourceToolId: payload.sourceToolId === undefined ? '' : payload.sourceToolId,
       pageActionId
-    }
+    },
+    true
   );
 }
 
@@ -1158,10 +1163,18 @@ export class ActionAgent extends MessageDrivenAgent
       compiler.compile(
         stored.request.goal,
         [offer],
-        stored.request.allowedActionIds.slice()
+        stored.request.allowedActionIds.slice(),
+        {
+          preboundEntryOfferId: offer.offerId
+        }
       ).then((draft: ActionPlanDraft) => {
         this.finishFrozenVirtualCompilation(key, stored, offer, draft);
-      }).catch((_error: Object) => {
+      }).catch((error: Object) => {
+        const message = error instanceof Error ? error.message : 'unknown';
+        aiLogError(
+          '[AIPhone][ActionPlanCompilerException] mode=frozen_sequence message=' +
+          message.substring(0, 240)
+        );
         this.finishFrozenVirtualCompilationError(
           key,
           stored,
@@ -1169,7 +1182,12 @@ export class ActionAgent extends MessageDrivenAgent
           'Action plan compiler failed.'
         );
       });
-    } catch (_error) {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown';
+      aiLogError(
+        '[AIPhone][ActionPlanCompilerException] mode=frozen_sequence message=' +
+        message.substring(0, 240)
+      );
       this.finishFrozenVirtualCompilationError(
         key,
         stored,
@@ -2010,6 +2028,12 @@ export class ActionAgent extends MessageDrivenAgent
       );
       return;
     }
+    if (this.definitions !== null && plan.steps[0].definition === undefined) {
+      aiLogInfo(
+        '[AIPhone][ActionSchemaFallback] mode=direct action=' +
+        payload.actionId + ' reason=schema_unregistered'
+      );
+    }
     const context: ActionPlanRunContext = {
       conversationId: message.conversationId,
       turnId: message.turnId,
@@ -2389,7 +2413,9 @@ export class ActionAgent extends MessageDrivenAgent
       '[AIPhone][ActionPlanTerminal] status=' + outcome.status +
       ' completed=' + outcome.completedStepIds.join(',') +
       (outcome.failedStepId === undefined ? '' :
-        ' failedStep=' + outcome.failedStepId)
+        ' failedStep=' + outcome.failedStepId) +
+      (outcome.status === 'success' ? '' :
+        ' code=' + outcome.errorCode)
     );
     this.bus.publish({
       type: AgentMessageType.ACTION_RESULT,

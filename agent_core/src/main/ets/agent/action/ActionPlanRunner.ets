@@ -317,6 +317,27 @@ function executionContext(
   return execution;
 }
 
+function isDirectSurfaceFollowUpReceipt(
+  plan: ActionPlan,
+  step: FrozenActionPlanStep,
+  result: ActionStepExecutionResult
+): boolean {
+  if (plan.steps.length !== 1 ||
+    step.authority === undefined ||
+    step.authority.kind !== 'surface' ||
+    result.status !== 'success' ||
+    result.followUp === undefined ||
+    result.output === null ||
+    typeof result.output !== 'object' ||
+    Array.isArray(result.output)) {
+    return false;
+  }
+  const output = result.output as Object as Record<string, JsonValue | undefined>;
+  return Object.keys(output).sort().join(',') === 'actionId,status' &&
+    output['actionId'] === step.actionId &&
+    output['status'] === 'follow_up_created';
+}
+
 export class ActionPlanRunner {
   private catalog: ActionCatalog;
   private executor: ActionStepExecutor;
@@ -777,7 +798,8 @@ export class ActionPlanRunner {
             this.completedStepIds(completed)
           );
         }
-        if (step.definition !== undefined) {
+        if (step.definition !== undefined &&
+          !isDirectSurfaceFollowUpReceipt(snapshot, step, result)) {
           const outputValidation = validateActionValue(
             step.definition.output.schema,
             result.output
@@ -1094,7 +1116,9 @@ export class ActionPlanRunner {
   ): ActionCatalogResult {
     const step = plan.steps[index];
     if (context.virtualAction === true) {
-      return this.catalog.validateActionIntentExecution(step.actionId, args);
+      return index === 0 ?
+        this.catalog.validateActionIntentExecution(step.actionId, args) :
+        this.catalog.validateRegisteredStep(step.actionId, args);
     }
     if (index === 0) {
       if (context.pageActionId !== undefined && context.pageActionId.length > 0) {
