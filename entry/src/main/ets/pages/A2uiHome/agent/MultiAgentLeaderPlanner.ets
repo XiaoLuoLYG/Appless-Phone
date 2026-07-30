@@ -1727,7 +1727,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         inputSchema: tool.inputSchema,
         outputSchema: tool.outputSchema,
         actions: tool.actions,
-        planningHint: tool.planningHint
+        planningHint: tool.planningHint === undefined ? undefined :
+          tool.planningHint.split(tool.intent).join(tool.toolId)
       })
     );
     const toolCatalog: string = JSON.stringify(promptTools);

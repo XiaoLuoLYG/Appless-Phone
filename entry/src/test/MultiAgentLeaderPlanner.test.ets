@@ -13,7 +13,8 @@ import {
   ModelContentListener,
   ObservationDigest,
   ToolDefinition,
-  actionAgentToolDefinitions
+  actionAgentToolDefinitions,
+  toolPlanningDescriptionForToolId
 } from '@loop/agent-core';
 import { MultiAgentLeaderPlanner } from '../main/ets/pages/A2uiHome/agent/MultiAgentLeaderPlanner';
 
@@ -1697,6 +1698,7 @@ export default function multiAgentLeaderPlannerTest() {
       for (let index = 0; index < context.tools.length; index++) {
         if (context.tools[index].toolId === 'food.search') {
           context.tools[index].intent = 'local.food.search';
+          context.tools[index].planningHint = toolPlanningDescriptionForToolId('food.search');
         }
       }
       let selectedToolId: string = 'plan_failed';
