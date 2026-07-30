@@ -876,9 +876,23 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     }
     if (misplacedIds.length !== 1 ||
       originalScope.requestedCapabilityIds.indexOf(misplacedIds[0]) < 0 ||
-      !this.sameJsonValue(preservedTasks, rawRepairedTasks as Object[])) {
+      (!this.sameJsonValue(preservedTasks, rawRepairedTasks as Object[]) &&
+        !this.sameJsonValue(rawOriginalTasks as Object[], rawRepairedTasks as Object[]))) {
       return false;
     }
+    const missingActionIds: string[] = [];
+    for (let index = 0; index < originalScope.requestedCapabilityIds.length; index++) {
+      const capabilityId: string = originalScope.requestedCapabilityIds[index];
+      if (originalScope.dataCapabilityIds.indexOf(capabilityId) < 0 &&
+        originalScope.actionCapabilityIds.indexOf(capabilityId) < 0) {
+        if (!this.actionOnlyCapability(context, capabilityId) || missingActionIds.length > 0) {
+          return false;
+        }
+        missingActionIds.push(capabilityId);
+      }
+    }
+    const deferredNormalization: boolean = missingActionIds.length === 1 &&
+      this.sameJsonValue(rawOriginalTasks as Object[], rawRepairedTasks as Object[]);
     const originalAction = original['actionIntent'];
     const repairedAction = repaired['actionIntent'];
     if (repairedAction === null || typeof repairedAction !== 'object' || Array.isArray(repairedAction)) {
@@ -905,6 +919,15 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     );
     const expectedActionIds: string[] = originalScope.actionCapabilityIds.slice();
     this.rememberScopeId(misplacedIds[0], expectedActionIds);
+    for (let index = 0; index < missingActionIds.length; index++) {
+      this.rememberScopeId(missingActionIds[index], expectedActionIds);
+    }
+    if (deferredNormalization) {
+      const rawExpectedActionIds: string[] = originalScope.actionCapabilityIds.slice();
+      this.rememberScopeId(missingActionIds[0], rawExpectedActionIds);
+      return this.sameStringSet(originalScope.dataCapabilityIds, repairedScope.dataCapabilityIds) &&
+        this.sameStringSet(rawExpectedActionIds, repairedScope.actionCapabilityIds);
+    }
     return this.sameStringSet(expectedDataIds, repairedScope.dataCapabilityIds) &&
       this.sameStringSet(expectedActionIds, repairedScope.actionCapabilityIds);
   }
@@ -2034,19 +2057,28 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     const rawTasks = values['dataTasks'];
     const rawAction = values['actionIntent'];
     const rawRequested = values['requestedCapabilityIds'];
-    if (!Array.isArray(rawTasks) || rawAction === null || typeof rawAction !== 'object' ||
-      Array.isArray(rawAction) || !Array.isArray(rawRequested)) {
+    if (!Array.isArray(rawTasks) || !Array.isArray(rawRequested)) {
       return;
     }
-    const actionValues =
-      rawAction as Record<string, Object | string | number | boolean | null | undefined>;
-    const rawActionIds = actionValues['allowedActionIds'];
-    if (Object.keys(rawAction).sort().join(',') !== ACTION_INTENT_KEYS ||
-      !Array.isArray(rawActionIds)) {
-      return;
+    let actionValues:
+      Record<string, Object | string | number | boolean | null | undefined> = {};
+    let rawActionIds: Object[] = [];
+    if (rawAction !== undefined) {
+      if (rawAction === null || typeof rawAction !== 'object' || Array.isArray(rawAction) ||
+        Object.keys(rawAction).sort().join(',') !== ACTION_INTENT_KEYS) {
+        return;
+      }
+      actionValues =
+        rawAction as Record<string, Object | string | number | boolean | null | undefined>;
+      const actionIds = actionValues['allowedActionIds'];
+      if (!Array.isArray(actionIds)) {
+        return;
+      }
+      rawActionIds = actionIds as Object[];
     }
     let misplacedIndex: number = -1;
     let misplacedId: string = '';
+    let misplacedGoal: string = '';
     const tasks = rawTasks as Object[];
     for (let index = 0; index < tasks.length; index++) {
       const rawTask = tasks[index];
@@ -2057,6 +2089,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       const task =
         rawTask as Record<string, Object | string | number | boolean | null | undefined>;
       const toolId = task['toolId'];
+      const goal = task['goal'];
       const allowedToolIds = task['allowedToolIds'];
       if (typeof toolId !== 'string' ||
         leaderIsDataCapability(context, toolId) ||
@@ -2064,20 +2097,24 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         continue;
       }
       if (misplacedIndex >= 0 || !Array.isArray(allowedToolIds) ||
-        allowedToolIds.length !== 1 || allowedToolIds[0] !== toolId) {
+        allowedToolIds.length !== 1 || allowedToolIds[0] !== toolId ||
+        typeof goal !== 'string' || goal.trim().length === 0) {
         return;
       }
       misplacedIndex = index;
       misplacedId = toolId;
+      misplacedGoal = goal;
     }
     if (misplacedIndex < 0 || rawRequested.indexOf(misplacedId) < 0) {
       return;
     }
-    const actionIds = rawActionIds as Object[];
+    if (rawAction === undefined && values['continuationMode'] !== 'sequence') {
+      return;
+    }
     const requestedIds = rawRequested as Object[];
     const existingActionIds: string[] = [];
-    for (let index = 0; index < actionIds.length; index++) {
-      const actionId: Object = actionIds[index];
+    for (let index = 0; index < rawActionIds.length; index++) {
+      const actionId: Object = rawActionIds[index];
       if (typeof actionId !== 'string' || actionId === misplacedId ||
         existingActionIds.indexOf(actionId) >= 0 ||
         !leaderIsActionCapability(context, actionId)) {
@@ -2088,18 +2125,35 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     const orderedActionIds: string[] = [];
     for (let index = 0; index < requestedIds.length; index++) {
       const capabilityId: Object = requestedIds[index];
-      if (typeof capabilityId === 'string' &&
-        (capabilityId === misplacedId || existingActionIds.indexOf(capabilityId) >= 0)) {
+      if (typeof capabilityId === 'string' && (capabilityId === misplacedId ||
+        existingActionIds.indexOf(capabilityId) >= 0 ||
+        (rawAction === undefined && this.actionOnlyCapability(context, capabilityId)))) {
         orderedActionIds.push(capabilityId);
       }
     }
-    if (orderedActionIds.length !== existingActionIds.length + 1) {
+    const expectedActionCount: number = existingActionIds.length +
+      (rawAction === undefined ? 2 : 1);
+    if (orderedActionIds.length !== expectedActionCount ||
+      orderedActionIds.indexOf(misplacedId) < 0) {
       return;
     }
-    values['dataTasks'] = tasks.filter(
+    if (rawAction === undefined) {
+      const normalizedActionIntent: LeaderActionIntent = {
+        goal: misplacedGoal,
+        allowedActionIds: orderedActionIds
+      };
+      values['actionIntent'] = normalizedActionIntent;
+      actionValues = normalizedActionIntent as Object as
+        Record<string, Object | string | number | boolean | null | undefined>;
+    }
+    const retainedTasks: Object[] = tasks.filter(
       (_task: Object, index: number): boolean => index !== misplacedIndex
     );
+    values['dataTasks'] = retainedTasks;
     actionValues['allowedActionIds'] = orderedActionIds;
+    if (retainedTasks.length === 0 && values['continuationMode'] === 'sequence') {
+      values['continuationMode'] = 'complete';
+    }
   }
 
   private hostReasonCode(action: LeaderRoundAction): string {

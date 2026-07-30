@@ -346,8 +346,13 @@ export function multiAgentTurnEvidence(logText, options = {}) {
   for (const result of events.filter((item) => item.marker === 'MultiAgentUiResult')) {
     if (!uiById.has(result.fields.task)) failures.push('unknown_ui_terminal');
   }
+  const virtualPlans = events.filter((item) => item.marker === 'MultiAgentActionPlan' &&
+    item.fields.virtual === 'true' && list(item.fields.dataTasks).length === 0);
+  const virtualAfterData = virtualPlans.length === 1 && uiTasks.length === 0 &&
+    dataById.size > 0 && [...dataById.values()].every((task) =>
+      task.terminalIndex < virtualPlans[0].index);
   for (const taskId of dataById.keys()) {
-    if (dependencyCounts.get(taskId) !== 1) failures.push('missing_ui_task');
+    if (dependencyCounts.get(taskId) !== 1 && !virtualAfterData) failures.push('missing_ui_task');
   }
 
   const knownTasks = new Set([
@@ -359,8 +364,6 @@ export function multiAgentTurnEvidence(logText, options = {}) {
     }
   }
 
-  const virtualPlans = events.filter((item) => item.marker === 'MultiAgentActionPlan' &&
-    item.fields.virtual === 'true' && list(item.fields.dataTasks).length === 0);
   const toolIds = [
     ...dataTasks.map((item) => item.fields.tool),
     ...virtualPlans.flatMap((item) => list(item.fields.actions))
@@ -377,7 +380,11 @@ export function multiAgentTurnEvidence(logText, options = {}) {
     !nonnegativeInteger(turn?.fields.messageChars) || Number(turn?.fields.messageChars) === 0) {
     failures.push('invalid_turn_result');
   }
-  if (rounds.length > 0 && Number(turn?.fields.roundCount || 0) < rounds.at(-1)) {
+  const runtimeVirtualTurn = virtualAfterData &&
+    (turn?.fields.surface || '').startsWith('virtual-') &&
+    Number(turn?.fields.roundCount || 0) === 0;
+  if (rounds.length > 0 && Number(turn?.fields.roundCount || 0) < rounds.at(-1) &&
+    !runtimeVirtualTurn) {
     failures.push('invalid_turn_round_count');
   }
   const finalUi = [...uiTerminals].sort((left, right) => left.index - right.index).at(-1);

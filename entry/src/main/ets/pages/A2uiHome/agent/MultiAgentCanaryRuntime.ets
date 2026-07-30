@@ -45,6 +45,7 @@ import {
   VirtualActionIntent,
   VirtualActionIntentResolver,
   allToolDefinitions,
+  aiLogInfo,
   callStructuredTool,
   gmailDraftApplyAction,
   genericToolResultsA2ui,
@@ -1414,9 +1415,20 @@ function canaryPlanningContext(previousPersonaId: string, prompt: string = ''): 
     outputSchema: memory.outputSchema,
     actions: memory.actions.slice()
   });
+  const personas = scopedLeaderPersonas(previousPersonaId, tools);
+  if (/点一杯咖啡|来一杯咖啡|买杯咖啡/.test(prompt)) {
+    for (let index = 0; index < personas.length; index++) {
+      const persona = personas[index];
+      if (persona.personaId === 'food_companion' &&
+        /只喝瑞幸|只买瑞幸|只点瑞幸/.test(persona.memory)) {
+        aiLogInfo('[AIPhone][PersonaMemoryApplied] personaId=food_companion kind=luckin_only');
+        break;
+      }
+    }
+  }
   return {
-    tools,
-    personas: scopedLeaderPersonas(previousPersonaId, tools)
+    tools: tools,
+    personas: personas
   };
 }
 

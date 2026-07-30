@@ -1336,6 +1336,26 @@ test('accepts dependent tools only with increasing round evidence', () => {
   ).complete, false);
 });
 
+test('accepts a settled Data round followed by one correlated virtual Action plan', () => {
+  const hybrid = `
+    [AIPhone][MultiAgentInput] conversation=c1 turn=t1 task=input-1
+    [AIPhone][MultiAgentDataTask] conversation=c1 turn=t1 task=ride round=1 tool=ride.estimate predecessor=none path=none target=none binding=false
+    [AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=ride tool=ride.estimate status=success sources=1 error=false
+    [AIPhone][MultiAgentActionPlan] conversation=c1 turn=t1 task=actions uiTask=actions dataTasks=none actions=luckin.order.preview,payment.send virtual=true
+    [AIPhone][MultiAgentActionResult] conversation=c1 turn=t1 task=actions surface=invalid plan=p1 run=r1 status=success
+    [AIPhone][MultiAgentTurnResult] conversation=c1 turn=t1 task=input-1 status=success surface=virtual-v1 roundCount=0 messageChars=17
+  `;
+  const result = multiAgentTurnEvidence(hybrid, {
+    expectedToolIds: ['ride.estimate', 'luckin.order.preview', 'payment.send']
+  });
+
+  assert.equal(result.complete, true);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.toolIds, [
+    'ride.estimate', 'luckin.order.preview', 'payment.send'
+  ]);
+});
+
 test('ends evidence at the first TurnResult and reports contradictory late markers', () => {
   const terminalBeforeData = successTurn.replace(
     /^.*MultiAgentDataResult.*\n/m,

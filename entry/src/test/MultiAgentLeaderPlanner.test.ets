@@ -3191,6 +3191,32 @@ export default function multiAgentLeaderPlannerTest() {
       );
     });
 
+    it('completes a sequence after normalizing its last mixed Action-owned Data task', 0,
+      async () => {
+        const misplaced: string =
+          '{"personaId":"travel_companion","skillId":"","requestedCapabilityIds":[' +
+          '"luckin.order.preview","payment.send"],"roundAction":"execute",' +
+          '"continuationMode":"sequence","dataTasks":[{"localId":"luckin",' +
+          '"goal":"预览瑞幸订单","allowedToolIds":["luckin.order.preview"],' +
+          '"toolId":"luckin.order.preview","input":{"prompt":"帮我点一杯瑞幸生椰拿铁，半糖少冰"},' +
+          '"required":true}],"uiIntent":{"purpose":"展示瑞幸预览和转账确认",' +
+          '"preferredDensity":"comfortable","requiredSections":["luckin","payment"]}}';
+        const decision = await new MultiAgentLeaderPlanner(
+          new QueueLocalModel([misplaced])
+        ).plan(
+          inputMessage(),
+          { text: MIXED_DATA_ACTION_QUERY },
+          actionOwnerContext(),
+          2
+        );
+
+        expect(decision.dataTasks.length).assertEqual(0);
+        expect(decision.actionIntent!.allowedActionIds.join(',')).assertEqual(
+          'luckin.order.preview,payment.send'
+        );
+        expect(decision.reasonCode).assertEqual('host_execute');
+      });
+
     it('does not request a second model decision while clearing an invalid skill', 0, async () => {
       const invalidSocialSkill: string = SOCIAL_ONLY_DECISION.replace(
         '"skillId":""',
@@ -3354,6 +3380,42 @@ export default function multiAgentLeaderPlannerTest() {
       expect(decision.actionIntent!.allowedActionIds[0]).assertEqual('payment.send');
     });
 
+    it('normalizes one omitted Action before the first mixed sequence round', 0, async () => {
+      const context = actionOwnerContext();
+      context.tools.push({
+        toolId: 'ride.estimate',
+        domain: 'ride',
+        intent: 'ride.estimate',
+        riskLevel: 'read',
+        registeredBackends: ['local_adapter'],
+        inputSchema: 'rideEstimateQuery',
+        outputSchema: 'genericToolResults',
+        actions: []
+      });
+      const missingPayment: string = MIXED_MISPLACED_ACTION_DECISION.replace(
+        ',"actionIntent":{"goal":"预览瑞幸订单，然后打开转账确认",' +
+          '"allowedActionIds":["payment.send"]}',
+        ''
+      ).replace(
+        '"continuationMode":"complete"',
+        '"continuationMode":"sequence"'
+      );
+      const model = new QueueLocalModel([missingPayment]);
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: MIXED_DATA_ACTION_QUERY },
+        context,
+        1,
+        (): boolean => true
+      );
+
+      expect(model.prompts.length).assertEqual(1);
+      expect(decision.dataTasks.length).assertEqual(1);
+      expect(decision.dataTasks[0].toolId).assertEqual('ride.estimate');
+      expect(decision.requestedCapabilityIds.join(',')).assertEqual('ride.estimate');
+      expect(decision.actionIntent === undefined).assertTrue();
+    });
+
     it('gives Action ownership repair its one permitted Data-to-Action move', 0, async () => {
       const model = new QueueLocalModel([
         actionAsDataDecision('memory.update'),
@@ -3426,6 +3488,35 @@ export default function multiAgentLeaderPlannerTest() {
         twoMisplaced,
         actionDecision('memory.update'),
         actionOwnerContext()
+      )).assertTrue();
+    });
+
+    it('rejects Action ownership repair that changes a misplaced payment goal', 0, async () => {
+      const context = actionOwnerContext();
+      context.tools.push({
+        toolId: 'ride.estimate',
+        domain: 'ride',
+        intent: 'ride.estimate',
+        riskLevel: 'read',
+        registeredBackends: ['local_adapter'],
+        inputSchema: 'rideEstimateQuery',
+        outputSchema: 'genericToolResults',
+        actions: []
+      });
+      const missingPaymentIntent: string = MIXED_MISPLACED_ACTION_DECISION.replace(
+        ',"actionIntent":{"goal":"预览瑞幸订单，然后打开转账确认",' +
+          '"allowedActionIds":["payment.send"]}',
+        ''
+      );
+      const changedPaymentGoal: string = MIXED_MISPLACED_ACTION_DECISION.replace(
+        '"goal":"预览瑞幸订单，然后打开转账确认"',
+        '"goal":"给其他收款人转账 500 美元"'
+      );
+
+      expect(await repairFails(
+        missingPaymentIntent,
+        changedPaymentGoal,
+        context
       )).assertTrue();
     });
 
