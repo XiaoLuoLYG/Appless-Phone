@@ -592,6 +592,15 @@ class C10C11PromptAwareModel implements LocalModel {
   }
 }
 
+class IntentAliasSensitiveFoodModel implements LocalModel {
+  async complete(prompt: string): Promise<string> {
+    if (prompt.indexOf('"intent":"local.food.search"') >= 0) {
+      return FOOD_COFFEE_DECISION.split('food.search').join('local.food.search');
+    }
+    return FOOD_COFFEE_DECISION;
+  }
+}
+
 class MixedOwnershipPromptAwareModel implements LocalModel {
   prompts: string[] = [];
 
@@ -1681,6 +1690,31 @@ export default function multiAgentLeaderPlannerTest() {
       expect(luckinOrder.dataTasks.length).assertEqual(0);
       expect(luckinOrder.actionIntent!.allowedActionIds.join(',')).assertEqual('luckin.order.preview');
       expect(model.prompts[0].indexOf('C10/C11 selection contract:')).assertLarger(-1);
+    });
+
+    it('keeps internal intent aliases from becoming Leader capability IDs', 0, async () => {
+      const context = c10C11Context();
+      for (let index = 0; index < context.tools.length; index++) {
+        if (context.tools[index].toolId === 'food.search') {
+          context.tools[index].intent = 'local.food.search';
+        }
+      }
+      let selectedToolId: string = 'plan_failed';
+      try {
+        const decision = await new MultiAgentLeaderPlanner(
+          new IntentAliasSensitiveFoodModel()
+        ).plan(
+          inputMessage(),
+          { text: '点一杯咖啡' },
+          context,
+          1,
+          (): boolean => true
+        );
+        selectedToolId = decision.dataTasks[0].toolId;
+      } catch (_error) {
+      }
+
+      expect(selectedToolId).assertEqual('food.search');
     });
 
     it('asks the Leader model once to correct an explicit Google Maps selection without host rewriting', 0,
