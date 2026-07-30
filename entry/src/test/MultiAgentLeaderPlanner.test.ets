@@ -239,6 +239,16 @@ const HOTEL_WITH_EXTRA_DECISION: string = '{"personaId":"travel_companion","skil
   '"toolId":"hotel.search","input":{},"required":true}],' +
   '"uiIntent":{"purpose":"展示酒店","preferredDensity":"comfortable",' +
   '"requiredSections":["hotel"]},"reasonCode":"hotel_search"}';
+const HOTEL_SEARCH_NAVIGATE_QUERY: string =
+  'Search hotels near Shenzhen Science Park from August 8 to 10 for two adults, then navigate to the first hotel.';
+const HOTEL_SEARCH_NAVIGATE_DECISION: string =
+  '{"personaId":"travel_companion","skillId":"","requestedCapabilityIds":[' +
+  '"hotel.search","hotel.navigate"],"roundAction":"execute","dataTasks":[{' +
+  '"localId":"hotel","goal":"Search matching hotels","allowedToolIds":["hotel.search"],' +
+  '"toolId":"hotel.search","input":{},"required":true}],"uiIntent":{' +
+  '"purpose":"Show hotels and open navigation","preferredDensity":"comfortable",' +
+  '"requiredSections":["hotel"]},"actionIntent":{"goal":"Navigate to the first hotel",' +
+  '"allowedActionIds":["hotel.navigate"]}}';
 const ANSWER_WITHOUT_ANSWER_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
   '"requestedCapabilityIds":[],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"reply","preferredDensity":"comfortable","requiredSections":[]},' +
@@ -542,6 +552,22 @@ class MixedOwnershipPromptAwareModel implements LocalModel {
           '"allowedActionIds":["luckin.order.preview","payment.send"]}',
         ''
       );
+  }
+}
+
+class SourceDerivedActionPromptAwareModel implements LocalModel {
+  prompts: string[] = [];
+
+  async complete(prompt: string): Promise<string> {
+    this.prompts.push(prompt);
+    const hasContract: boolean = prompt.indexOf(
+      'unavailable result-bound arguments are not a reason to postpone or omit actionIntent'
+    ) >= 0 && prompt.indexOf(
+      'requestedCapabilityIds must be exactly ["hotel.search","hotel.navigate"]'
+    ) >= 0 && prompt.indexOf(
+      'Do not replace this with maps.place.search or maps.route.open'
+    ) >= 0;
+    return hasContract ? HOTEL_SEARCH_NAVIGATE_DECISION : HOTEL_WITH_EXTRA_DECISION;
   }
 }
 
@@ -1362,6 +1388,13 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.systemPrompts[0].indexOf('exactly one JSON object') >= 0).assertTrue();
       expect(model.systemPrompts[0].indexOf('Do not include Thought') >= 0).assertTrue();
       expect(model.systemPrompts[0].indexOf('markdown') >= 0).assertTrue();
+      expect(model.systemPrompts[0].indexOf(
+        'Never place an unescaped ASCII double quote (") inside a JSON string value.'
+      ) >= 0).assertTrue();
+      expect(model.systemPrompts[0].indexOf('主题为“路线链接”') >= 0).assertTrue();
+      expect(model.prompts[0].indexOf(
+        'Never place an unescaped ASCII double quote (") inside a JSON string value.'
+      ) >= 0).assertTrue();
       expect(model.systemPrompts[0].indexOf('Omit reasonCode') >= 0).assertTrue();
       expect(model.prompts[0].indexOf('Omit reasonCode') >= 0).assertTrue();
       expect(model.prompts[0].indexOf('"reasonCode":"string"')).assertEqual(-1);
@@ -2992,6 +3025,139 @@ export default function multiAgentLeaderPlannerTest() {
         expect(thirdWithDuration.actionIntent === undefined).assertFalse();
       });
 
+    it('accepts one explicit frozen Action sequence with an output dependency', 0,
+      async () => {
+        const frozenDecision: string =
+          '{"personaId":"travel_companion","skillId":"",' +
+          '"requestedCapabilityIds":["social.post.preview","gmail.draft.create"],' +
+          '"roundAction":"execute","dataTasks":[],"uiIntent":{' +
+          '"purpose":"preview and save","preferredDensity":"comfortable",' +
+          '"requiredSections":[]},"actionIntent":{' +
+          '"goal":"Use the social preview output text as the Gmail draft body for alice@example.com.",' +
+          '"allowedActionIds":["social.post.preview","gmail.draft.create"],' +
+          '"executionMode":"frozen_sequence"}}';
+        const model = new QueueLocalModel([frozenDecision]);
+        const decision = await new MultiAgentLeaderPlanner(model).plan(
+          inputMessage(),
+          {
+            text: 'Preview the post, then save its text in a Gmail draft.'
+          },
+          actionOwnerContext(),
+          1
+        );
+
+        expect(decision.dataTasks.length).assertEqual(0);
+        expect(decision.actionIntent?.executionMode).assertEqual('frozen_sequence');
+        expect(decision.actionIntent?.allowedActionIds.join(',')).assertEqual(
+          'social.post.preview,gmail.draft.create'
+        );
+        expect(model.prompts[0].indexOf(
+          'Structured field dependencies between those Actions are allowed'
+        ) >= 0).assertTrue();
+        expect(model.prompts[0].indexOf(
+          'allowedActionIds is the exact execution order'
+        ) >= 0).assertTrue();
+      });
+
+    it('normalizes a structured Maps first step for a frozen Gmail sequence', 0,
+      async () => {
+        const frozenDecision: string =
+          '{"personaId":"travel_companion","skillId":"",' +
+          '"requestedCapabilityIds":["maps.route.open","gmail.draft.create"],' +
+          '"roundAction":"execute","dataTasks":[],"uiIntent":{' +
+          '"purpose":"open route and save link","preferredDensity":"comfortable",' +
+          '"requiredSections":[]},"actionIntent":{' +
+          '"goal":"Generate a driving route from 深圳坂田华为基地 to 深圳北站, then use the returned Maps URL ' +
+          'as the body of a Gmail draft to alice@example.com with subject 路线链接. Save only; do not send.",' +
+          '"allowedActionIds":["maps.route.open","gmail.draft.create"],' +
+          '"executionMode":"frozen_sequence","mapsRouteInput":{' +
+          '"origin":"深圳坂田华为基地","destination":"深圳北站",' +
+          '"travelMode":"driving","navigate":false}}}';
+        const model = new QueueLocalModel([frozenDecision]);
+        const decision = await new MultiAgentLeaderPlanner(model).plan(
+          inputMessage(),
+          {
+            text: '生成一条从“深圳坂田华为基地”到“深圳北站”的驾车路线，然后把路线结果返回的 Maps URL ' +
+              '作为正文保存到发给 alice@example.com 的 Gmail 草稿中，主题是“路线链接”，只保存草稿，不要发送。'
+          },
+          actionOwnerContext(),
+          1
+        );
+
+        expect(decision.dataTasks.length).assertEqual(0);
+        expect(decision.actionIntent?.allowedActionIds.join(',')).assertEqual(
+          'maps.route.open,gmail.draft.create'
+        );
+        expect(decision.normalizedActionInputText).assertEqual(
+          '从深圳坂田华为基地到深圳北站的驾车路线'
+        );
+        expect(JSON.stringify(decision.actionIntent).indexOf('mapsRouteInput'))
+          .assertEqual(-1);
+        expect(model.prompts[0].indexOf(
+          'include actionIntent.mapsRouteInput with exactly origin, destination, travelMode, and navigate'
+        ) >= 0).assertTrue();
+      });
+
+    it('fails closed when a Maps-first frozen sequence omits structured route input', 0,
+      async () => {
+        const frozenDecision: string =
+          '{"personaId":"travel_companion","skillId":"",' +
+          '"requestedCapabilityIds":["maps.route.open","gmail.draft.create"],' +
+          '"roundAction":"execute","dataTasks":[],"uiIntent":{' +
+          '"purpose":"open route and save link","preferredDensity":"comfortable",' +
+          '"requiredSections":[]},"actionIntent":{' +
+          '"goal":"Open the route and save its URL to a Gmail draft.",' +
+          '"allowedActionIds":["maps.route.open","gmail.draft.create"],' +
+          '"executionMode":"frozen_sequence"}}';
+        let failed: boolean = false;
+        try {
+          await new MultiAgentLeaderPlanner(
+            new QueueLocalModel([frozenDecision])
+          ).plan(
+            inputMessage(),
+            { text: '打开路线，然后把链接保存到 Gmail 草稿。' },
+            actionOwnerContext(),
+            1
+          );
+        } catch (error) {
+          failed = error instanceof Error &&
+            error.message === 'Leader Maps route input is malformed.';
+        }
+        expect(failed).assertTrue();
+      });
+
+    it('removes a frozen Action duplicated in Data without invoking repair', 0,
+      async () => {
+        const duplicatedDecision: string =
+          '{"personaId":"work_companion","skillId":"",' +
+          '"requestedCapabilityIds":["social.post.preview","gmail.draft.create"],' +
+          '"roundAction":"execute","dataTasks":[{"localId":"dt1",' +
+          '"goal":"Generate the preview","allowedToolIds":["social.post.preview"],' +
+          '"toolId":"social.post.preview","input":{"platform":"x",' +
+          '"operation":"publish","text":"device test"},"required":true}],' +
+          '"uiIntent":{"purpose":"preview and save","preferredDensity":"compact",' +
+          '"requiredSections":[]},"actionIntent":{"goal":' +
+          '"Use the preview text as the Gmail body for alice@example.com.",' +
+          '"allowedActionIds":["social.post.preview","gmail.draft.create"],' +
+          '"executionMode":"frozen_sequence"}}';
+        const model = new QueueLocalModel([duplicatedDecision]);
+        const decision = await new MultiAgentLeaderPlanner(model).plan(
+          inputMessage(),
+          { text: 'Preview the X post, then save its text in a Gmail draft.' },
+          actionOwnerContext(),
+          1,
+          (): boolean => true
+        );
+
+        expect(model.prompts.length).assertEqual(1);
+        expect(decision.dataTasks.length).assertEqual(0);
+        expect(decision.actionIntent?.allowedActionIds.join(',')).assertEqual(
+          'social.post.preview,gmail.draft.create'
+        );
+      expect(decision.actionIntent === undefined).assertFalse();
+      expect(decision.actionIntent!.goal.indexOf('alice@example.com') >= 0).assertTrue();
+      });
+
     it('keeps mixed read and Action-owned capabilities in their declared agents', 0, async () => {
       const context = actionOwnerContext();
       context.tools.push({
@@ -3020,6 +3186,32 @@ export default function multiAgentLeaderPlannerTest() {
       expect(decision.dataTasks[0].toolId).assertEqual('ride.estimate');
       expect(decision.actionIntent!.allowedActionIds.join(',')).assertEqual(
         'luckin.order.preview,payment.send'
+      );
+    });
+
+    it('keeps a source-derived hotel navigation Action in the first Leader decision', 0, async () => {
+      const context = planningContext();
+      for (let index = 0; index < context.tools.length; index++) {
+        if (context.tools[index].toolId === 'hotel.search') {
+          context.tools[index].actions = ['hotel.navigate'];
+        }
+      }
+      const model = new SourceDerivedActionPromptAwareModel();
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: HOTEL_SEARCH_NAVIGATE_QUERY },
+        context,
+        1
+      );
+
+      expect(model.prompts.length).assertEqual(1);
+      expect(decision.requestedCapabilityIds.join(',')).assertEqual(
+        'hotel.search,hotel.navigate'
+      );
+      expect(decision.dataTasks.length).assertEqual(1);
+      expect(decision.dataTasks[0].toolId).assertEqual('hotel.search');
+      expect(decision.actionIntent!.allowedActionIds.join(',')).assertEqual(
+        'hotel.navigate'
       );
     });
 

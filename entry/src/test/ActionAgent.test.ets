@@ -81,6 +81,9 @@ class ActionLookup implements ToolDefinitionLookup {
     if (toolId === 'social.reply.draft' || toolId === 'gmail.draft.create') {
       return definition(toolId, 'draft', []);
     }
+    if (toolId === 'social.post.preview') {
+      return definition(toolId, 'draft', []);
+    }
     if (toolId === 'memory.update') {
       return definition(toolId, 'draft', ['memory.update']);
     }
@@ -169,14 +172,27 @@ class NoClientAction implements ClientActionAuthorizer {
 
 class ExactArgs implements ActionArgsValidator {
   reject: boolean = false;
+  requireGmailBody: boolean = false;
 
-  validate(_actionId: string, args: Object): ActionValidationResult {
+  validate(actionId: string, args: Object): ActionValidationResult {
     if (this.reject || args === null || typeof args !== 'object' || Array.isArray(args)) {
       return {
         ok: false,
         code: 'ACTION_ARGS_REJECTED',
         message: 'Action args rejected.'
       };
+    }
+    if (this.requireGmailBody && actionId === 'gmail.draft.create') {
+      const values =
+        args as Record<string, Object | string | number | boolean | null | undefined>;
+      if (typeof values['body'] !== 'string' ||
+        (values['body'] as string).length === 0) {
+        return {
+          ok: false,
+          code: 'GMAIL_BODY_REQUIRED',
+          message: 'Gmail body must be available after input binding.'
+        };
+      }
     }
     return {
       ok: true,
@@ -372,6 +388,63 @@ class MixedVirtualIntentResolver implements VirtualActionIntentResolver {
   }
 }
 
+class SocialPreviewVirtualIntentResolver implements VirtualActionIntentResolver {
+  readonly actionIds: string[] = [];
+
+  async resolve(request: ActionPlanRequestPayload): Promise<VirtualActionIntent | null> {
+    if (request.virtual !== true || request.allowedActionIds.length !== 1) {
+      return null;
+    }
+    const actionId = request.allowedActionIds[0];
+    this.actionIds.push(actionId);
+    if (actionId !== 'social.post.preview') {
+      return null;
+    }
+    return {
+      sourceToolId: 'virtual.action-intent',
+      offer: {
+        offerId: 'initial-action:social.post.preview',
+        actionId,
+        label: 'Preview post',
+        variant: 'primary',
+        args: JSON.parse(
+          '{"platform":"x","operation":"publish","text":"binding smoke"}'
+        ) as Object
+      },
+      autoRun: true
+    };
+  }
+}
+
+function frozenSocialGmailPlan(): ActionPlanDraft {
+  return {
+    planId: 'model-plan',
+    runId: 'model-run',
+    label: 'Preview and save draft',
+    steps: [{
+      stepId: 'preview',
+      actionId: 'social.post.preview',
+      offerId: 'initial-action:social.post.preview',
+      args: JSON.parse(
+        '{"platform":"x","operation":"publish","text":"binding smoke"}'
+      ) as Object,
+      inputFrom: []
+    }, {
+      stepId: 'save-draft',
+      actionId: 'gmail.draft.create',
+      offerId: null,
+      args: JSON.parse(
+        '{"to":["alice@example.com"],"subject":"Post preview"}'
+      ) as Object,
+      inputFrom: [{
+        target: '/body',
+        stepId: 'preview',
+        path: '/data/socialHub/publication/text'
+      }]
+    }]
+  };
+}
+
 async function composedOffers(
   data: DataResult,
   _context: ActionOfferContext
@@ -401,10 +474,13 @@ function compiledPlan(firstArgs: Object = new Object()): ActionPlanDraft {
     label: '生成并保存',
     steps: [{
       stepId: 'generate',
+      offerId: 'offer-generate',
       actionId: 'social.reply.draft',
-      args: firstArgs
+      args: firstArgs,
+      inputFrom: []
     }, {
       stepId: 'save',
+      offerId: 'offer-save',
       actionId: 'gmail.draft.create',
       args: new Object(),
       inputFrom: [{
@@ -426,8 +502,10 @@ function singleOfferPlan(
     label: '生成回复',
     steps: [{
       stepId: 'generate',
+      offerId: 'offer-generate',
       actionId: 'social.reply.draft',
-      args: new Object()
+      args: new Object(),
+      inputFrom: []
     }]
   };
 }
@@ -844,6 +922,122 @@ export default function actionAgentTest() {
       agent.stop();
       observer.close();
     });
+
+    it('compiles a frozen zero-Data sequence and binds the first output into Gmail', 0,
+      async () => {
+        const bus = new LinkedMessageBus();
+        const compiler = new ScriptedActionPlanCompiler(frozenSocialGmailPlan());
+        const virtualResolver = new SocialPreviewVirtualIntentResolver();
+        const executor = new RecordingRegisteredExecutor();
+        const validator = new ExactArgs();
+        validator.requireGmailBody = true;
+        executor.results = [
+          success(
+            '{"data":{"socialHub":{"publication":{"text":"runtime preview"}}}}'
+          ),
+          success('{"draftId":"draft-1"}')
+        ];
+        const agent = new ActionAgent(
+          bus,
+          catalog(new ActionLookup(), new ExactActionSurface(), validator),
+          noOffers,
+          executor,
+          compiler,
+          virtualResolver
+        );
+        const observer = bus.openReader();
+        agent.start();
+
+        bus.publish(message(
+          AgentMessageType.ACTION_PLAN_REQUEST,
+          {
+            uiTaskId: 'input-1:round-1:virtual',
+            dataTaskIds: [],
+            goal: 'Preview a post, then use the preview text as the Gmail draft body.',
+            allowedActionIds: ['social.post.preview', 'gmail.draft.create'],
+            executionMode: 'frozen_sequence',
+            personaId: 'default_companion',
+            skillId: '',
+            inputText: 'preview and save post: binding smoke',
+            virtual: true
+          } as ActionPlanRequestPayload,
+          'turn-1',
+          'frozen-virtual-request'
+        ));
+        const observed = await receiveUntilResult(observer);
+        const result = observed[observed.length - 1].payload as ActionResultPayload;
+
+        expect(result.status).assertEqual('success');
+        expect(result.completedStepIds.join(',')).assertEqual('preview,save-draft');
+        expect(virtualResolver.actionIds.join(',')).assertEqual('social.post.preview');
+        expect(compiler.goals.length).assertEqual(1);
+        expect(compiler.offerIds.join(',')).assertEqual(
+          'initial-action:social.post.preview'
+        );
+        expect(compiler.allowedIds.join(',')).assertEqual(
+          'social.post.preview,gmail.draft.create'
+        );
+        expect(executor.actionIds.join(',')).assertEqual(
+          'social.post.preview,gmail.draft.create'
+        );
+        expect(executor.serializedArgs[1]).assertEqual(
+          '{"to":["alice@example.com"],"subject":"Post preview","body":"runtime preview"}'
+        );
+        expect(result.surfaceId).assertEqual('virtual:frozen-virtual-request');
+        expect(result.planId).assertEqual('direct:virtual:frozen-virtual-request');
+        expect(messagesOfType(observed, AgentMessageType.ACTION_PLAN_DRAFT).length)
+          .assertEqual(0);
+        expect(messagesOfType(observed, AgentMessageType.ACTION_PLAN_READY).length)
+          .assertEqual(0);
+        agent.stop();
+        observer.close();
+      });
+
+    it('fails a frozen zero-Data sequence closed when the compiler omits a step', 0,
+      async () => {
+        const incomplete = frozenSocialGmailPlan();
+        incomplete.steps.splice(1, 1);
+        const bus = new LinkedMessageBus();
+        const compiler = new ScriptedActionPlanCompiler(incomplete);
+        const virtualResolver = new SocialPreviewVirtualIntentResolver();
+        const executor = new RecordingRegisteredExecutor();
+        const agent = new ActionAgent(
+          bus,
+          catalog(new ActionLookup()),
+          noOffers,
+          executor,
+          compiler,
+          virtualResolver
+        );
+        const observer = bus.openReader();
+        agent.start();
+
+        bus.publish(message(
+          AgentMessageType.ACTION_PLAN_REQUEST,
+          {
+            uiTaskId: 'input-1:round-1:virtual',
+            dataTaskIds: [],
+            goal: 'Preview and save.',
+            allowedActionIds: ['social.post.preview', 'gmail.draft.create'],
+            executionMode: 'frozen_sequence',
+            personaId: 'default_companion',
+            skillId: '',
+            inputText: 'preview and save post: binding smoke',
+            virtual: true
+          } as ActionPlanRequestPayload,
+          'turn-1',
+          'incomplete-frozen-request'
+        ));
+        const observed = await receiveUntilResult(observer);
+        const result = observed[observed.length - 1].payload as ActionResultPayload;
+
+        expect(result.status).assertEqual('error');
+        expect(result.errorCode).assertEqual('ACTION_PLAN_SEQUENCE_MISMATCH');
+        expect(executor.actionIds.length).assertEqual(0);
+        expect(compiler.goals.length).assertEqual(1);
+        agent.stop();
+        observer.close();
+      });
 
     it('compiles a composed request from ordered current offers before READY', 0, async () => {
       const bus = new LinkedMessageBus();

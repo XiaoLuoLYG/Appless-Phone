@@ -16,7 +16,9 @@ import {
   LeaderToolMetadata,
   LeaderUiIntent,
   LocalModel,
+  MapsRouteArgs,
   MAX_LEADER_DATA_TASKS_PER_ROUND,
+  normalizeMapsRouteInput,
   normalizedCalendarArgsForPrompt,
   ObservationDigest,
   leaderActionCapabilityIds,
@@ -39,6 +41,10 @@ const DECISION_KEYS: string[] = [
 const DATA_TASK_KEYS: string = 'allowedToolIds,goal,input,localId,required,toolId';
 const UI_INTENT_KEYS: string = 'preferredDensity,purpose,requiredSections';
 const ACTION_INTENT_KEYS: string = 'allowedActionIds,goal';
+const FROZEN_ACTION_INTENT_KEYS: string =
+  'allowedActionIds,executionMode,goal';
+const FROZEN_MAPS_ACTION_INTENT_KEYS: string =
+  'allowedActionIds,executionMode,goal,mapsRouteInput';
 const ANSWER_FIELD_RULE: string = 'For roundAction answer or clarify, include answer as a non-empty string. ' +
   'For roundAction execute, omit answer.';
 const REASON_CODE_FIELD_RULE: string = 'Omit reasonCode. The host creates deterministic diagnostic reason metadata.';
@@ -63,11 +69,19 @@ const REQUEST_SCOPE_CONTRACT: string =
   'mail or email. Explicit multi-domain requests remain valid and should keep independent tasks in the same round. ' +
   'Before returning JSON, silently scope-check every requestedCapabilityId, Data task, allowed tool, and Action ' +
   'against that closed set; do not output the check.';
+const JSON_STRING_SAFETY_CONTRACT: string =
+  'The response must be valid JSON accepted by JSON.parse(). Never place an unescaped ASCII double quote (") ' +
+  'inside a JSON string value. When repeating quoted user text inside a string value, preserve or convert it to ' +
+  'Chinese quotation marks “”, or escape each inner ASCII double quote as \\". For example, do not emit the ' +
+  'invalid goal value 主题为"路线链接"; emit 主题为“路线链接” instead. Before responding, silently verify that every ' +
+  'JSON string is correctly escaped; do not output the verification.';
 const LEADER_SYSTEM_PROMPT: string = 'Return exactly one JSON object and nothing else. ' +
-  'Do not include Thought, markdown, or code fences. ' + ANSWER_FIELD_RULE + ' ' + REASON_CODE_FIELD_RULE + ' ' +
-  CONTINUATION_MODE_FIELD_RULE + ' ' + REQUEST_SCOPE_CONTRACT + ' ' + FULL_DECISION_CONTRACT;
+  'Do not include Thought, markdown, or code fences. ' + JSON_STRING_SAFETY_CONTRACT + ' ' +
+  ANSWER_FIELD_RULE + ' ' + REASON_CODE_FIELD_RULE + ' ' + CONTINUATION_MODE_FIELD_RULE + ' ' +
+  REQUEST_SCOPE_CONTRACT + ' ' + FULL_DECISION_CONTRACT;
 const REPAIR_INSTRUCTION: string = 'Correction: previous decision rejected by strict schema. ' +
-  'Return one corrected decision matching the schema exactly. ' + FULL_DECISION_CONTRACT;
+  'Return one corrected decision matching the schema exactly. ' + JSON_STRING_SAFETY_CONTRACT + ' ' +
+  FULL_DECISION_CONTRACT;
 const COMPLETED_TOOL_REUSE_ERROR: string = 'LEADER_COMPLETED_TOOL_REUSE';
 const UNBOUND_LATER_TOOL_ERROR: string = 'LEADER_UNBOUND_LATER_TOOL';
 const SAME_ROUND_DEPENDENCY_ERROR: string = 'LEADER_SAME_ROUND_DEPENDENCY';
@@ -190,12 +204,22 @@ const C10_C11_SELECTION_CONTRACT: string =
   'or order status from generic coffee, a product/price question, or saved preference text.';
 const SOCIAL_SELECTION_CONTRACT: string =
   'Social selection contract: Reddit/LinkedIn/Instagram/public community reading -> ' +
-  'social.community.search. Standalone public post draft -> social.post.preview. ' +
+  'social.community.search. A public post draft or public post preview step inside a larger requested workflow ' +
+  'uses social.post.preview. ' +
   'social.reply.draft only after a selected real inbox/feed item. social.post.preview is preview-only; ' +
   'never infer or invoke a provider publish write from the preview request.';
 const AGGREGATE_MEDIA_SELECTION_CONTRACT: string =
   'Aggregate media selection contract: A request for both 新闻 and 讨论 about the same topic uses exactly ' +
   'media.aggregate.search, not social.community.search.';
+const SOURCE_DERIVED_ACTION_CONTRACT: string =
+  'Source-derived Action contract: when the current request asks for a Data query and an Action declared by that ' +
+  'Data tool, include both in the same Leader decision. Put the producer in dataTasks and the declared Action in ' +
+  'actionIntent; unavailable result-bound arguments are not a reason to postpone or omit actionIntent. The Host ' +
+  'retains actionIntent until real Data results and Action offers are available, and ActionAgent binds only real ' +
+  'offer arguments. For a request to search hotels and navigate to the first result, requestedCapabilityIds must ' +
+  'be exactly ["hotel.search","hotel.navigate"], dataTasks must contain hotel.search, and ' +
+  'actionIntent.allowedActionIds must be ["hotel.navigate"]. Do not replace this with maps.place.search or ' +
+  'maps.route.open when hotel.search declares hotel.navigate.';
 const OBSERVATION_REUSE_CONTRACT: string =
   'Never schedule a listed tool again in a later round, regardless of success, partial, empty, or error status. ' +
   'Data Agent owns same-tool adapter fallback and retry. A different later-round tool is allowed only when it ' +
@@ -205,12 +229,25 @@ const DATA_SCOPE_CONTRACT: string =
   'Put multiple independent sources in the same round. After round 1, every Data task input must contain an ' +
   'exact entity reference from a successful or partial earlier current-turn observation.';
 const EXPLICIT_SERIAL_SEQUENCE_CONTRACT: string =
-  'Explicit sequence contract: infer whether the user explicitly ordered distinct capabilities sequentially. ' +
-  'Execute exactly the first not-yet-completed capability, set continuationMode to sequence while another ordered ' +
-  'step remains, and defer every later Data task and Action to later planning rounds in the requested order. ' +
-  'When Context.orderedContinuationAuthorized is true, the host has authorized the next ordered capability ' +
-  'even when it ' +
-  'does not consume an entity ID from the prior result.';
+  'Explicit sequence contract: when the user explicitly orders two or more Action-owned capabilities and every ' +
+  'later step can run without semantic selection, branching, retry decisions, loops, or replanning, put the ' +
+  'complete ordered Action sequence in one actionIntent and set executionMode to "frozen_sequence". Structured ' +
+  'field dependencies between those Actions are allowed; ActionAgent compiles them, so preserve the dependency ' +
+  'in actionIntent.goal but never invent inputFrom or Action args. In frozen_sequence, allowedActionIds is the ' +
+  'exact execution order. Never duplicate an Action-owned ID from that actionIntent in dataTasks. Do not use ' +
+  'frozen_sequence for dependent Data work or whenever a later step needs judgment from an observed result. ' +
+  'For every other explicitly ordered sequence, execute exactly the first not-yet-completed capability, set ' +
+  'continuationMode to sequence while another ordered step remains, and defer every later Data task and Action ' +
+  'to later planning rounds in the requested order. When Context.orderedContinuationAuthorized is true, the host ' +
+  'has authorized the next ordered capability even when it does not consume an entity ID from the prior result.';
+const MAPS_FROZEN_ENTRY_CONTRACT: string =
+  'Maps frozen-sequence entry contract: when dataTasks is [] and the first allowedActionId is maps.route.open, ' +
+  'include actionIntent.mapsRouteInput with exactly origin, destination, travelMode, and navigate. Copy origin ' +
+  'and destination only from the current user request. travelMode must be driving, walking, bicycling, transit, ' +
+  'or two-wheeler; use driving when the user does not specify a mode. navigate is true only when the user asks ' +
+  'to start navigation, otherwise false. This field supplies only the first Action input; keep the complete ' +
+  'ordered workflow and all downstream constants or dependencies in actionIntent.goal. Omit mapsRouteInput for ' +
+  'every other actionIntent.';
 
 interface JsonContainerFrame {
   object: boolean;
@@ -223,6 +260,25 @@ interface LeaderRepairScope {
   dataCapabilityIds: string[];
   actionCapabilityIds: string[];
   roundAction: LeaderRoundAction;
+}
+
+interface ParsedLeaderActionIntent {
+  intent: LeaderActionIntent;
+  normalizedActionInputText?: string;
+}
+
+function mapsRouteActionInput(args: MapsRouteArgs): string {
+  let routeLabel: string = '的驾车路线';
+  if (args.travelMode === 'walking') {
+    routeLabel = '的步行路线';
+  } else if (args.travelMode === 'bicycling' || args.travelMode === 'two-wheeler') {
+    routeLabel = '的骑行路线';
+  } else if (args.travelMode === 'transit') {
+    routeLabel = '的公交路线';
+  }
+  const navigate: string = args.navigate === true ? '并导航' : '';
+  return '从' + (args.origin as string) + '到' +
+    (args.destination as string) + routeLabel + navigate;
 }
 
 export class MultiAgentLeaderPlanner implements LeaderPlanner {
@@ -260,7 +316,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     const currentLocalDate: string = trustedCurrentLocalDate === undefined ?
       this.currentLocalDate() : trustedCurrentLocalDate;
     const prompt: string = this.prompt(message, input, context, round, currentLocalDate);
-    const output: string = await this.completeBounded(prompt);
+    const rawOutput: string = await this.completeBounded(prompt);
+    const output: string = this.normalizeFrozenActionOwnedDuplicates(rawOutput, context);
     let sameRoundProducerTaskToolIds: string[] = [];
     let sameRoundConsumerTaskToolIds: string[] = [];
     let rejectedDecision: LeaderDecision | null = null;
@@ -657,6 +714,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       return original === undefined && repaired === undefined;
     }
     return original.goal === repaired.goal &&
+      original.executionMode === repaired.executionMode &&
       this.sameStrings(original.allowedActionIds, repaired.allowedActionIds);
   }
 
@@ -803,6 +861,70 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     this.rememberScopeId(misplacedIds[0], expectedActionIds);
     return this.sameStringSet(expectedDataIds, repairedScope.dataCapabilityIds) &&
       this.sameStringSet(expectedActionIds, repairedScope.actionCapabilityIds);
+  }
+
+  private normalizeFrozenActionOwnedDuplicates(
+    output: string,
+    context: LeaderPlanningContext
+  ): string {
+    const raw = this.rawDecisionObject(output);
+    if (raw === null) {
+      return output;
+    }
+    const rawAction = raw['actionIntent'];
+    const rawTasks = raw['dataTasks'];
+    if (rawAction === null || typeof rawAction !== 'object' || Array.isArray(rawAction) ||
+      !Array.isArray(rawTasks)) {
+      return output;
+    }
+    const action = rawAction as
+      Record<string, Object | string | number | boolean | null | undefined>;
+    if (action['executionMode'] !== 'frozen_sequence') {
+      return output;
+    }
+    const actionIds: string[] | null = this.scopeStrings(action['allowedActionIds']);
+    if (actionIds === null || actionIds.length < 2) {
+      return output;
+    }
+    const retained: Object[] = [];
+    let changed: boolean = false;
+    const tasks = rawTasks as Object[];
+    for (let index = 0; index < tasks.length; index++) {
+      const rawTask: Object = tasks[index];
+      if (rawTask === null || typeof rawTask !== 'object' || Array.isArray(rawTask)) {
+        retained.push(rawTask);
+        continue;
+      }
+      const task = rawTask as
+        Record<string, Object | string | number | boolean | null | undefined>;
+      const toolId = task['toolId'];
+      const allowedIds: string[] | null = this.scopeStrings(task['allowedToolIds']);
+      let exactDuplicate: boolean = typeof toolId === 'string' &&
+        actionIds.indexOf(toolId) >= 0 &&
+        this.actionOnlyCapability(context, toolId) &&
+        allowedIds !== null &&
+        allowedIds.length > 0;
+      if (exactDuplicate && allowedIds !== null) {
+        for (let allowedIndex = 0; allowedIndex < allowedIds.length; allowedIndex++) {
+          const allowedId: string = allowedIds[allowedIndex];
+          if (actionIds.indexOf(allowedId) < 0 ||
+            !this.actionOnlyCapability(context, allowedId)) {
+            exactDuplicate = false;
+            break;
+          }
+        }
+      }
+      if (exactDuplicate) {
+        changed = true;
+      } else {
+        retained.push(rawTask);
+      }
+    }
+    if (!changed) {
+      return output;
+    }
+    raw['dataTasks'] = retained;
+    return JSON.stringify(raw);
   }
 
   private actionOnlyCapability(context: LeaderPlanningContext, toolId: string): boolean {
@@ -1450,6 +1572,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     const result: string = [
       'You are the Appless Leader Agent.',
       'Return exactly one LeaderDecision JSON object.',
+      JSON_STRING_SAFETY_CONTRACT,
       REQUEST_SCOPE_CONTRACT,
       'LeaderDecision schema: {"personaId":"string","skillId":"string",' +
         '"requestedCapabilityIds":["registered tool or action ID"],' +
@@ -1458,7 +1581,11 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         '{"localId":"string","goal":"string","allowedToolIds":["string"],' +
         '"toolId":"string","input":{},"required":true}],"uiIntent":{' +
         '"purpose":"string","preferredDensity":"string","requiredSections":["string"]},' +
-        '"actionIntent":{"goal":"string","allowedActionIds":["string"]} optional,' +
+        '"actionIntent":{"goal":"string","allowedActionIds":["string"],' +
+        '"executionMode":"frozen_sequence" optional,"mapsRouteInput":{' +
+        '"origin":"string","destination":"string",' +
+        '"travelMode":"driving|walking|bicycling|transit|two-wheeler",' +
+        '"navigate":boolean} optional} optional,' +
         '"answer":"required non-empty string for answer|clarify; omit for execute"}.',
       ANSWER_FIELD_RULE,
       REASON_CODE_FIELD_RULE,
@@ -1472,7 +1599,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         'their requested registered capability. For execute, requestedCapabilityIds must be exactly ' +
         'the unique union of every selected Data tool, allowed tool, and Action ID. In other words, ' +
         'requestedCapabilityIds is the exact current-round execution union, not a list of future-round tools.',
-      'Tasks in this round must be independent. Put dependent work in a later round.',
+      'Data tasks in this round must be independent. Put dependent Data work and any work requiring observation, ' +
+        'judgment, or replanning in a later round. This does not prohibit a frozen_sequence of Action-owned steps.',
       'For dependent serial tools, emit exactly one data task in this planning round.\n' +
         'Wait for its Observation, then emit the next task with args derived from that real output.\n' +
         'Never pre-fill placeId, eventId, threadId, messageId, orderId, or provider receipt.',
@@ -1485,6 +1613,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         'the exact union of dataTasks and actionIntent for the current round.',
       'When an Action requires a real provider ID, plan the necessary Data-owned read task first and the ' +
         'Action-owned capability in actionIntent. Use only a real observed ID in a later round; never invent one.',
+      SOURCE_DERIVED_ACTION_CONTRACT,
       'Available Data owner IDs: ' + JSON.stringify(dataOwnerIds),
       'Available Action owner IDs: ' + JSON.stringify(actionOwnerIds),
       'Maximum Data tasks in one round: ' + MAX_LEADER_DATA_TASKS_PER_ROUND.toString() + '.',
@@ -1500,7 +1629,9 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       OBSERVATION_REUSE_CONTRACT,
       DATA_SCOPE_CONTRACT,
       EXPLICIT_SERIAL_SEQUENCE_CONTRACT,
-      'Never emit provider facts, action args, A2UI, credentials, or unregistered tool IDs.',
+      MAPS_FROZEN_ENTRY_CONTRACT,
+      'Never emit provider facts, downstream Action args, inputFrom, A2UI, credentials, or unregistered tool IDs. ' +
+        'The only permitted first-Action args are mapsRouteInput when the Maps frozen-sequence entry contract requires it.',
       hotelSearchPlanningContract(currentLocalDate),
       'Maximum planning rounds: 3.',
       'Round: ' + round.toString(),
@@ -1638,8 +1769,11 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       context
     );
     const actionValue = values['actionIntent'];
-    const actionIntent: LeaderActionIntent | null = actionValue === undefined ? null :
-      this.actionIntent(actionValue, context);
+    const parsedActionIntent: ParsedLeaderActionIntent | null =
+      actionValue === undefined ? null :
+        this.actionIntent(actionValue, context, tasks.length === 0);
+    const actionIntent: LeaderActionIntent | null =
+      parsedActionIntent === null ? null : parsedActionIntent.intent;
     if ((selectedAction === 'execute' && tasks.length === 0 && actionIntent === null) ||
       (selectedAction !== 'execute' && tasks.length !== 0)) {
       throw new Error('Leader round action does not match its Data tasks.');
@@ -1679,6 +1813,10 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     if (actionIntent !== null) {
       decision.actionIntent = actionIntent;
     }
+    if (parsedActionIntent?.normalizedActionInputText !== undefined) {
+      decision.normalizedActionInputText =
+        parsedActionIntent.normalizedActionInputText;
+    }
     return decision;
   }
 
@@ -1696,7 +1834,10 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     const actionValues =
       rawAction as Record<string, Object | string | number | boolean | null | undefined>;
     const rawActionIds = actionValues['allowedActionIds'];
-    if (Object.keys(rawAction).sort().join(',') !== ACTION_INTENT_KEYS ||
+    const actionKeys: string = Object.keys(rawAction).sort().join(',');
+    if ((actionKeys !== ACTION_INTENT_KEYS &&
+      actionKeys !== FROZEN_ACTION_INTENT_KEYS &&
+      actionKeys !== FROZEN_MAPS_ACTION_INTENT_KEYS) ||
       !Array.isArray(rawActionIds)) {
       return;
     }
@@ -1907,15 +2048,23 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
 
   private actionIntent(
     raw: Object | string | number | boolean | null | undefined,
-    context: LeaderPlanningContext
-  ): LeaderActionIntent {
-    if (raw === null || raw === undefined || typeof raw !== 'object' || Array.isArray(raw) ||
-      Object.keys(raw).sort().join(',') !== ACTION_INTENT_KEYS) {
+    context: LeaderPlanningContext,
+    zeroData: boolean
+  ): ParsedLeaderActionIntent {
+    if (raw === null || raw === undefined || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new Error('Leader action intent contains missing or unknown fields.');
+    }
+    const keys: string = Object.keys(raw).sort().join(',');
+    if (keys !== ACTION_INTENT_KEYS &&
+      keys !== FROZEN_ACTION_INTENT_KEYS &&
+      keys !== FROZEN_MAPS_ACTION_INTENT_KEYS) {
       throw new Error('Leader action intent contains missing or unknown fields.');
     }
     const values = raw as Record<string, Object | string | number | boolean | null | undefined>;
     const goal = values['goal'];
     const allowedActionIds = values['allowedActionIds'];
+    const executionMode = values['executionMode'];
+    const mapsRouteInput = values['mapsRouteInput'];
     if (typeof goal !== 'string' || goal.trim().length === 0 ||
       !Array.isArray(allowedActionIds) || allowedActionIds.length === 0) {
       throw new Error('Leader action intent fields are malformed.');
@@ -1926,7 +2075,49 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         throw new Error('Leader action allowlist contains an unregistered action ID.');
       }
     }
-    return { goal, allowedActionIds: ids };
+    if (executionMode !== undefined &&
+      (executionMode !== 'frozen_sequence' || ids.length < 2)) {
+      throw new Error('Leader frozen action sequence must contain at least two ordered Actions.');
+    }
+    const result: LeaderActionIntent = { goal, allowedActionIds: ids };
+    if (executionMode === 'frozen_sequence') {
+      result.executionMode = 'frozen_sequence';
+    }
+    const requiresMapsRouteInput: boolean = zeroData &&
+      executionMode === 'frozen_sequence' &&
+      ids[0] === 'maps.route.open';
+    if (!requiresMapsRouteInput) {
+      if (mapsRouteInput !== undefined) {
+        throw new Error('Leader Maps route input is not allowed for this action intent.');
+      }
+      return { intent: result };
+    }
+    if (mapsRouteInput === null || mapsRouteInput === undefined ||
+      typeof mapsRouteInput !== 'object' || Array.isArray(mapsRouteInput)) {
+      throw new Error('Leader Maps route input is malformed.');
+    }
+    const routeValues = mapsRouteInput as
+      Record<string, Object | string | number | boolean | null | undefined>;
+    const routeTravelMode = routeValues['travelMode'];
+    if (Object.keys(mapsRouteInput).sort().join(',') !==
+        'destination,navigate,origin,travelMode' ||
+      typeof routeValues['origin'] !== 'string' ||
+      typeof routeValues['destination'] !== 'string' ||
+      typeof routeTravelMode !== 'string' ||
+      ['driving', 'walking', 'bicycling', 'transit', 'two-wheeler']
+        .indexOf(routeTravelMode) < 0 ||
+      typeof routeValues['navigate'] !== 'boolean') {
+      throw new Error('Leader Maps route input is malformed.');
+    }
+    const routeArgs: MapsRouteArgs | null =
+      normalizeMapsRouteInput(mapsRouteInput as Object);
+    if (routeArgs === null) {
+      throw new Error('Leader Maps route input is malformed.');
+    }
+    return {
+      intent: result,
+      normalizedActionInputText: mapsRouteActionInput(routeArgs)
+    };
   }
 
   private uniqueStrings(values: Object[], label: string): string[] {

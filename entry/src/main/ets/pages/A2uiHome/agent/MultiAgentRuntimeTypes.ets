@@ -13,6 +13,7 @@ import {
   LeaderPlanningContext,
   LinkedMessageBus,
   RegisteredActionExecutor,
+  SchemaAwareActionDefinitionLookup,
   TurnResultStatus,
   UiLayoutPlanner,
   UiSurfaceWriter,
@@ -62,6 +63,7 @@ export interface MultiAgentRuntimeOptions {
   conversationId?: string;
   dataPlanner?: DataTaskPlanner;
   actionCompiler?: ActionPlanCompiler;
+  actionDefinitions?: SchemaAwareActionDefinitionLookup;
   virtualActionResolver?: VirtualActionIntentResolver;
   submitTimeoutMs?: number;
   actionTimeoutMs?: number;

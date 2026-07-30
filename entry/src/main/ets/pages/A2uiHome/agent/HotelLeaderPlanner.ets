@@ -9,6 +9,7 @@ import {
   LeaderPlanningContext,
   LeaderToolMetadata,
   LocalModel,
+  aiLogInfo,
   extractJsonObjects,
   parseHotelSearchRequest
 } from '@loop/agent-core';
@@ -58,6 +59,11 @@ export interface HotelPlannerIdFactory {
 
 export type HotelLocalDateProvider = () => string;
 
+interface HotelDestinationEvidence {
+  destination: string;
+  rule: string;
+}
+
 export function hotelSearchPlanningContract(currentLocalDate: string): string {
   return 'Current local date: ' + currentLocalDate + '. Resolve relative dates from this date.\n' +
     'For hotel.search, input must contain exactly originQuery, place, placeType, countryCode, ' +
@@ -105,31 +111,102 @@ function chineseCount(value: string): number {
   return high * 10 + low;
 }
 
-function explicitHotelDestination(query: string): string {
+function hotelDestinationEvidence(
+  match: RegExpExecArray | null,
+  rule: string
+): HotelDestinationEvidence | null {
+  if (match === null) {
+    return null;
+  }
+  const destination: string = match[1].trim().replace(/^的/, '').replace(/的$/, '');
+  if (destination.length === 0 || destination.length > 80 ||
+    /[0-9]{1,2}月|[0-9]{1,2}日|成人|儿童|孩子|小孩|间房|住.+晚/.test(destination)) {
+    return null;
+  }
+  return { destination, rule };
+}
+
+function explicitHotelDestinationEvidence(query: string): HotelDestinationEvidence | null {
   const nearby =
-    /(?:到|至)(?:[0-9]{4}年)?(?:[0-9]{1,2}月)?[0-9]{1,2}日([^，,]+)附近的酒店/.exec(query);
-  if (nearby !== null) {
-    return nearby[1].trim();
+    /(?:到|至)(?:[0-9]{4}年)?(?:[0-9]{1,2}月)?[0-9]{1,2}日(?:的)?([^，,。！？]+?)(?:附近|周边|一带)(?:的)?酒店/.exec(query);
+  const nearbyEvidence = hotelDestinationEvidence(nearby, 'date_before_nearby_hotel');
+  if (nearbyEvidence !== null) {
+    return nearbyEvidence;
   }
   const direct =
-    /(?:到|至)(?:[0-9]{4}年)?(?:[0-9]{1,2}月)?[0-9]{1,2}日([^，,]+)的酒店/.exec(query);
-  if (direct !== null) {
-    return direct[1].trim();
+    /(?:到|至)(?:[0-9]{4}年)?(?:[0-9]{1,2}月)?[0-9]{1,2}日(?:的)?([^，,。！？]+?)(?:的)?酒店/.exec(query);
+  const directEvidence = hotelDestinationEvidence(direct, 'date_before_hotel');
+  if (directEvidence !== null) {
+    return directEvidence;
   }
   const cityStay =
-    /(?:[0-9]{4}年)?[0-9]{1,2}月[0-9]{1,2}日([^，,]+?)住[0-9一二两三四五六七八九十]+晚的酒店/.exec(query);
-  if (cityStay !== null) {
-    return cityStay[1].trim();
+    /(?:[0-9]{4}年)?[0-9]{1,2}月[0-9]{1,2}日([^，,。！？]+?)住[0-9一二两三四五六七八九十]+晚的酒店/.exec(query);
+  const cityStayEvidence = hotelDestinationEvidence(cityStay, 'date_destination_stay');
+  if (cityStayEvidence !== null) {
+    return cityStayEvidence;
   }
-  const simpleCity = /^(?:帮我找|请帮我找)([^，,]+?)酒店$/.exec(query);
-  if (simpleCity !== null) {
-    return simpleCity[1].trim();
+  const checkInNearby =
+    /(?:入住|住在)([^，,。！？]+?)(?:附近|周边|一带)(?:的)?酒店/.exec(query);
+  const checkInNearbyEvidence = hotelDestinationEvidence(checkInNearby, 'checkin_nearby_hotel');
+  if (checkInNearbyEvidence !== null) {
+    return checkInNearbyEvidence;
+  }
+  const destinationFirstNearby =
+    /^(?:(?:帮我|请帮我)?(?:找|搜索|查找|查)|我想找)?(?:在)?([^，,。！？]+?)(?:附近|周边|一带)(?:的)?酒店(?:[，,。！？]|$)/.exec(query);
+  const destinationFirstNearbyEvidence =
+    hotelDestinationEvidence(destinationFirstNearby, 'destination_before_date_nearby_hotel');
+  if (destinationFirstNearbyEvidence !== null) {
+    return destinationFirstNearbyEvidence;
+  }
+  const nearbyClause =
+    /(?:^|[，,。！？])(?:在)?([^，,。！？]+?)(?:附近|周边|一带)(?:[，,。！？]|$)/.exec(query);
+  const nearbyClauseEvidence = hotelDestinationEvidence(nearbyClause, 'standalone_nearby_clause');
+  if (nearbyClauseEvidence !== null) {
+    return nearbyClauseEvidence;
+  }
+  const simpleCity =
+    /^(?:(?:帮我|请帮我)?(?:找|搜索|查找|查)|我想找)?(?:在)?([^，,。！？]+?)(?:的)?酒店(?:[，,。！？]|$)/.exec(query);
+  const simpleCityEvidence = hotelDestinationEvidence(simpleCity, 'destination_before_date_hotel');
+  if (simpleCityEvidence !== null) {
+    return simpleCityEvidence;
   }
   const englishCity = /\bbook\s+(?:a|an)\s+([a-z]+)\s+hotel\b/i.exec(query);
   if (englishCity !== null && englishCity[1].toLowerCase() === 'shenzhen') {
-    return '深圳';
+    return { destination: '深圳', rule: 'english_city' };
   }
-  return '';
+  return null;
+}
+
+function explicitHotelDestination(query: string): string {
+  const evidence: HotelDestinationEvidence | null =
+    explicitHotelDestinationEvidence(query);
+  return evidence === null ? '' : evidence.destination;
+}
+
+function normalizedHotelDestination(value: string): string {
+  return value.trim()
+    .replace(/\s+/g, '')
+    .replace(/[，,。！？]/g, '')
+    .replace(/(?:附近|周边|一带)$/, '');
+}
+
+function hotelDestinationLogValue(value: string): string {
+  return value.replace(/[\r\n\t]/g, ' ').replace(/=/g, '＝').substring(0, 80);
+}
+
+function logHotelDestinationMismatch(query: string, llmDestination: string): void {
+  const evidence: HotelDestinationEvidence | null =
+    explicitHotelDestinationEvidence(query);
+  if (evidence === null ||
+    normalizedHotelDestination(evidence.destination) ===
+      normalizedHotelDestination(llmDestination)) {
+    return;
+  }
+  aiLogInfo(
+    '[AIPhone][HotelDestinationComparison] status=mismatch rule=' + evidence.rule +
+    ' regexDestination=' + hotelDestinationLogValue(evidence.destination) +
+    ' llmDestination=' + hotelDestinationLogValue(llmDestination)
+  );
 }
 
 function normalizedHotelPlaceType(query: string, raw: HotelSearchModelArgs): string {
@@ -336,10 +413,12 @@ function normalizeHotelSearchInput(
   };
   const omittedPrefix: boolean = omittedHotelQueryPrefix(trustedQuery, modelQuery);
   if ((modelQuery !== trustedQuery && !omittedPrefix) ||
-    !explicitHotelQueryFieldsMatch(modelQuery, normalizedRaw, currentLocalDate) ||
     typeof normalizedRaw.countryCode !== 'string' ||
     normalizedRaw.countryCode.trim().length === 0) {
     throw new Error('Hotel planner output changed the query or omitted countryCode.');
+  }
+  if (typeof normalizedRaw.place === 'string' && normalizedRaw.place.trim().length > 0) {
+    logHotelDestinationMismatch(trustedQuery, normalizedRaw.place);
   }
   const trusted: HotelSearchModelArgs = {
     originQuery: trustedQuery,

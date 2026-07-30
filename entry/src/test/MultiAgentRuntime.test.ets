@@ -458,8 +458,10 @@ class RecordingActionCompiler implements ActionPlanCompiler {
       label: '查看酒店详情',
       steps: [{
         stepId: 'step-1',
+        offerId: offer.offerId,
         actionId: offer.actionId,
-        args: offer.args
+        args: offer.args,
+        inputFrom: []
       }]
     };
   }

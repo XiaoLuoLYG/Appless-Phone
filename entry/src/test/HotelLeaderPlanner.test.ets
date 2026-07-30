@@ -281,6 +281,40 @@ export default function hotelLeaderPlannerTest() {
       expect(await rejected(trustedQuery, changedPlace)).assertTrue();
     });
 
+    it('accepts common destination-before-date and date-before-destination hotel wording', 0,
+      async () => {
+        const queries: string[] = [
+          '帮我找深圳科技园附近的酒店，2位成人1间房，8月8日到10日',
+          '帮我找8月8日到10日的深圳科技园附近的酒店，2位成人1间房',
+          '深圳科技园附近，帮我找8月8日到10日的酒店，2位成人1间房',
+          '8月8日入住深圳科技园附近的酒店，2位成人1间房，住2晚'
+        ];
+        for (let index = 0; index < queries.length; index++) {
+          const query: string = queries[index];
+          const response: string = C20_DEVICE_SEARCH_JSON.replace(C20_MODEL_QUERY, query);
+          const plan = await planFor(query, response);
+          const args = plan.dataTasks[0].args as
+            Record<string, Object | string | number | boolean | null | undefined>;
+
+          expect(args.place).assertEqual('深圳科技园');
+          expect(args.placeType).assertEqual('POI');
+        }
+      });
+
+    it('keeps a valid LLM destination when regex comparison disagrees', 0, async () => {
+      const trustedQuery: string = '帮我找' + C20_MODEL_QUERY;
+      const llmMismatch: string = C20_SEARCH_JSON.replace(
+        '"place":"深圳科技园"',
+        '"place":"深圳南山区科技园"'
+      );
+      const plan = await planFor(trustedQuery, llmMismatch);
+      const args = plan.dataTasks[0].args as
+        Record<string, Object | string | number | boolean | null | undefined>;
+
+      expect(args.place).assertEqual('深圳南山区科技园');
+      expect(args.placeType).assertEqual('POI');
+    });
+
     it('accepts a polite-prefix range that crosses month and year by exactly two UTC days', 0,
       async () => {
         const trustedQuery: string = '帮我找' + CROSS_YEAR_MODEL_QUERY;

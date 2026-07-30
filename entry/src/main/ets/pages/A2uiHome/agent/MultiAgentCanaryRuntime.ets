@@ -4,7 +4,9 @@ import {
   ActionExecutionContext,
   ActionExecutionResult,
   ActionOffer,
+  ActionPlanningModel,
   ActionPlanRequestPayload,
+  ActionPlanCompiler,
   ActionValidationResult,
   A2uiAction,
   A2uiRuntimeDataModel,
@@ -32,6 +34,8 @@ import {
   MailDetail,
   MailDetailRequest,
   RegisteredActionExecutor,
+  SchemaAwareActionDefinitionLookup,
+  SchemaAwareActionPlanCompiler,
   SurfaceActionAuthorizer,
   ToolDefinition,
   ToolDefinitionLookup,
@@ -46,6 +50,7 @@ import {
   VirtualActionIntentResolver,
   allToolDefinitions,
   callStructuredTool,
+  createRegisteredActionDefinitionLookup,
   gmailDraftApplyAction,
   genericToolResultsA2ui,
   isExplicitLuckinOrderPrompt,
@@ -167,6 +172,7 @@ interface SocialFeedTaskInput {
 
 export interface MultiAgentCanaryOptions {
   model: LocalModel;
+  actionPlanningModel?: ActionPlanningModel;
   opener: SystemUriOpener;
   pageAction?: RegisteredPageAction;
   currentPageSnapshot?: () => RegisteredPageSnapshot | null;
@@ -1514,6 +1520,14 @@ export class MultiAgentCanaryRuntime {
       return options.onSurface(surface, hostGeneration);
     };
     const lookup = new CanaryToolLookup();
+    const actionPlanningModel = options.actionPlanningModel;
+    const actionDefinitions: SchemaAwareActionDefinitionLookup | undefined =
+      actionPlanningModel === undefined ? undefined :
+        createRegisteredActionDefinitionLookup(lookup);
+    const actionCompiler: ActionPlanCompiler = actionPlanningModel === undefined ||
+      actionDefinitions === undefined ?
+      new MultiAgentActionPlanCompiler(options.model) :
+      new SchemaAwareActionPlanCompiler(actionDefinitions, actionPlanningModel);
     const catalog = new ActionCatalog(
       lookup,
       new CanarySurfaceAuthorizer(this.authority),
@@ -1591,7 +1605,8 @@ export class MultiAgentCanaryRuntime {
       uiRenderer: mailDetailBridge,
       surfaceWriter: mailDetailBridge,
       actionCatalog: catalog,
-      actionCompiler: new MultiAgentActionPlanCompiler(options.model),
+      actionCompiler,
+      actionDefinitions,
       actionExecutor: new CanaryRegisteredExecutor(
         aiphoneExecutor,
         (update: PersonaMemoryUpdateRequest, context: ActionExecutionContext): void => {

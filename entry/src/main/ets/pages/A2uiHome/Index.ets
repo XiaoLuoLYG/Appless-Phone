@@ -6,6 +6,7 @@ import {
   LlmProvider,
   LocalModelSettings,
   OpenAiA2uiModel,
+  OpenAiCompatibleActionPlanningModel,
   OpenAiCompatibleModel,
   PaymentAccount,
   RuntimeOwner,
@@ -1831,6 +1832,7 @@ struct Index {
     );
     const options: MultiAgentCanaryOptions = {
       model: model,
+      actionPlanningModel: new OpenAiCompatibleActionPlanningModel(provider),
       opener: opener,
       onSurface: (surface: A2uiSurfaceState, generation: number): boolean => {
         const accepted = this.applyRuntimeSurface(surface, 'multi_agent', generation);

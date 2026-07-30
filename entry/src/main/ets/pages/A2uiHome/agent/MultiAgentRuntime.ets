@@ -536,7 +536,8 @@ export class MultiAgentRuntime {
       actionOfferResolver,
       actionExecutor,
       options.actionCompiler,
-      options.virtualActionResolver
+      options.virtualActionResolver,
+      options.actionDefinitions
     );
     // The observer is the fifth and final reader. All five exist before any
     // public method can publish INPUT.USER.
@@ -915,7 +916,12 @@ export class MultiAgentRuntime {
       keys === 'allowedActionIds,dataTaskIds,goal,inputText,personaId,skillId,uiTaskId' ||
       keys === 'allowedActionIds,currentLocalDate,dataTaskIds,goal,inputText,personaId,skillId,uiTaskId' ||
       keys === 'allowedActionIds,dataTaskIds,goal,inputText,personaId,skillId,uiTaskId,virtual' ||
-      keys === 'allowedActionIds,currentLocalDate,dataTaskIds,goal,inputText,personaId,skillId,uiTaskId,virtual';
+      keys === 'allowedActionIds,currentLocalDate,dataTaskIds,goal,inputText,personaId,skillId,uiTaskId,virtual' ||
+      keys === 'allowedActionIds,dataTaskIds,executionMode,goal,skillId,uiTaskId' ||
+      keys === 'allowedActionIds,dataTaskIds,executionMode,goal,inputText,personaId,skillId,uiTaskId' ||
+      keys === 'allowedActionIds,currentLocalDate,dataTaskIds,executionMode,goal,inputText,personaId,skillId,uiTaskId' ||
+      keys === 'allowedActionIds,dataTaskIds,executionMode,goal,inputText,personaId,skillId,uiTaskId,virtual' ||
+      keys === 'allowedActionIds,currentLocalDate,dataTaskIds,executionMode,goal,inputText,personaId,skillId,uiTaskId,virtual';
     if (!exactShape ||
       request.uiTaskId !== message.taskId ||
       !nonempty(request.goal) ||
@@ -927,6 +933,8 @@ export class MultiAgentRuntime {
     const contextual: boolean = request.personaId !== undefined || request.inputText !== undefined;
     return (!contextual || (nonempty(request.personaId) && nonempty(request.inputText))) &&
       (request.currentLocalDate === undefined || nonempty(request.currentLocalDate)) &&
+      (request.executionMode === undefined ||
+        request.executionMode === 'frozen_sequence') &&
       (request.virtual === undefined || typeof request.virtual === 'boolean');
   }
 
