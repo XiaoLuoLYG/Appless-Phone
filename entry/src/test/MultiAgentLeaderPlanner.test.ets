@@ -8,7 +8,9 @@ import {
   LeaderDecision,
   LeaderDecisionDataTask,
   LeaderPlanningContext,
+  LeaderStreamedDataTask,
   LocalModel,
+  ModelContentListener,
   ObservationDigest,
   ToolDefinition,
   actionAgentToolDefinitions
@@ -22,6 +24,15 @@ const PARALLEL_DECISION: string = '{"personaId":"travel_companion","skillId":"",
   '{"localId":"train","goal":"查高铁","allowedToolIds":["train.search"],"toolId":"train.search","input":{},"required":false}' +
   '],"uiIntent":{"purpose":"比较出行方案","preferredDensity":"comfortable","requiredSections":["flight","train"]},' +
   '"reasonCode":"parallel_reads"}';
+const TAGGED_PARALLEL_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["flight.search","train.search"],"roundAction":"execute",' +
+  '"dataTasks":[' +
+  '<appless_tool>{"localId":"flight","goal":"查航班","allowedToolIds":["flight.search"],' +
+  '"toolId":"flight.search","input":{},"required":false}</appless_tool>,' +
+  '<appless_tool>{"localId":"train","goal":"查高铁","allowedToolIds":["train.search"],' +
+  '"toolId":"train.search","input":{},"required":false}</appless_tool>' +
+  '],"continuationMode":"complete","uiIntent":{"purpose":"比较出行方案","preferredDensity":"comfortable",' +
+  '"requiredSections":["flight","train"]}}';
 const TRAVEL_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
   '"requestedCapabilityIds":["travel.search"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"travel","goal":"我明天要从北京去上海，帮我搜索出行方案",' +
@@ -430,6 +441,68 @@ class QueueLocalModel implements LocalModel {
       throw new Error('No scripted Leader output');
     }
     return this.outputs.shift() as string;
+  }
+}
+
+class ChunkedLeaderLocalModel implements LocalModel {
+  prompts: string[] = [];
+  private readonly output: string;
+
+  constructor(output: string) {
+    this.output = output;
+  }
+
+  async complete(
+    prompt: string,
+    _conversation?: ConversationContext,
+    _systemPrompt?: string,
+    onContent?: ModelContentListener
+  ): Promise<string> {
+    this.prompts.push(prompt);
+    const chunks: string[] = [
+      this.output.substring(0, 173),
+      this.output.substring(173, 257),
+      this.output.substring(257, 401),
+      this.output.substring(401)
+    ];
+    if (onContent !== undefined) {
+      for (let index: number = 0; index < chunks.length; index++) {
+        onContent(chunks[index]);
+      }
+    }
+    return this.output;
+  }
+}
+
+class QueueChunkedLeaderLocalModel implements LocalModel {
+  prompts: string[] = [];
+  listenerCalls: number = 0;
+  private readonly outputs: string[];
+
+  constructor(outputs: string[]) {
+    this.outputs = outputs.slice();
+  }
+
+  async complete(
+    prompt: string,
+    _conversation?: ConversationContext,
+    _systemPrompt?: string,
+    onContent?: ModelContentListener
+  ): Promise<string> {
+    this.prompts.push(prompt);
+    if (this.outputs.length === 0) {
+      throw new Error('No scripted Leader output');
+    }
+    const output: string = this.outputs.shift() as string;
+    if (onContent !== undefined) {
+      this.listenerCalls++;
+      const firstEnd: number = Math.min(137, output.length);
+      const secondEnd: number = Math.min(311, output.length);
+      onContent(output.substring(0, firstEnd));
+      onContent(output.substring(firstEnd, secondEnd));
+      onContent(output.substring(secondEnd));
+    }
+    return output;
   }
 }
 
@@ -972,6 +1045,28 @@ async function failsAtRound(output: string, round: number): Promise<boolean> {
 
 export default function multiAgentLeaderPlannerTest() {
   describe('multiAgentLeaderPlanner', () => {
+    it('emits tagged parallel tasks as soon as each closing tag arrives', 0, async () => {
+      const model: ChunkedLeaderLocalModel = new ChunkedLeaderLocalModel(TAGGED_PARALLEL_DECISION);
+      const streamed: LeaderStreamedDataTask[] = [];
+      const decision: LeaderDecision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: '查航班和高铁' },
+        planningContext(),
+        1,
+        (): boolean => true,
+        '2026-07-28',
+        (task: LeaderStreamedDataTask): void => {
+          streamed.push(task);
+        }
+      );
+
+      expect(streamed.length).assertEqual(2);
+      expect(streamed[0].task.toolId).assertEqual('flight.search');
+      expect(streamed[1].task.toolId).assertEqual('train.search');
+      expect(decision.dataTasks.length).assertEqual(2);
+      expect(model.prompts[0].indexOf('<appless_tool>')).assertLarger(-1);
+    });
+
     it('rejects an oversized registered tool catalog before calling the model', 0, async () => {
       const model = new QueueLocalModel([LIVE_ANSWER_WITHOUT_REASON_CODE]);
       const context = planningContext();
@@ -1359,7 +1454,9 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.prompts[0].indexOf('Round: 1') >= 0).assertTrue();
       expect(model.prompts[0].indexOf('flight.search') >= 0).assertTrue();
       expect(model.prompts[0].indexOf('travel_companion') >= 0).assertTrue();
-      expect(model.systemPrompts[0].indexOf('exactly one JSON object') >= 0).assertTrue();
+      expect(model.systemPrompts[0].indexOf('exactly one LeaderDecision document') >= 0).assertTrue();
+      expect(model.systemPrompts[0].indexOf('<appless_tool>') >= 0).assertTrue();
+      expect(model.systemPrompts[0].indexOf('</appless_tool>') >= 0).assertTrue();
       expect(model.systemPrompts[0].indexOf('Do not include Thought') >= 0).assertTrue();
       expect(model.systemPrompts[0].indexOf('markdown') >= 0).assertTrue();
       expect(model.systemPrompts[0].indexOf('Omit reasonCode') >= 0).assertTrue();

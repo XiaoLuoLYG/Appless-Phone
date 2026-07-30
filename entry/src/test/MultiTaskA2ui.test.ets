@@ -673,6 +673,40 @@ export default function multiTaskA2uiTest() {
     expect(document.blocks[2].sectionId).assertEqual('slot_0');
   });
 
+  it('keeps_parallel_focus_on_the_first_completed_section', 0, () => {
+    let latestSurface: A2uiSurfaceState | null = null;
+    const composer = new MultiToolSurfaceComposer('surface_batch', (surface) => {
+      latestSurface = surface;
+    });
+    composer.registerSlots([
+      { name: 'ride.estimate', input: '{}' },
+      { name: 'luckin.order.preview', input: '{}' },
+      { name: 'payment.send', input: '{}' }
+    ]);
+    composer.emitShell();
+    expect(latestSurface !== null).assertTrue();
+
+    const afterFirst = mergeSlotObservationIntoMultiTaskSurface(
+      latestSurface!,
+      'slot_1',
+      'luckin.order.preview',
+      '{not-a2ui-json'
+    );
+    const firstParsed = JSON.parse(afterFirst.dataModelJson) as Record<string, Object>;
+    const firstBoard = firstParsed.multiTask as Record<string, string>;
+    expect(firstBoard.activeSectionId).assertEqual('slot_1');
+
+    const afterSecond = mergeSlotObservationIntoMultiTaskSurface(
+      afterFirst,
+      'slot_2',
+      'payment.send',
+      '{still-not-a2ui-json'
+    );
+    const secondParsed = JSON.parse(afterSecond.dataModelJson) as Record<string, Object>;
+    const secondBoard = secondParsed.multiTask as Record<string, string>;
+    expect(secondBoard.activeSectionId).assertEqual('slot_1');
+  });
+
   it('preserves slot errors and settles the composite surface', 0, () => {
     let latestSurface: A2uiSurfaceState | null = null;
     const composer = new MultiToolSurfaceComposer('surface_batch', (surface) => {

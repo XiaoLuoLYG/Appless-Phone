@@ -80,6 +80,7 @@ import agentMessageTest from './AgentMessage.test';
 import linkedMessageBusTest from './LinkedMessageBus.test';
 import leaderAgentTest from './LeaderAgent.test';
 import multiAgentLeaderPlannerTest from './MultiAgentLeaderPlanner.test';
+import streamingLeaderProtocolTest from './StreamingLeaderProtocol.test';
 import dataAgentTest from './DataAgent.test';
 import readOnlyDataPlannerTest from './ReadOnlyDataPlanner.test';
 import uiAgentTest from './UiAgent.test';
@@ -176,6 +177,7 @@ export default function testsuite() {
   linkedMessageBusTest();
   leaderAgentTest();
   multiAgentLeaderPlannerTest();
+  streamingLeaderProtocolTest();
   dataAgentTest();
   readOnlyDataPlannerTest();
   uiAgentTest();

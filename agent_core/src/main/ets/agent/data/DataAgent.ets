@@ -11,6 +11,7 @@ import {
   dataAgentToolDefinitions
 } from '../../aiphone/runtime/ToolDefinitionRegistry';
 import { ToolDefinition } from '../../aiphone/runtime/ToolDefinitionTypes';
+import { aiLogInfo } from '../../aiphone/runtime/AiphoneLogger';
 import {
   CreateDataTaskPayload,
   DataStepDecision,
@@ -88,6 +89,8 @@ export class DataAgent extends MessageDrivenAgent {
       this.publishInputError(message, 'DATA_TASK_INVALID', 'Data task payload is malformed');
       return;
     }
+    const receivedAtMs: number = Date.now();
+    this.logToolReceived(message, task, receivedAtMs);
     if (this.planner === null) {
       let authorization: DataTaskAuthorizationResult;
       try {
@@ -104,7 +107,7 @@ export class DataAgent extends MessageDrivenAgent {
         );
         return;
       }
-      this.execute(message, task, key, '');
+      this.execute(message, task, key, '', receivedAtMs);
       return;
     }
     if (!this.validToolIds(task.allowedToolIds as Object[])) {
@@ -121,19 +124,23 @@ export class DataAgent extends MessageDrivenAgent {
       this.completeTask(taskKey, this.generation);
       return;
     }
-    this.executePlanned(message, task, key, taskKey);
+    this.executePlanned(message, task, key, taskKey, receivedAtMs);
   }
 
   private execute(
     message: AgentMessage,
     task: CreateDataTaskPayload,
     key: string,
-    taskKey: string
+    taskKey: string,
+    receivedAtMs: number
   ): void {
     const generation: number = this.generation;
+    const executionStartMs: number = Date.now();
+    this.logToolStart(message, task, executionStartMs);
     try {
       this.executor.execute(task)
         .then((result: DataResult) => {
+          this.logToolComplete(message, task.toolId, result.status, executionStartMs, receivedAtMs);
           if (this.canPublish(key, generation)) {
             if (this.validResult(task, result)) {
               this.publishResult(message, result);
@@ -148,12 +155,14 @@ export class DataAgent extends MessageDrivenAgent {
           this.completeTask(taskKey, generation);
         })
         .catch((error: Object) => {
+          this.logToolComplete(message, task.toolId, 'error', executionStartMs, receivedAtMs);
           if (this.canPublish(key, generation)) {
             this.publishError(message, error);
           }
           this.completeTask(taskKey, generation);
         });
     } catch (error) {
+      this.logToolComplete(message, task.toolId, 'error', executionStartMs, receivedAtMs);
       if (this.canPublish(key, generation)) {
         this.publishError(message, error as Object);
       }
@@ -165,10 +174,11 @@ export class DataAgent extends MessageDrivenAgent {
     message: AgentMessage,
     task: CreateDataTaskPayload,
     key: string,
-    taskKey: string
+    taskKey: string,
+    receivedAtMs: number
   ): void {
     const generation: number = this.generation;
-    this.runPlanned(message, task, key, taskKey, generation)
+    this.runPlanned(message, task, key, taskKey, generation, receivedAtMs)
       .catch((error: Object) => {
         if (this.canPublish(key, generation)) {
           const detail: string = error instanceof Error ? error.message : `${error}`;
@@ -183,7 +193,8 @@ export class DataAgent extends MessageDrivenAgent {
     task: CreateDataTaskPayload,
     key: string,
     taskKey: string,
-    generation: number
+    generation: number,
+    receivedAtMs: number
   ): Promise<void> {
     const planner: DataTaskPlanner | null = this.planner;
     if (planner === null) {
@@ -257,9 +268,13 @@ export class DataAgent extends MessageDrivenAgent {
       }
       calls++;
       let result: DataResult;
+      const executionStartMs: number = Date.now();
+      this.logToolStart(message, callTask, executionStartMs);
       try {
         result = await this.executor.execute(callTask);
+        this.logToolComplete(message, callTask.toolId, result.status, executionStartMs, receivedAtMs);
       } catch (error) {
+        this.logToolComplete(message, callTask.toolId, 'error', executionStartMs, receivedAtMs);
         if (this.canPublish(key, generation)) {
           this.publishError(message, error as Object);
         }
@@ -394,6 +409,48 @@ export class DataAgent extends MessageDrivenAgent {
   private boundedText(value: string, maximum: number): string {
     const trimmed: string = value.trim();
     return trimmed.length > maximum ? trimmed.substring(0, maximum) : trimmed;
+  }
+
+  private logToolStart(
+    message: AgentMessage,
+    task: CreateDataTaskPayload,
+    startedAtMs: number
+  ): void {
+    aiLogInfo(
+      '[AIPhone][DataAgentToolStart] toolId=' + task.toolId +
+      ' taskId=' + message.taskId +
+      ' atMs=' + startedAtMs.toString()
+    );
+  }
+
+  private logToolReceived(
+    message: AgentMessage,
+    task: CreateDataTaskPayload,
+    receivedAtMs: number
+  ): void {
+    aiLogInfo(
+      '[AIPhone][DataAgentToolReceived] toolId=' + task.toolId +
+      ' taskId=' + message.taskId +
+      ' atMs=' + receivedAtMs.toString()
+    );
+  }
+
+  private logToolComplete(
+    message: AgentMessage,
+    toolId: string,
+    status: string,
+    startedAtMs: number,
+    receivedAtMs: number
+  ): void {
+    const completedAtMs: number = Date.now();
+    aiLogInfo(
+      '[AIPhone][DataAgentToolComplete] toolId=' + toolId +
+      ' taskId=' + message.taskId +
+      ' status=' + status +
+      ' atMs=' + completedAtMs.toString() +
+      ' executionElapsedMs=' + (completedAtMs - startedAtMs).toString() +
+      ' sinceReceivedMs=' + (completedAtMs - receivedAtMs).toString()
+    );
   }
 
   private completeTask(taskKey: string, generation: number): void {

@@ -5242,9 +5242,6 @@ struct Index {
     }
     this.multiTaskLastMergedRawBySlot[slotId] = observationRaw;
     const activateSlot = !this.multiTaskUserPinnedSection;
-    if (activateSlot) {
-      this.multiTaskActiveSectionId = slotId;
-    }
     const useIncrementalMultiTask = composite.intent === 'multi-task' &&
       this.multiTaskShellHtml.length > 0;
     if (!useIncrementalMultiTask) {
@@ -5252,7 +5249,11 @@ struct Index {
       this.htmlHomeCacheHtml = '';
     }
     const merged = mergeSlotObservationIntoMultiTaskSurface(composite, slotId, toolId, observationRaw, activateSlot);
-    return copyPersonaData(composite, merged);
+    const nextSurface = copyPersonaData(composite, merged);
+    if (activateSlot) {
+      this.multiTaskActiveSectionId = this.readMultiTaskActiveSectionId(nextSurface);
+    }
+    return nextSurface;
   }
 
   private readMultiTaskActiveSectionId(surface: A2uiSurfaceState): string {

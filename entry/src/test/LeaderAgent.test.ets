@@ -13,6 +13,7 @@ import {
   InputUserPayload,
   LeaderAgent,
   LeaderDataTaskInputNormalizer,
+  LeaderDataTaskStreamListener,
   LeaderDataTask,
   LeaderDecision,
   LeaderDecisionDataTask,
@@ -20,6 +21,8 @@ import {
   LeaderPlanner,
   LeaderPlannerResult,
   LeaderPlanningContext,
+  LeaderPlanningSignal,
+  LeaderStreamedDataTask,
   LeaderToolMetadata,
   LeaderUiTask,
   LinkedMessageBus,
@@ -146,6 +149,56 @@ class TestGate {
     if (resolve !== null) {
       resolve();
     }
+  }
+}
+
+class ControlledStreamingPlanner implements LeaderPlanner {
+  calls: number = 0;
+  readonly streamed: TestGate = new TestGate();
+  readonly releaseSecondDataTask: TestGate = new TestGate();
+  readonly secondStreamed: TestGate = new TestGate();
+  readonly releaseFinalDecision: TestGate = new TestGate();
+
+  async plan(
+    _message: AgentMessage,
+    _input: InputUserPayload,
+    _context: LeaderPlanningContext,
+    _round: number = 1,
+    _signal?: LeaderPlanningSignal,
+    currentLocalDate: string = '2026-07-20',
+    onDataTask?: LeaderDataTaskStreamListener
+  ): Promise<LeaderDecision> {
+    this.calls++;
+    if (this.calls > 1) {
+      return withNormalizationDate(semanticDecision([], 'answer'), currentLocalDate);
+    }
+    const decision: LeaderDecision = withNormalizationDate(semanticDecision([
+      semanticDataTask('hotel-stream', 'hotel.search'),
+      semanticDataTask('food-stream', 'food.search')
+    ]), currentLocalDate);
+    if (onDataTask !== undefined) {
+      const firstStreamed: LeaderStreamedDataTask = {
+        personaId: decision.personaId,
+        skillId: decision.skillId,
+        requestedCapabilityIds: decision.requestedCapabilityIds.slice(),
+        task: decision.dataTasks[0]
+      };
+      onDataTask(firstStreamed);
+    }
+    this.streamed.open();
+    await this.releaseSecondDataTask.promise;
+    this.secondStreamed.open();
+    if (onDataTask !== undefined) {
+      const secondStreamed: LeaderStreamedDataTask = {
+        personaId: decision.personaId,
+        skillId: decision.skillId,
+        requestedCapabilityIds: decision.requestedCapabilityIds.slice(),
+        task: decision.dataTasks[1]
+      };
+      onDataTask(secondStreamed);
+    }
+    await this.releaseFinalDecision.promise;
+    return decision;
   }
 }
 
@@ -786,6 +839,84 @@ async function repairCallsAfterTerminal(kind: string): Promise<number> {
 
 export default function leaderAgentTest() {
   describe('leaderAgent', () => {
+    it('keeps same-round streaming valid when an earlier Data task finishes before the next tag', 5000, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const planner: ControlledStreamingPlanner = new ControlledStreamingPlanner();
+      const leader: LeaderAgent = new LeaderAgent(
+        bus,
+        planner,
+        nineDataPlanningContext(),
+        30000,
+        undefined,
+        undefined,
+        fixedCurrentLocalDate
+      );
+      const observer: AgentMessageReader = bus.openReader();
+      leader.start();
+      try {
+        bus.publish(inputMessage());
+        await receive(observer);
+        await planner.streamed.promise;
+        const streamedTask: AgentMessage = await receive(observer);
+        expect(streamedTask.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+        expect(planner.calls).assertEqual(1);
+
+        bus.publish(dataResultMessage(streamedTask));
+        await receive(observer);
+        planner.releaseSecondDataTask.open();
+        await planner.secondStreamed.promise;
+        const secondStreamedTask: AgentMessage = await receive(observer);
+        expect(secondStreamedTask.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+        expect((secondStreamedTask.payload as CreateDataTaskPayload).toolId).assertEqual('food.search');
+
+        planner.releaseFinalDecision.open();
+        bus.publish(dataResultMessage(secondStreamedTask));
+        await receive(observer);
+        const afterFinalDecision: AgentMessage = await receive(observer);
+        expect(afterFinalDecision.type).assertEqual(AgentMessageType.TASK_CREATE_UI);
+        expect(planner.calls).assertEqual(1);
+      } finally {
+        leader.stop();
+        observer.close();
+      }
+    });
+
+    it('replans when a streamed Data task fails before the final decision arrives', 5000, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const planner: ControlledStreamingPlanner = new ControlledStreamingPlanner();
+      const leader: LeaderAgent = new LeaderAgent(
+        bus,
+        planner,
+        nineDataPlanningContext(),
+        30000,
+        undefined,
+        undefined,
+        fixedCurrentLocalDate
+      );
+      const observer: AgentMessageReader = bus.openReader();
+      leader.start();
+      try {
+        bus.publish(inputMessage());
+        await receive(observer);
+        await planner.streamed.promise;
+        const firstTask: AgentMessage = await receive(observer);
+        bus.publish(dataResultMessageWithStatus(firstTask, 'error'));
+        await receive(observer);
+
+        planner.releaseSecondDataTask.open();
+        await planner.secondStreamed.promise;
+        const secondTask: AgentMessage = await receive(observer);
+        planner.releaseFinalDecision.open();
+        bus.publish(dataResultMessage(secondTask));
+        await receive(observer);
+        expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_CREATE_UI);
+        expect(planner.calls).assertEqual(2);
+      } finally {
+        leader.stop();
+        observer.close();
+      }
+    });
+
     it('publishes an exact valid legacy hotel shape on round one', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const leader: LeaderAgent = new LeaderAgent(

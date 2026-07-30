@@ -67,7 +67,8 @@ export function mergeSectionIntoDataModel(
         completionReply: content.completionReply
       });
     }
-    if (activateSlot) {
+    const hasActiveSection = typeof board.activeSectionId === 'string' && board.activeSectionId.length > 0;
+    if (activateSlot && (board.mode === 'serial' || !hasActiveSection)) {
       board.activeSectionId = slotId;
     }
     parsed.multiTask = board as Object;
