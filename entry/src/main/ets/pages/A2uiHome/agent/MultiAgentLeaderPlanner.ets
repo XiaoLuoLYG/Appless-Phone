@@ -1618,7 +1618,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       rawUiIntent === null || typeof rawUiIntent !== 'object' || Array.isArray(rawUiIntent) ||
       (reasonCode !== undefined &&
         (typeof reasonCode !== 'string' || reasonCode.trim().length === 0)) ||
-      (continuationMode !== undefined && continuationMode !== 'complete' &&
+      (continuationMode !== 'complete' &&
         continuationMode !== 'dependency' && continuationMode !== 'sequence')) {
       throw new Error('Leader decision fields are malformed.');
     }

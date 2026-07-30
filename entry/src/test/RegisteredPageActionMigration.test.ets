@@ -59,17 +59,17 @@ import { createHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHome
 import { HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
 
 const WORLDCUP_DECISION: string = '{"personaId":"default_companion","skillId":"",' +
-  '"requestedCapabilityIds":["worldcup.open"],"roundAction":"execute","dataTasks":[],' +
+  '"requestedCapabilityIds":["worldcup.open"],"roundAction":"execute","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"worldcup.open","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"actionIntent":{"goal":"open world cup",' +
   '"allowedActionIds":["worldcup.open"]},"reasonCode":"worldcup"}';
 const MAPS_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["maps.route.open"],"roundAction":"execute","dataTasks":[],' +
+  '"requestedCapabilityIds":["maps.route.open"],"roundAction":"execute","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"maps.route.open","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"actionIntent":{"goal":"open maps route",' +
   '"allowedActionIds":["maps.route.open"]},"reasonCode":"maps"}';
 const SOCIAL_DECISION: string = '{"personaId":"default_companion","skillId":"",' +
-  '"requestedCapabilityIds":["social.reply.draft"],"roundAction":"execute","dataTasks":[],' +
+  '"requestedCapabilityIds":["social.reply.draft"],"roundAction":"execute","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"social.reply.draft","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"actionIntent":{"goal":"draft reply",' +
   '"allowedActionIds":["social.reply.draft"]},"reasonCode":"social"}';

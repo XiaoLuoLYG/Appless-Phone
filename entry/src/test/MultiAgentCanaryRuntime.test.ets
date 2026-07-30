@@ -71,32 +71,32 @@ const SEARCH_INPUT: string = '{"originQuery":"帮我找深圳酒店","place":"�
   '"stayNights":2,"adultCount":2,"childCount":0,"childAgeDetails":[],' +
   '"roomCount":1,"currency":"CNY","size":10}';
 const ANSWER_DECISION: string = '{"personaId":"default_companion","skillId":"",' +
-  '"requestedCapabilityIds":[],"roundAction":"answer","dataTasks":[],' +
+  '"requestedCapabilityIds":[],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"conversation",' +
   '"preferredDensity":"comfortable","requiredSections":[]},"answer":"你好",' +
   '"reasonCode":"greeting"}';
 const MEMORY_DECISION: string = '{"personaId":"food_companion","skillId":"",' +
-  '"requestedCapabilityIds":["memory.update"],"roundAction":"execute","dataTasks":[],' +
+  '"requestedCapabilityIds":["memory.update"],"roundAction":"execute","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"memory.update",' +
   '"preferredDensity":"comfortable","requiredSections":[]},"actionIntent":{' +
   '"goal":"remember explicit preference","allowedActionIds":["memory.update"]},' +
   '"reasonCode":"stable_preference"}';
 const HOTEL_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["hotel.search"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["hotel.search"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"hotel-search",' +
   '"goal":"search real hotels","allowedToolIds":["hotel.search"],' +
   '"toolId":"hotel.search","input":' + SEARCH_INPUT + ',"required":true}],' +
   '"uiIntent":{"purpose":"hotel.search","preferredDensity":"comfortable",' +
   '"requiredSections":["hotels"]},"reasonCode":"hotel_search"}';
 const HOTEL_DONE_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["hotel.search"],"roundAction":"answer","dataTasks":[],' +
+  '"requestedCapabilityIds":["hotel.search"],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"hotel.search",' +
   '"preferredDensity":"comfortable","requiredSections":[]},' +
   '"answer":"酒店结果已就绪","reasonCode":"hotel_ready"}';
 const HOTEL_DATA_CALL_DECISION: string = '{"kind":"call","toolId":"hotel.search",' +
   '"args":' + SEARCH_INPUT + ',"summary":"query the registered hotel provider"}';
 const HOTEL_ACTION_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["hotel.search","hotel.navigate"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["hotel.search","hotel.navigate"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"hotel-search",' +
   '"goal":"search real hotels","allowedToolIds":["hotel.search"],' +
   '"toolId":"hotel.search","input":' + SEARCH_INPUT + ',"required":true}],' +
@@ -108,7 +108,7 @@ const CALENDAR_UPDATE_ACTION_DRAFT: string = '{"planId":"plan-model-1","runId":"
   '"label":"更新日程","steps":[{"stepId":"step-1","actionId":"calendar.event.update",' +
   '"args":{}}]}';
 const TWO_TOOL_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["travel.search","train.search"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["travel.search","train.search"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"travel","goal":"search travel options",' +
   '"allowedToolIds":["travel.search"],"toolId":"travel.search",' +
   '"input":{"query":"北京到上海"},"required":true},{"localId":"train",' +
@@ -117,22 +117,22 @@ const TWO_TOOL_DECISION: string = '{"personaId":"travel_companion","skillId":"",
   '"uiIntent":{"purpose":"travel.compare","preferredDensity":"comfortable",' +
   '"requiredSections":["travel","train"]},"reasonCode":"two_tool_compare"}';
 const TWO_TOOL_DONE_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["travel.search","train.search"],"roundAction":"answer",' +
+  '"requestedCapabilityIds":["travel.search","train.search"],"roundAction":"answer","continuationMode":"complete",' +
   '"dataTasks":[],"uiIntent":{"purpose":"travel.compare",' +
   '"preferredDensity":"comfortable","requiredSections":[]},' +
   '"answer":"出行结果已就绪","reasonCode":"two_tool_ready"}';
 const TIME_DECISION: string = '{"personaId":"default_companion","skillId":"",' +
-  '"requestedCapabilityIds":["time"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["time"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"current-time","goal":"查询当前设备时间",' +
   '"allowedToolIds":["time"],"toolId":"time","input":{},"required":true}],' +
   '"uiIntent":{"purpose":"time","preferredDensity":"comfortable",' +
   '"requiredSections":["time"]}}';
 const TIME_DONE_DECISION: string = '{"personaId":"default_companion","skillId":"",' +
-  '"requestedCapabilityIds":["time"],"roundAction":"answer","dataTasks":[],' +
+  '"requestedCapabilityIds":["time"],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"time","preferredDensity":"comfortable","requiredSections":[]},' +
   '"answer":"当前设备时间已返回。"}';
 const FLIGHT_TRAIN_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["flight.search","train.search"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["flight.search","train.search"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"flight","goal":"search flights",' +
   '"allowedToolIds":["flight.search"],"toolId":"flight.search",' +
   '"input":{"query":"北京到上海"},"required":true},{"localId":"train",' +
@@ -141,7 +141,7 @@ const FLIGHT_TRAIN_DECISION: string = '{"personaId":"travel_companion","skillId"
   '"uiIntent":{"purpose":"flight and train","preferredDensity":"comfortable",' +
   '"requiredSections":["flight","train"]},"reasonCode":"flight_train_compare"}';
 const FLIGHT_TRAIN_DONE_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["flight.search","train.search"],"roundAction":"answer",' +
+  '"requestedCapabilityIds":["flight.search","train.search"],"roundAction":"answer","continuationMode":"complete",' +
   '"dataTasks":[],"uiIntent":{"purpose":"flight and train",' +
   '"preferredDensity":"comfortable","requiredSections":[]},' +
   '"answer":"航班和高铁结果已就绪","reasonCode":"flight_train_ready"}';
@@ -149,7 +149,7 @@ const C02_QUERY: string = '我明天要从北京去上海，帮我搜索出行�
 const F01_QUERY: string = '帮我查明天北京到上海的航班';
 const F02_QUERY: string = '帮我查询明天晚上六点以后深圳北到香港西九龙的高铁';
 const C02_QUERY_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["travel.search"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["travel.search"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"travel","goal":"搜索从北京到上海的出行方案",' +
   '"allowedToolIds":["travel.search"],"toolId":"travel.search",' +
   '"input":{"origin":"北京","destination":"上海","departureDate":"2026-07-23",' +
@@ -157,11 +157,11 @@ const C02_QUERY_DECISION: string = '{"personaId":"travel_companion","skillId":""
   '"uiIntent":{"purpose":"travel.search","preferredDensity":"comfortable",' +
   '"requiredSections":["travel"]}}';
 const C02_QUERY_DONE: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["travel.search"],"roundAction":"answer","dataTasks":[],' +
+  '"requestedCapabilityIds":["travel.search"],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"travel.search","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"answer":"综合出行结果已就绪"}';
 const F01_QUERY_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["flight.search"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["flight.search"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"flight","goal":"搜索北京到上海的航班",' +
   '"allowedToolIds":["flight.search"],"toolId":"flight.search",' +
   '"input":{"origin":"北京","destination":"上海","departureDate":"2026-07-23",' +
@@ -169,11 +169,11 @@ const F01_QUERY_DECISION: string = '{"personaId":"travel_companion","skillId":""
   '"uiIntent":{"purpose":"flight.search","preferredDensity":"comfortable",' +
   '"requiredSections":["flight"]}}';
 const F01_QUERY_DONE: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["flight.search"],"roundAction":"answer","dataTasks":[],' +
+  '"requestedCapabilityIds":["flight.search"],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"flight.search","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"answer":"航班结果已就绪"}';
 const F02_QUERY_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["train.search"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["train.search"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"train","goal":"搜索深圳北到香港西九龙的高铁",' +
   '"allowedToolIds":["train.search"],"toolId":"train.search",' +
   '"input":{"origin":"深圳北","destination":"香港西九龙","departureDate":"2026-07-23",' +
@@ -181,16 +181,16 @@ const F02_QUERY_DECISION: string = '{"personaId":"travel_companion","skillId":""
   '"uiIntent":{"purpose":"train.search","preferredDensity":"comfortable",' +
   '"requiredSections":["train"]}}';
 const F02_QUERY_DONE: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["train.search"],"roundAction":"answer","dataTasks":[],' +
+  '"requestedCapabilityIds":["train.search"],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"train.search","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"answer":"高铁结果已就绪"}';
 const WORLDCUP_ACTION_DECISION: string = '{"personaId":"default_companion","skillId":"",' +
-  '"requestedCapabilityIds":["worldcup.open"],"roundAction":"execute","dataTasks":[],' +
+  '"requestedCapabilityIds":["worldcup.open"],"roundAction":"execute","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"worldcup.open","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"actionIntent":{"goal":"open the World Cup page",' +
   '"allowedActionIds":["worldcup.open"]},"reasonCode":"worldcup_action"}';
 const MIXED_DATA_ACTION_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["travel.search","worldcup.open"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["travel.search","worldcup.open"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"travel","goal":"search travel options",' +
   '"allowedToolIds":["travel.search"],"toolId":"travel.search",' +
   '"input":{"query":"北京到上海"},"required":true}],' +
@@ -198,22 +198,22 @@ const MIXED_DATA_ACTION_DECISION: string = '{"personaId":"travel_companion","ski
   '"requiredSections":["travel"]},"actionIntent":{"goal":"open the World Cup page",' +
   '"allowedActionIds":["worldcup.open"]},"reasonCode":"mixed_data_action"}';
 const MAPS_ACTION_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["maps.route.open"],"roundAction":"execute","dataTasks":[],' +
+  '"requestedCapabilityIds":["maps.route.open"],"roundAction":"execute","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"maps.route.open","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"actionIntent":{"goal":"open the requested map route",' +
   '"allowedActionIds":["maps.route.open"]},"reasonCode":"maps_action"}';
 const CALENDAR_CREATE_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
-  '"requestedCapabilityIds":["calendar.event.create"],"roundAction":"execute","dataTasks":[],' +
+  '"requestedCapabilityIds":["calendar.event.create"],"roundAction":"execute","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"calendar.event.create","preferredDensity":"comfortable",' +
   '"requiredSections":["review"]},"actionIntent":{"goal":"review an exact Calendar event",' +
   '"allowedActionIds":["calendar.event.create"]},"reasonCode":"calendar_create_review"}';
 const GMAIL_DRAFT_CREATE_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
-  '"requestedCapabilityIds":["gmail.draft.create"],"roundAction":"execute","dataTasks":[],' +
+  '"requestedCapabilityIds":["gmail.draft.create"],"roundAction":"execute","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"gmail.draft.create","preferredDensity":"comfortable",' +
   '"requiredSections":["review"]},"actionIntent":{"goal":"create the exact Gmail draft",' +
   '"allowedActionIds":["gmail.draft.create"]},"reasonCode":"gmail_draft_create"}';
 const GMAIL_DRAFT_APPLY_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
-  '"requestedCapabilityIds":["gmail.draft.apply"],"roundAction":"execute","dataTasks":[],' +
+  '"requestedCapabilityIds":["gmail.draft.apply"],"roundAction":"execute","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"gmail.draft.apply","preferredDensity":"comfortable",' +
   '"requiredSections":["review"]},"actionIntent":{"goal":"apply the current exact Gmail draft",' +
   '"allowedActionIds":["gmail.draft.apply"]},"reasonCode":"gmail_draft_apply"}';
@@ -260,22 +260,22 @@ const CALENDAR_UPDATE_REPAIRED_SEARCH_DECISION: string =
   '"requiredSections":["events","review"]}}';
 const CALENDAR_UPDATE_PREMATURE_LATER_ACTION_DECISION: string =
   '{"personaId":"work_companion","skillId":"",' +
-  '"requestedCapabilityIds":["calendar.event.update"],"roundAction":"execute","dataTasks":[],' +
+  '"requestedCapabilityIds":["calendar.event.update"],"roundAction":"execute","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"calendar.event.update","preferredDensity":"comfortable",' +
   '"requiredSections":["review"]},"actionIntent":{' +
   '"goal":"update the found event to 16:00","allowedActionIds":["calendar.event.update"]}}';
 const CALENDAR_UPDATE_REPAIRED_DONE_DECISION: string =
   '{"personaId":"work_companion","skillId":"",' +
-  '"requestedCapabilityIds":["calendar.event.update"],"roundAction":"answer","dataTasks":[],' +
+  '"requestedCapabilityIds":["calendar.event.update"],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"calendar.event.update","preferredDensity":"comfortable",' +
   '"requiredSections":["review"]},"answer":"已找到唯一日程，请在卡片中核对并确认更新。"}';
 const CALENDAR_UPDATE_DIRECT_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
-  '"requestedCapabilityIds":["calendar.event.update"],"roundAction":"execute","dataTasks":[],' +
+  '"requestedCapabilityIds":["calendar.event.update"],"roundAction":"execute","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"calendar.event.update","preferredDensity":"comfortable",' +
   '"requiredSections":["review"]},"actionIntent":{"goal":"update without a provider event",' +
   '"allowedActionIds":["calendar.event.update"]},"reasonCode":"calendar_update_zero_data"}';
 const CALENDAR_UPDATE_DONE_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
-  '"requestedCapabilityIds":["calendar.events.search"],"roundAction":"answer","dataTasks":[],' +
+  '"requestedCapabilityIds":["calendar.events.search"],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"calendar.event.update","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"answer":"已找到唯一日程，请在卡片中核对并确认更新。",' +
   '"reasonCode":"calendar_update_review_ready"}';
@@ -289,32 +289,32 @@ const CALENDAR_DELETE_SEARCH_DECISION: string = '{"personaId":"work_companion","
   '"uiIntent":{"purpose":"calendar.event.delete","preferredDensity":"comfortable",' +
   '"requiredSections":["events","review"]},"reasonCode":"calendar_delete_read_first"}';
 const CALENDAR_DELETE_DONE_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
-  '"requestedCapabilityIds":["calendar.events.search"],"roundAction":"answer","dataTasks":[],' +
+  '"requestedCapabilityIds":["calendar.events.search"],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"calendar.event.delete","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"answer":"已找到唯一日程，请在卡片中核对并确认删除。",' +
   '"reasonCode":"calendar_delete_review_ready"}';
 const CALENDAR_DELETE_PREMATURE_ACTION_DECISION: string =
   '{"personaId":"work_companion","skillId":"",' +
-  '"requestedCapabilityIds":["calendar.event.delete"],"roundAction":"execute","dataTasks":[],' +
+  '"requestedCapabilityIds":["calendar.event.delete"],"roundAction":"execute","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"calendar.event.delete","preferredDensity":"comfortable",' +
   '"requiredSections":["review"]},"actionIntent":{' +
   '"goal":"delete the exact event","allowedActionIds":["calendar.event.delete"]},' +
   '"reasonCode":"calendar_delete_action"}';
 const CALENDAR_DELETE_REPAIRED_DONE_DECISION: string =
   '{"personaId":"work_companion","skillId":"",' +
-  '"requestedCapabilityIds":["calendar.event.delete"],"roundAction":"answer","dataTasks":[],' +
+  '"requestedCapabilityIds":["calendar.event.delete"],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"calendar.event.delete","preferredDensity":"comfortable",' +
   '"requiredSections":["review"]},"answer":"已找到唯一日程，请在卡片中核对并确认删除。",' +
   '"reasonCode":"calendar_delete_review_ready"}';
 const MAIL_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
-  '"requestedCapabilityIds":["mail.search"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["mail.search"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"mail-search",' +
   '"goal":"search real mail","allowedToolIds":["mail.search"],' +
   '"toolId":"mail.search","input":{"query":"酒店确认"},"required":true}],' +
   '"uiIntent":{"purpose":"mail.search","preferredDensity":"comfortable",' +
   '"requiredSections":["mail"]},"reasonCode":"mail_search"}';
 const DYNAMIC_READ_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
-  '"requestedCapabilityIds":["dynamic.search"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["dynamic.search"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"dynamic-read","goal":"find the selected Notion page",' +
   '"allowedToolIds":["dynamic.search"],"toolId":"dynamic.search",' +
   '"input":{"operation":"search","qualifiedName":"NOTION_SEARCH",' +
@@ -322,85 +322,85 @@ const DYNAMIC_READ_DECISION: string = '{"personaId":"work_companion","skillId":"
   '"uiIntent":{"purpose":"dynamic.search","preferredDensity":"comfortable",' +
   '"requiredSections":["results"]},"reasonCode":"dynamic_read"}';
 const DYNAMIC_READ_DONE: string = '{"personaId":"work_companion","skillId":"",' +
-  '"requestedCapabilityIds":["dynamic.search"],"roundAction":"answer","dataTasks":[],' +
+  '"requestedCapabilityIds":["dynamic.search"],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"dynamic.search","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"answer":"已返回授权 Notion 的读取结果。",' +
   '"reasonCode":"dynamic_read_done"}';
 const GMAIL_REGISTERED_CAPABILITY_ANSWER: string = '{"personaId":"work_companion","skillId":"",' +
   '"requestedCapabilityIds":["gmail.thread.read","gmail.draft.create","gmail.open.web"],' +
-  '"roundAction":"answer","dataTasks":[],"uiIntent":{"purpose":"mail.actions",' +
+  '"roundAction":"answer","continuationMode":"complete","dataTasks":[],"uiIntent":{"purpose":"mail.actions",' +
   '"preferredDensity":"comfortable","requiredSections":[]},' +
   '"answer":"邮件操作由当前四 Agent runtime 负责。","reasonCode":"registered_mail_actions"}';
 const GMAIL_AUTHORIZE_FORGERY: string = '{"personaId":"work_companion","skillId":"",' +
-  '"requestedCapabilityIds":["gmail.authorize"],"roundAction":"answer","dataTasks":[],' +
+  '"requestedCapabilityIds":["gmail.authorize"],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"gmail.authorize","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"answer":"forged","reasonCode":"forged_client_action"}';
 const CALENDAR_AUTHORIZE_FORGERY: string = '{"personaId":"work_companion","skillId":"",' +
-  '"requestedCapabilityIds":["calendar.authorize"],"roundAction":"answer","dataTasks":[],' +
+  '"requestedCapabilityIds":["calendar.authorize"],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"calendar.authorize","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"answer":"forged","reasonCode":"forged_client_action"}';
 const C06_QUERY: string = '帮我查看我 Gmail 里和 ECCV 论文相关的邮件';
 const C06_GMAIL_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
-  '"requestedCapabilityIds":["gmail.mail.search"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["gmail.mail.search"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"gmail-search","goal":"search real Gmail mail",' +
   '"allowedToolIds":["gmail.mail.search"],"toolId":"gmail.mail.search",' +
   '"input":{"query":"' + C06_QUERY + '"},"required":true}],' +
   '"uiIntent":{"purpose":"gmail.mail.search","preferredDensity":"comfortable",' +
   '"requiredSections":["mail"]},"reasonCode":"gmail_search"}';
 const C06_GMAIL_DONE: string = '{"personaId":"work_companion","skillId":"",' +
-  '"requestedCapabilityIds":["gmail.mail.search"],"roundAction":"answer","dataTasks":[],' +
+  '"requestedCapabilityIds":["gmail.mail.search"],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"gmail.mail.search","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"answer":"已返回真实 Gmail 邮件。","reasonCode":"gmail_search_ready"}';
 const C09_SOCIAL_DONE: string = '{"personaId":"work_companion","skillId":"",' +
-  '"requestedCapabilityIds":["social.feed.search"],"roundAction":"answer","dataTasks":[],' +
+  '"requestedCapabilityIds":["social.feed.search"],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"social.feed.search","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"answer":"已返回真实 SocialHub 消息。","reasonCode":"social_feed_ready"}';
 const F04_PRICE_DECISION: string = '{"personaId":"food_companion","skillId":"",' +
-  '"requestedCapabilityIds":["food.search"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["food.search"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"food-price","goal":"查询瑞幸生椰拿铁价格",' +
   '"allowedToolIds":["food.search"],"toolId":"food.search",' +
   '"input":{"query":"瑞幸生椰拿铁多少钱"},"required":true}],' +
   '"uiIntent":{"purpose":"food.search","preferredDensity":"comfortable",' +
   '"requiredSections":["food"]}}';
 const F04_PRICE_DONE: string = '{"personaId":"food_companion","skillId":"",' +
-  '"requestedCapabilityIds":["food.search"],"roundAction":"answer","dataTasks":[],' +
+  '"requestedCapabilityIds":["food.search"],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"food.search","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"answer":"价格查询结果已就绪"}';
 const R01_COMMUNITY_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
-  '"requestedCapabilityIds":["social.community.search"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["social.community.search"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"community","goal":"读取 Reddit 社区讨论",' +
   '"allowedToolIds":["social.community.search"],"toolId":"social.community.search",' +
   '"input":{"platform":"reddit","query":"Appless","limit":10},"required":true}],' +
   '"uiIntent":{"purpose":"social.community.search","preferredDensity":"comfortable",' +
   '"requiredSections":["social"]}}';
 const R01_COMMUNITY_DONE: string = '{"personaId":"work_companion","skillId":"",' +
-  '"requestedCapabilityIds":["social.community.search"],"roundAction":"answer","dataTasks":[],' +
+  '"requestedCapabilityIds":["social.community.search"],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"social.community.search","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"answer":"社区结果已就绪"}';
 const R02_POST_PREVIEW_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
-  '"requestedCapabilityIds":["social.post.preview"],"roundAction":"execute","dataTasks":[],' +
+  '"requestedCapabilityIds":["social.post.preview"],"roundAction":"execute","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"social.post.preview","preferredDensity":"comfortable",' +
   '"requiredSections":["preview"]},"actionIntent":{"goal":"生成独立公开帖子预览",' +
   '"allowedActionIds":["social.post.preview"]}}';
 const FOOD_CONTEXT_ANSWER: string = '{"personaId":"food_companion","skillId":"",' +
-  '"requestedCapabilityIds":[],"roundAction":"answer","dataTasks":[],' +
+  '"requestedCapabilityIds":[],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"conversation",' +
   '"preferredDensity":"comfortable","requiredSections":[]},' +
   '"answer":"已按更新后的瑞幸偏好继续","reasonCode":"memory_context_routed"}';
 const MAIL_DIRECT_ANSWER: string = '{"personaId":"work_companion","skillId":"",' +
-  '"requestedCapabilityIds":["mail.search"],"roundAction":"answer","dataTasks":[],' +
+  '"requestedCapabilityIds":["mail.search"],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"mail.search","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"answer":"你有一封酒店确认邮件","reasonCode":"mail_search"}';
 const WEATHER_DIRECT_CLARIFY: string = '{"personaId":"default_companion","skillId":"",' +
-  '"requestedCapabilityIds":["dynamic.search"],"roundAction":"clarify","dataTasks":[],' +
+  '"requestedCapabilityIds":["dynamic.search"],"roundAction":"clarify","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"weather","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"answer":"请确认天气地点","reasonCode":"weather_missing_location"}';
 const MISLEADING_HOTEL_DIRECT_ANSWER: string = '{"personaId":"work_companion","skillId":"",' +
-  '"requestedCapabilityIds":["mail.search"],"roundAction":"answer","dataTasks":[],' +
+  '"requestedCapabilityIds":["mail.search"],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"mail.search","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"answer":"按邮件能力回答","reasonCode":"mail_search"}';
 const UNOBSERVED_HOTEL_DIRECT_ANSWER: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["hotel.search"],"roundAction":"answer","dataTasks":[],' +
+  '"requestedCapabilityIds":["hotel.search"],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"hotel.search","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"answer":"酒店价格是 500 元","reasonCode":"hotel_ready"}';
 
@@ -684,7 +684,7 @@ type CanaryJsonRecord = Record<string, JsonValue | undefined>;
 
 function c02DecisionWithInput(inputJson: string): string {
   return '{"personaId":"travel_companion","skillId":"",' +
-    '"requestedCapabilityIds":["travel.search"],"roundAction":"execute",' +
+    '"requestedCapabilityIds":["travel.search"],"roundAction":"execute","continuationMode":"complete",' +
     '"dataTasks":[{"localId":"travel","goal":"搜索从北京到上海的出行方案",' +
     '"allowedToolIds":["travel.search"],"toolId":"travel.search","input":' + inputJson +
     ',"required":true}],"uiIntent":{"purpose":"travel.search",' +
@@ -755,7 +755,7 @@ function c09SocialFeedResult(): DataResult {
 
 function c09SocialDecision(inputJson: string): string {
   return '{"personaId":"work_companion","skillId":"",' +
-    '"requestedCapabilityIds":["social.feed.search"],"roundAction":"execute",' +
+    '"requestedCapabilityIds":["social.feed.search"],"roundAction":"execute","continuationMode":"complete",' +
     '"dataTasks":[{"localId":"social-feed","goal":"read X and Slack messages",' +
     '"allowedToolIds":["social.feed.search"],"toolId":"social.feed.search","input":' +
     inputJson + ',"required":true}],"uiIntent":{"purpose":"social.feed.search",' +

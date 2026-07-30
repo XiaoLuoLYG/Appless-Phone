@@ -16,14 +16,14 @@ import {
 import { MultiAgentLeaderPlanner } from '../main/ets/pages/A2uiHome/agent/MultiAgentLeaderPlanner';
 
 const PARALLEL_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["flight.search","train.search"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["flight.search","train.search"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[' +
   '{"localId":"flight","goal":"查航班","allowedToolIds":["flight.search"],"toolId":"flight.search","input":{},"required":false},' +
   '{"localId":"train","goal":"查高铁","allowedToolIds":["train.search"],"toolId":"train.search","input":{},"required":false}' +
   '],"uiIntent":{"purpose":"比较出行方案","preferredDensity":"comfortable","requiredSections":["flight","train"]},' +
   '"reasonCode":"parallel_reads"}';
 const TRAVEL_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["travel.search"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["travel.search"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"travel","goal":"我明天要从北京去上海，帮我搜索出行方案",' +
   '"allowedToolIds":["travel.search"],"toolId":"travel.search",' +
   '"input":{"origin":"北京","destination":"上海","date":"明天",' +
@@ -31,14 +31,14 @@ const TRAVEL_DECISION: string = '{"personaId":"travel_companion","skillId":"",' 
   '"uiIntent":{"purpose":"展示综合出行方案","preferredDensity":"comfortable",' +
   '"requiredSections":["travel"]},"reasonCode":"travel_search"}';
 const FLIGHT_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["flight.search"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["flight.search"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"flight","goal":"帮我查明天北京到上海的航班",' +
   '"allowedToolIds":["flight.search"],"toolId":"flight.search",' +
   '"input":{"origin":"北京","destination":"上海","date":"明天"},"required":true}],' +
   '"uiIntent":{"purpose":"展示航班","preferredDensity":"comfortable",' +
   '"requiredSections":["flight"]},"reasonCode":"flight_search"}';
 const TRAIN_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["train.search"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["train.search"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"train","goal":"帮我查询明天晚上六点以后深圳北到香港西九龙的高铁",' +
   '"allowedToolIds":["train.search"],"toolId":"train.search",' +
   '"input":{"origin":"深圳北","destination":"香港西九龙","date":"明天",' +
@@ -46,7 +46,7 @@ const TRAIN_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
   '"uiIntent":{"purpose":"展示高铁","preferredDensity":"comfortable",' +
   '"requiredSections":["train"]},"reasonCode":"train_search"}';
 const OVERLAPPING_VIDEO_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["media.video.search","youtube.video.search"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["media.video.search","youtube.video.search"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"task1","goal":"搜索 B 站上的 Qwen 官方视频",' +
   '"allowedToolIds":["media.video.search"],"toolId":"media.video.search",' +
   '"input":{"query":"Qwen 官方视频","platform":"B站"},"required":true},' +
@@ -55,28 +55,28 @@ const OVERLAPPING_VIDEO_DECISION: string = '{"personaId":"travel_companion","ski
   '"input":{"query":"Qwen 官方视频"},"required":true}],' +
   '"uiIntent":{"purpose":"search","preferredDensity":"medium","requiredSections":["results"]}}';
 const AGGREGATE_VIDEO_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["media.video.search"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["media.video.search"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"videos","goal":"搜索 B 站和 YouTube 上的 Qwen 官方视频",' +
   '"allowedToolIds":["media.video.search"],"toolId":"media.video.search",' +
   '"input":{"query":"Qwen 官方视频","sources":["youtube","bilibili"]},"required":true}],' +
   '"uiIntent":{"purpose":"展示多源视频","preferredDensity":"comfortable",' +
   '"requiredSections":["video"]}}';
 const YOUTUBE_ONLY_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["youtube.video.search"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["youtube.video.search"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"youtube","goal":"搜索 YouTube 视频",' +
   '"allowedToolIds":["youtube.video.search"],"toolId":"youtube.video.search",' +
   '"input":{"query":"世界杯"},"required":true}],' +
   '"uiIntent":{"purpose":"展示 YouTube 视频","preferredDensity":"comfortable",' +
   '"requiredSections":["video"]}}';
 const BILIBILI_ONLY_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["media.video.search"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["media.video.search"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"bilibili","goal":"搜索 B 站视频",' +
   '"allowedToolIds":["media.video.search"],"toolId":"media.video.search",' +
   '"input":{"query":"Qwen","sources":["bilibili"]},"required":true}],' +
   '"uiIntent":{"purpose":"展示 B 站视频","preferredDensity":"comfortable",' +
   '"requiredSections":["video"]}}';
 const SOCIAL_ONLY_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["social.feed.search"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["social.feed.search"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"social","goal":"查看 X 和 Slack 消息",' +
   '"allowedToolIds":["social.feed.search"],"toolId":"social.feed.search",' +
   '"input":{"platforms":["x","slack"]},"required":true}],' +
@@ -87,7 +87,7 @@ const SOCIAL_WITH_DATE_DECISION: string = SOCIAL_ONLY_DECISION.replace(
   '"input":{"platforms":["x","slack"],"date":"2026-07-23"}'
 );
 const SOCIAL_MAIL_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["social.feed.search","mail.search"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["social.feed.search","mail.search"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"social","goal":"查看 X 和 Slack 消息",' +
   '"allowedToolIds":["social.feed.search"],"toolId":"social.feed.search",' +
   '"input":{"platforms":["x","slack"]},"required":true},' +
@@ -96,14 +96,14 @@ const SOCIAL_MAIL_DECISION: string = '{"personaId":"travel_companion","skillId":
   '"required":true}],"uiIntent":{"purpose":"展示消息和邮件","preferredDensity":"comfortable",' +
   '"requiredSections":["social","mail"]}}';
 const X_POST_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["x.post.search"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["x.post.search"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"x-posts","goal":"查看 OpenAI 最近的公开 post",' +
   '"allowedToolIds":["x.post.search"],"toolId":"x.post.search",' +
   '"input":{"query":"OpenAI"},"required":true}],"uiIntent":{' +
   '"purpose":"展示 X 公开 post","preferredDensity":"comfortable",' +
   '"requiredSections":["posts"]}}';
 const FOOD_COFFEE_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["food.search"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["food.search"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"coffee","goal":"点一杯咖啡",' +
   '"allowedToolIds":["food.search"],"toolId":"food.search",' +
   '"input":{"query":"咖啡"},"required":true}],"uiIntent":{' +
@@ -113,7 +113,7 @@ const MIXED_DATA_ACTION_QUERY: string =
   '我现在要打车从深圳华为坂田基地到秋港花园，帮我点一杯瑞幸生椰拿铁，半糖少冰，转账给罗一格5美金';
 const MIXED_DATA_ACTION_DECISION: string =
   '{"personaId":"travel_companion","skillId":"","requestedCapabilityIds":[' +
-  '"ride.estimate","luckin.order.preview","payment.send"],"roundAction":"execute",' +
+  '"ride.estimate","luckin.order.preview","payment.send"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"ride","goal":"查询从深圳华为坂田基地到秋港花园的打车估价",' +
   '"allowedToolIds":["ride.estimate"],"toolId":"ride.estimate",' +
   '"input":{"origin":"深圳华为坂田基地","destination":"秋港花园"},' +
@@ -136,32 +136,32 @@ const MIXED_MISPLACED_ACTION_DECISION: string = MIXED_DATA_ACTION_DECISION
   );
 const EXPLICIT_GOOGLE_MAPS_AS_FOOD_DECISION: string =
   '{"personaId":"travel_companion","skillId":"","requestedCapabilityIds":["food.search"],' +
-  '"roundAction":"execute","dataTasks":[{"localId":"places","goal":"在 Google Maps 搜索附近中餐",' +
+  '"roundAction":"execute","continuationMode":"complete","dataTasks":[{"localId":"places","goal":"在 Google Maps 搜索附近中餐",' +
   '"allowedToolIds":["food.search"],"toolId":"food.search",' +
   '"input":{"query":"伦敦国王十字车站附近的中餐"},"required":true}],' +
   '"uiIntent":{"purpose":"展示 Google Maps 地点","preferredDensity":"comfortable",' +
   '"requiredSections":["places"]}}';
 const EXPLICIT_GOOGLE_MAPS_DECISION: string =
   '{"personaId":"travel_companion","skillId":"","requestedCapabilityIds":["maps.place.search"],' +
-  '"roundAction":"execute","dataTasks":[{"localId":"places","goal":"在 Google Maps 搜索附近中餐",' +
+  '"roundAction":"execute","continuationMode":"complete","dataTasks":[{"localId":"places","goal":"在 Google Maps 搜索附近中餐",' +
   '"allowedToolIds":["maps.place.search"],"toolId":"maps.place.search",' +
   '"input":{"query":"伦敦国王十字车站附近的中餐"},"required":true}],' +
   '"uiIntent":{"purpose":"展示 Google Maps 地点","preferredDensity":"comfortable",' +
   '"requiredSections":["places"]}}';
 const PLANNING_INCOMPLETE_GOOGLE_MAPS_DECISION: string = EXPLICIT_GOOGLE_MAPS_DECISION.replace(
-  '"roundAction":"execute",',
+  '"roundAction":"execute","continuationMode":"complete",',
   '"roundAction":"execute","continuationMode":"dependency",'
 );
 const DEVICE_C04_FOOD_DECISION: string =
   '{"personaId":"food_companion","skillId":"","requestedCapabilityIds":["food.search"],' +
-  '"roundAction":"execute","dataTasks":[{"localId":"search_chinese_restaurant_near_kings_cross",' +
+  '"roundAction":"execute","continuationMode":"complete","dataTasks":[{"localId":"search_chinese_restaurant_near_kings_cross",' +
   '"goal":"搜索伦敦国王十字车站附近的中餐","allowedToolIds":["food.search"],"toolId":"food.search",' +
   '"input":{"query":"中餐 伦敦国王十字车站附近","location":"伦敦国王十字车站",' +
   '"radius":5000,"language":"zh"},"required":true}],"uiIntent":{"purpose":"search",' +
   '"preferredDensity":"compact","requiredSections":["results"]}}';
 const DEVICE_C04_MAPS_REPAIR: string =
   '{"personaId":"default_companion","skillId":"","requestedCapabilityIds":["maps.place.search"],' +
-  '"roundAction":"execute","dataTasks":[{"localId":"search_chinese_restaurant_near_kings_cross",' +
+  '"roundAction":"execute","continuationMode":"complete","dataTasks":[{"localId":"search_chinese_restaurant_near_kings_cross",' +
   '"goal":"搜索伦敦国王十字车站附近的中餐","allowedToolIds":["maps.place.search"],' +
   '"toolId":"maps.place.search","input":{"query":"中餐 伦敦国王十字车站附近",' +
   '"location":"伦敦国王十字车站"},"required":true}],"uiIntent":{"purpose":"search",' +
@@ -171,11 +171,11 @@ const PREMATURE_GOOGLE_MAPS_DETAILS_DECISION: string = EXPLICIT_GOOGLE_MAPS_DECI
   '["maps.place.search","maps.place.details"]'
 );
 const ANSWER_FROM_TRAVEL_OBSERVATION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["travel.search"],"roundAction":"answer","dataTasks":[],' +
+  '"requestedCapabilityIds":["travel.search"],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"总结真实出行结果","preferredDensity":"comfortable",' +
   '"requiredSections":["travel"]},"answer":"根据上一轮真实结果继续回答。"}';
 const MODEL_OWNED_TERMINAL_REPAIR: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["travel.search"],"roundAction":"answer","dataTasks":[],' +
+  '"requestedCapabilityIds":["travel.search"],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"模型选择的真实出行总结","preferredDensity":"compact",' +
   '"requiredSections":["travel","next-step"]},"answer":"根据上一轮真实出行结果回答。"}';
 const MODEL_OWNED_UNBOUND_REPAIR: string = MODEL_OWNED_TERMINAL_REPAIR
@@ -183,28 +183,28 @@ const MODEL_OWNED_UNBOUND_REPAIR: string = MODEL_OWNED_TERMINAL_REPAIR
   .replace('模型选择的真实出行总结', '模型选择的真实地点总结')
   .replace('"travel","next-step"', '"place","next-step"');
 const SPARSE_TERMINAL_REPAIR: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["travel.search"],"roundAction":"answer",' +
+  '"requestedCapabilityIds":["travel.search"],"roundAction":"answer","continuationMode":"complete",' +
   '"answer":"根据上一轮真实出行结果回答。"}';
 const REPEATED_TRAVEL_PRIVATE_DECISION: string = TRAVEL_DECISION.replace(
   '"goal":"我明天要从北京去上海，帮我搜索出行方案"',
   '"goal":"FIRST_MODEL_PRIVATE_MARKER"'
 );
 const MAP_DETAILS_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["maps.place.details"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["maps.place.details"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"place-details","goal":"读取上一轮真实地点的详情",' +
   '"allowedToolIds":["maps.place.details"],"toolId":"maps.place.details",' +
   '"input":{"placeId":"place-real-1"},"required":true}],' +
   '"uiIntent":{"purpose":"展示地点详情","preferredDensity":"comfortable",' +
   '"requiredSections":["place"]}}';
 const UNBOUND_FOOD_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["food.search"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["food.search"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"food","goal":"查询附近餐厅",' +
   '"allowedToolIds":["food.search"],"toolId":"food.search",' +
   '"input":{"query":"附近餐厅"},"required":true}],' +
   '"uiIntent":{"purpose":"展示餐厅","preferredDensity":"comfortable",' +
   '"requiredSections":["food"]}}';
 const MAIL_READ_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["mail.thread.read"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["mail.thread.read"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"mail-read","goal":"读取真实邮件正文",' +
   '"allowedToolIds":["mail.thread.read"],"toolId":"mail.thread.read",' +
   '"input":{"provider":"gmail","requestKey":"gmail:thread-real-1",' +
@@ -212,7 +212,7 @@ const MAIL_READ_DECISION: string = '{"personaId":"travel_companion","skillId":""
   '"uiIntent":{"purpose":"展示邮件正文","preferredDensity":"comfortable",' +
   '"requiredSections":["mail"]}}';
 const GMAIL_READ_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["gmail.thread.read"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["gmail.thread.read"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"gmail-read","goal":"读取真实 Gmail 正文",' +
   '"allowedToolIds":["gmail.thread.read"],"toolId":"gmail.thread.read",' +
   '"input":{"requestKey":"gmail:thread-real-1","threadId":"thread-real-1",' +
@@ -234,17 +234,17 @@ const EXACT_MULTI_TOOL_ACTION_DECISION: string = PARALLEL_DECISION
       '"reasonCode":"parallel_reads"}'
   );
 const HOTEL_WITH_EXTRA_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["hotel.search","memory.update"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["hotel.search","memory.update"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"hotel","goal":"查酒店","allowedToolIds":["hotel.search"],' +
   '"toolId":"hotel.search","input":{},"required":true}],' +
   '"uiIntent":{"purpose":"展示酒店","preferredDensity":"comfortable",' +
   '"requiredSections":["hotel"]},"reasonCode":"hotel_search"}';
 const ANSWER_WITHOUT_ANSWER_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":[],"roundAction":"answer","dataTasks":[],' +
+  '"requestedCapabilityIds":[],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"reply","preferredDensity":"comfortable","requiredSections":[]},' +
   '"reasonCode":"greeting"}';
 const LIVE_ANSWER_WITHOUT_REASON_CODE: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":[],"roundAction":"answer","dataTasks":[],' +
+  '"requestedCapabilityIds":[],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"reply","preferredDensity":"comfortable","requiredSections":[]},' +
   '"answer":"LIVE_PRIVATE_MARKER"}';
 const VALID_ANSWER_DECISION: string = LIVE_ANSWER_WITHOUT_REASON_CODE.substring(
@@ -280,8 +280,8 @@ const EXPLICIT_SERIAL_SECOND_DECISION: string =
   '"allowedActionIds":["calendar.event.create"]}}';
 const EXPLICIT_SERIAL_THIRD_DECISION: string =
   '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["calendar.event.create"],"roundAction":"execute",' +
-  '"continuationMode":"complete","dataTasks":[],' +
+  '"requestedCapabilityIds":["calendar.event.create"],"roundAction":"execute","continuationMode":"complete",' +
+  '"dataTasks":[],' +
   '"uiIntent":{"purpose":"创建明天同一时间的会议日程","preferredDensity":"comfortable",' +
   '"requiredSections":["calendar"]},"actionIntent":{"goal":"创建明天同一时间的会议日程",' +
   '"allowedActionIds":["calendar.event.create"]}}';
@@ -319,14 +319,14 @@ function sameRoundDependencyDecisionWithConsumers(
   const tasks: string = reversed ? consumerTasks + ',' + source : source + ',' + consumerTasks;
   return '{"personaId":"travel_companion","skillId":"",' +
     '"requestedCapabilityIds":["' + sourceToolId + '","' + consumerToolId + '"],' +
-    '"roundAction":"execute","dataTasks":[' + tasks + '],"uiIntent":{' +
+    '"roundAction":"execute","continuationMode":"complete","dataTasks":[' + tasks + '],"uiIntent":{' +
     '"purpose":"read source and dependent detail","preferredDensity":"comfortable",' +
     '"requiredSections":["source","detail"]}}';
 }
 
 function producerOnlyRepairDecision(toolId: string): string {
   return '{"personaId":"travel_companion","skillId":"",' +
-    '"requestedCapabilityIds":["' + toolId + '"],"roundAction":"execute",' +
+    '"requestedCapabilityIds":["' + toolId + '"],"roundAction":"execute","continuationMode":"complete",' +
     '"dataTasks":[{"localId":"source","goal":"read source",' +
     '"allowedToolIds":["' + toolId + '"],"toolId":"' + toolId + '",' +
     '"input":{},"required":true}],"uiIntent":{' +
@@ -336,7 +336,7 @@ function producerOnlyRepairDecision(toolId: string): string {
 
 function directDependencyConsumerDecision(toolId: string, input: string): string {
   return '{"personaId":"travel_companion","skillId":"",' +
-    '"requestedCapabilityIds":["' + toolId + '"],"roundAction":"execute",' +
+    '"requestedCapabilityIds":["' + toolId + '"],"roundAction":"execute","continuationMode":"complete",' +
     '"dataTasks":[{"localId":"direct-detail","goal":"read an explicit detail",' +
     '"allowedToolIds":["' + toolId + '"],"toolId":"' + toolId + '",' +
     '"input":' + input + ',"required":true}],"uiIntent":{' +
@@ -362,7 +362,7 @@ function sameRoundMapsWithFood(
     '["maps.place.search","food.search","maps.place.details"]' :
     '["maps.place.search","food.search"]';
   return '{"personaId":"travel_companion","skillId":"",' +
-    '"requestedCapabilityIds":' + capabilityIds + ',"roundAction":"execute","dataTasks":[' +
+    '"requestedCapabilityIds":' + capabilityIds + ',"roundAction":"execute","continuationMode":"complete","dataTasks":[' +
     tasks + '],"uiIntent":{"purpose":"read source and food","preferredDensity":"comfortable",' +
     '"requiredSections":["source","food"]}}';
 }
@@ -405,7 +405,7 @@ function manyTravelDecision(count: number): string {
       '"toolId":"travel.search","input":{"query":"北京到上海"},"required":true}');
   }
   return '{"personaId":"travel_companion","skillId":"",' +
-    '"requestedCapabilityIds":["travel.search"],"roundAction":"execute",' +
+    '"requestedCapabilityIds":["travel.search"],"roundAction":"execute","continuationMode":"complete",' +
     '"dataTasks":[' + tasks.join(',') + '],"uiIntent":{"purpose":"travel.search",' +
     '"preferredDensity":"comfortable","requiredSections":["travel"]}}';
 }
@@ -858,7 +858,7 @@ function c10C11Context(): LeaderPlanningContext {
 
 function actionDecision(actionId: string): string {
   return '{"personaId":"travel_companion","skillId":"",' +
-    '"requestedCapabilityIds":["' + actionId + '"],"roundAction":"execute","dataTasks":[],' +
+    '"requestedCapabilityIds":["' + actionId + '"],"roundAction":"execute","continuationMode":"complete","dataTasks":[],' +
     '"uiIntent":{"purpose":"perform requested action","preferredDensity":"comfortable",' +
     '"requiredSections":[]},"actionIntent":{"goal":"perform requested action",' +
     '"allowedActionIds":["' + actionId + '"]}}';
@@ -866,7 +866,7 @@ function actionDecision(actionId: string): string {
 
 function actionAsDataDecision(actionId: string): string {
   return '{"personaId":"travel_companion","skillId":"",' +
-    '"requestedCapabilityIds":["' + actionId + '"],"roundAction":"execute",' +
+    '"requestedCapabilityIds":["' + actionId + '"],"roundAction":"execute","continuationMode":"complete",' +
     '"dataTasks":[{"localId":"action-as-data","goal":"perform requested action",' +
     '"allowedToolIds":["' + actionId + '"],"toolId":"' + actionId + '",' +
     '"input":{},"required":true}],"uiIntent":{"purpose":"perform requested action",' +
@@ -875,7 +875,7 @@ function actionAsDataDecision(actionId: string): string {
 
 function hotelDetailDualRoleDecision(): string {
   return '{"personaId":"travel_companion","skillId":"",' +
-    '"requestedCapabilityIds":["hotel.detail"],"roundAction":"execute",' +
+    '"requestedCapabilityIds":["hotel.detail"],"roundAction":"execute","continuationMode":"complete",' +
     '"dataTasks":[{"localId":"hotel-detail","goal":"read exact hotel detail",' +
     '"allowedToolIds":["hotel.detail"],"toolId":"hotel.detail",' +
     '"input":{"hotelId":47675},"required":true}],"uiIntent":{' +
@@ -886,7 +886,7 @@ function hotelDetailDualRoleDecision(): string {
 
 function hotelDetailDataOnlyDecision(): string {
   return '{"personaId":"travel_companion","skillId":"",' +
-    '"requestedCapabilityIds":["hotel.detail"],"roundAction":"execute",' +
+    '"requestedCapabilityIds":["hotel.detail"],"roundAction":"execute","continuationMode":"complete",' +
     '"dataTasks":[{"localId":"hotel-detail","goal":"read exact hotel detail",' +
     '"allowedToolIds":["hotel.detail"],"toolId":"hotel.detail",' +
     '"input":{"hotelId":47675},"required":true}],"uiIntent":{' +
@@ -896,7 +896,7 @@ function hotelDetailDataOnlyDecision(): string {
 
 function hotelDetailActionOnlyDecision(): string {
   return '{"personaId":"travel_companion","skillId":"",' +
-    '"requestedCapabilityIds":["hotel.detail"],"roundAction":"execute","dataTasks":[],' +
+    '"requestedCapabilityIds":["hotel.detail"],"roundAction":"execute","continuationMode":"complete","dataTasks":[],' +
     '"uiIntent":{"purpose":"offer hotel detail","preferredDensity":"comfortable",' +
     '"requiredSections":["hotel"]},"actionIntent":{"goal":"offer the declared hotel detail follow-up",' +
     '"allowedActionIds":["hotel.detail"]}}';
@@ -1696,6 +1696,27 @@ export default function multiAgentLeaderPlannerTest() {
       );
 
       expect(decision.reasonCode).assertEqual('dependency_requires_next_round');
+    });
+
+    it('repairs a missing continuation mode instead of treating the round as complete', 0, async () => {
+      const missingMode: string = PLANNING_INCOMPLETE_GOOGLE_MAPS_DECISION.replace(
+        '"continuationMode":"dependency",',
+        ''
+      );
+      const model = new QueueLocalModel([
+        missingMode,
+        PLANNING_INCOMPLETE_GOOGLE_MAPS_DECISION
+      ]);
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: '请用 Google Maps 找到伦敦国王十字车站并展示完整地点信息' },
+        planningContext(),
+        1,
+        (): boolean => true
+      );
+
+      expect(decision.reasonCode).assertEqual('dependency_requires_next_round');
+      expect(model.prompts.length).assertEqual(2);
     });
 
     it('keeps tool scope closed while preserving an explicitly requested parallel domain', 0, async () => {
@@ -2791,7 +2812,7 @@ export default function multiAgentLeaderPlannerTest() {
       const omittedModel = new QueueLocalModel([LIVE_ANSWER_WITHOUT_REASON_CODE]);
       const forgedModel = new QueueLocalModel([VALID_ANSWER_DECISION]);
       const clarifyModel = new QueueLocalModel(['{"personaId":"travel_companion","skillId":"",' +
-        '"requestedCapabilityIds":[],"roundAction":"clarify","dataTasks":[],' +
+        '"requestedCapabilityIds":[],"roundAction":"clarify","continuationMode":"complete","dataTasks":[],' +
         '"uiIntent":{"purpose":"clarify","preferredDensity":"comfortable","requiredSections":[]},' +
         '"answer":"请提供城市"}']);
       const input: InputUserPayload = { text: '你好' };
@@ -3106,7 +3127,7 @@ export default function multiAgentLeaderPlannerTest() {
 
     it('accepts zero Data only for an explicit registered Action intent', 0, async () => {
       const output: string = '{"personaId":"travel_companion","skillId":"",' +
-        '"requestedCapabilityIds":["memory.update"],"roundAction":"execute","dataTasks":[],' +
+        '"requestedCapabilityIds":["memory.update"],"roundAction":"execute","continuationMode":"complete","dataTasks":[],' +
         '"uiIntent":{"purpose":"remember","preferredDensity":"comfortable",' +
         '"requiredSections":[]},"actionIntent":{"goal":"remember explicit text",' +
         '"allowedActionIds":["memory.update"]},"reasonCode":"stable_preference"}';
