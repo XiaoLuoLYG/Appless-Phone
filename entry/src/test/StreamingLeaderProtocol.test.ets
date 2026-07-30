@@ -44,6 +44,20 @@ export default function streamingLeaderProtocolTest() {
       expect(tasks.length).assertEqual(2);
     });
 
+    it('keeps a closing tag literal inside a task JSON string', 0, () => {
+      const parser: StreamingLeaderToolParser = new StreamingLeaderToolParser();
+      const body: string = '{"localId":"protocol","goal":"explain </appless_tool> framing",' +
+        '"allowedToolIds":["time.query"],"toolId":"time.query","input":{},"required":true}';
+      let bodies: string[] = parser.feed('<appless_tool>{"localId":"protocol","goal":"explain </appless_');
+      expect(bodies.length).assertEqual(0);
+      bodies = bodies.concat(parser.feed('tool> framing","allowedToolIds":["time.query"],' +
+        '"toolId":"time.query","input":{},"required":true}</appless_tool>'));
+
+      expect(bodies.length).assertEqual(1);
+      expect(bodies[0]).assertEqual(body);
+      expect(parser.finish()).assertEqual(body);
+    });
+
     it('rejects an unfinished tool tag at stream end', 0, () => {
       const parser: StreamingLeaderToolParser = new StreamingLeaderToolParser();
       parser.feed('{"dataTasks":[<appless_tool>{"localId":"unfinished"}');
