@@ -2,7 +2,7 @@
   "app": {
     "bundleName": "com.example.aiphonedemo",
     "vendor": "XiaoLuoLYG",
-    "versionCode": 10006,
+    "versionCode": 1000001,
     "versionName": "0.1.6",
     "buildVersion": "1",
     "icon": "$media:layered_image",
