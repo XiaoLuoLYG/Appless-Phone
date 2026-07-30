@@ -29,6 +29,7 @@ export interface ActionPlanRequestPayload {
   dataTaskIds: string[];
   goal: string;
   allowedActionIds: string[];
+  executionMode?: 'frozen_sequence';
   personaId?: string;
   skillId: string;
   inputText?: string;

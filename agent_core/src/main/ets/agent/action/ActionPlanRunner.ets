@@ -12,7 +12,9 @@ import {
   ActionPlanStep,
   ActionPlanStepOutput,
   ActionPlanValidationResult,
+  ActionStepCommitResult,
   ActionStepExecutionResult,
+  ActionStepExecutionObserver,
   ActionStepExecutor,
   FrozenActionPlanStep,
   JsonValue
@@ -26,6 +28,16 @@ import {
   setJsonPointer,
   validateJsonPointer
 } from './JsonPointer';
+import {
+  actionSchemaFingerprint
+} from './schema/ActionSchemaCatalog';
+import {
+  validateActionSchema,
+  validateActionValue
+} from './schema/ActionJsonSchema';
+import {
+  SchemaAwareActionDefinitionLookup
+} from './schema/SchemaAwareActionDefinition';
 
 interface CompletedStep {
   stepId: string;
@@ -127,10 +139,6 @@ function pausedOutcome(
 }
 
 function stepArgs(step: ActionPlanStep): Object {
-  if (step.args === undefined) {
-    const empty: Record<string, JsonValue | undefined> = {};
-    return empty;
-  }
   return step.args;
 }
 
@@ -226,8 +234,17 @@ function inspectForbiddenFields(
   active.add(objectValue);
   const keys = Object.keys(objectValue);
   const record = objectValue as Record<string, JsonValue | undefined>;
+  const isPlanStep = keys.indexOf('stepId') >= 0 &&
+    keys.indexOf('actionId') >= 0 &&
+    keys.indexOf('args') >= 0 &&
+    keys.indexOf('inputFrom') >= 0;
   for (let index = 0; index < keys.length; index++) {
     const key = keys[index];
+    // Frozen schema snapshots are declarative metadata. Their property names
+    // must not be mistaken for executable plan control fields.
+    if (key === 'definition' && isPlanStep) {
+      continue;
+    }
     if (FORBIDDEN_FIELDS.indexOf(key) >= 0) {
       active.delete(objectValue);
       return {
@@ -259,6 +276,12 @@ function bindingSourceIsEarlier(
     }
   }
   return false;
+}
+
+function bindingTargetsOverlap(left: string, right: string): boolean {
+  return left === right ||
+    left.startsWith(`${right}/`) ||
+    right.startsWith(`${left}/`);
 }
 
 function completedOutput(completed: CompletedStep[], stepId: string): JsonValue | undefined {
@@ -297,10 +320,19 @@ function executionContext(
 export class ActionPlanRunner {
   private catalog: ActionCatalog;
   private executor: ActionStepExecutor;
+  private definitions: SchemaAwareActionDefinitionLookup | null;
+  private observer: ActionStepExecutionObserver | null;
 
-  constructor(catalog: ActionCatalog, executor: ActionStepExecutor) {
+  constructor(
+    catalog: ActionCatalog,
+    executor: ActionStepExecutor,
+    definitions?: SchemaAwareActionDefinitionLookup | null,
+    observer?: ActionStepExecutionObserver
+  ) {
     this.catalog = catalog;
     this.executor = executor;
+    this.definitions = definitions === undefined ? null : definitions;
+    this.observer = observer === undefined ? null : observer;
   }
 
   validate(plan: ActionPlan, context: ActionPlanRunContext): ActionPlanValidationResult {
@@ -397,6 +429,21 @@ export class ActionPlanRunner {
             'Action plan actionId must be nonempty.'
           );
         }
+        const frozenValidation = this.validateFrozenStep(step, context);
+        if (!frozenValidation.ok) {
+          return validationFailure(
+            step.stepId,
+            frozenValidation.errorCode,
+            frozenValidation.message
+          );
+        }
+        if (step.offerId !== null && !isNonemptyString(step.offerId)) {
+          return validationFailure(
+            step.stepId,
+            'ACTION_PLAN_OFFER_ID',
+            'Action plan offerId must be a nonempty string or null.'
+          );
+        }
         const args = stepArgs(step);
         if (!isArgsObject(args)) {
           return validationFailure(
@@ -405,14 +452,21 @@ export class ActionPlanRunner {
             'Action args must be a non-array object.'
           );
         }
-        if (step.inputFrom !== undefined && !Array.isArray(step.inputFrom)) {
+        if (!Array.isArray(step.inputFrom)) {
           return validationFailure(
             step.stepId,
             'ACTION_PLAN_BINDING_MALFORMED',
             'Action inputFrom must be an array.'
           );
         }
-        const bindings: ActionInputBinding[] = step.inputFrom === undefined ? [] : step.inputFrom;
+        const bindings: ActionInputBinding[] = step.inputFrom;
+        if (step.offerId !== null && bindings.length !== 0) {
+          return validationFailure(
+            step.stepId,
+            'ACTION_PLAN_OFFER_STEP_OVERRIDE',
+            'Offer steps cannot bind prior outputs.'
+          );
+        }
         for (let bindingIndex = 0; bindingIndex < bindings.length; bindingIndex++) {
           const binding = bindings[bindingIndex];
           if (binding === null ||
@@ -441,6 +495,28 @@ export class ActionPlanRunner {
               'JSON_POINTER_INVALID',
               'Action binding contains an invalid JSON Pointer.'
             );
+          }
+          if (resolveJsonPointer(args as JsonValue, binding.target).ok &&
+            !(binding.target === '' && Object.keys(args).length === 0)) {
+            return validationFailure(
+              step.stepId,
+              'ACTION_PLAN_BINDING_ARG_CONFLICT',
+              'Action input binding cannot overwrite a constant arg.'
+            );
+          }
+          for (let priorIndex = 0;
+            priorIndex < bindingIndex;
+            priorIndex++) {
+            if (bindingTargetsOverlap(
+              bindings[priorIndex].target,
+              binding.target
+            )) {
+              return validationFailure(
+                step.stepId,
+                'ACTION_PLAN_BINDING_TARGET_CONFLICT',
+                'Action input binding targets cannot overlap.'
+              );
+            }
           }
         }
         const catalogResult = this.validatePreflightAction(
@@ -543,8 +619,7 @@ export class ActionPlanRunner {
       let availableConfirmation = confirmedStepId;
       for (let index = nextStepIndex; index < snapshot.steps.length; index++) {
         const step = snapshot.steps[index];
-        if (step.definitionFingerprint !== undefined && step.definitionFingerprint.length > 0 &&
-          this.catalog.definitionFingerprint(step.actionId) !== step.definitionFingerprint) {
+        if (this.stepIsStale(step)) {
           return errorOutcome(
             step.stepId,
             'PLAN_STALE',
@@ -562,6 +637,29 @@ export class ActionPlanRunner {
           );
         }
         const boundArgs = bound.value as Object;
+        const inputInspection = inspectJsonValue(boundArgs);
+        if (!inputInspection.ok) {
+          return errorOutcome(
+            step.stepId,
+            'ACTION_BOUND_INPUT_INVALID',
+            'Bound action input is not safe JSON data.',
+            this.completedStepIds(completed)
+          );
+        }
+        if (step.definition !== undefined) {
+          const inputValidation = validateActionValue(
+            step.definition.input.schema,
+            boundArgs as JsonValue
+          );
+          if (!inputValidation.ok) {
+            return errorOutcome(
+              step.stepId,
+              'ACTION_BOUND_INPUT_INVALID',
+              `Bound action input failed schema validation at ${inputValidation.path}.`,
+              this.completedStepIds(completed)
+            );
+          }
+        }
         const currentValidation = this.validateExecutionAction(
           snapshot,
           contextSnapshot,
@@ -616,6 +714,7 @@ export class ActionPlanRunner {
           );
         }
         const result = resultClone.value as ActionStepExecutionResult;
+        const resultKeys = Object.keys(result).sort().join(',');
         if (result.status !== 'success') {
           if (result.status !== 'paused' &&
             result.status !== 'canceled' &&
@@ -632,6 +731,14 @@ export class ActionPlanRunner {
               step.stepId,
               'ACTION_EXECUTOR_RESULT_INVALID',
               'Action executor failure details are malformed.',
+              this.completedStepIds(completed)
+            );
+          }
+          if (resultKeys !== 'errorCode,message,status') {
+            return errorOutcome(
+              step.stepId,
+              'ACTION_EXECUTOR_RESULT_INVALID',
+              'Action executor failure result contains unexpected fields.',
               this.completedStepIds(completed)
             );
           }
@@ -652,6 +759,15 @@ export class ActionPlanRunner {
             completedStepIds: this.completedStepIds(completed)
           };
         }
+        if (resultKeys !== 'output,status' &&
+          resultKeys !== 'followUp,output,status') {
+          return errorOutcome(
+            step.stepId,
+            'ACTION_EXECUTOR_RESULT_INVALID',
+            'Action executor success result contains unexpected fields.',
+            this.completedStepIds(completed)
+          );
+        }
         const outputInspection = inspectJsonValue(result.output);
         if (!outputInspection.ok || result.output === undefined) {
           return errorOutcome(
@@ -661,9 +777,54 @@ export class ActionPlanRunner {
             this.completedStepIds(completed)
           );
         }
+        if (step.definition !== undefined) {
+          const outputValidation = validateActionValue(
+            step.definition.output.schema,
+            result.output
+          );
+          if (!outputValidation.ok) {
+            return errorOutcome(
+              step.stepId,
+              'ACTION_OUTPUT_SCHEMA_INVALID',
+              `Action output failed schema validation at ${outputValidation.path}.`,
+              this.completedStepIds(completed)
+            );
+          }
+        }
+        const currentExecution = executionContext(
+          contextSnapshot,
+          step.stepId,
+          index
+        );
+        if (this.observer !== null) {
+          const commit: ActionStepCommitResult =
+            this.observer.commitValidatedSuccess(
+              step.actionId,
+              result.output,
+              currentExecution,
+              result.followUp
+            );
+          if (!commit.ok) {
+            return errorOutcome(
+              step.stepId,
+              commit.errorCode,
+              commit.message,
+              this.completedStepIds(completed)
+            );
+          }
+        }
+        const outputClone = cloneJsonValue(result.output);
+        if (!outputClone.ok || outputClone.value === undefined) {
+          return errorOutcome(
+            step.stepId,
+            'ACTION_OUTPUT_INVALID',
+            'Validated action output could not be stored.',
+            this.completedStepIds(completed)
+          );
+        }
         completed.push({
           stepId: step.stepId,
-          output: result.output
+          output: outputClone.value as JsonValue
         });
       }
       const outputs: ActionPlanStepOutput[] = [];
@@ -686,6 +847,134 @@ export class ActionPlanRunner {
         this.completedStepIds(completed)
       );
     }
+  }
+
+  private validateFrozenStep(
+    step: FrozenActionPlanStep,
+    context: ActionPlanRunContext
+  ): ActionPlanValidationResult {
+    if (step.definition !== undefined) {
+      const definition = step.definition;
+      if (!isNonemptyString(definition.definitionFingerprint) ||
+        !isNonemptyString(definition.input.schemaId) ||
+        !isNonemptyString(definition.input.revision) ||
+        !isNonemptyString(definition.input.fingerprint) ||
+        !isNonemptyString(definition.output.schemaId) ||
+        !isNonemptyString(definition.output.revision) ||
+        !isNonemptyString(definition.output.fingerprint)) {
+        return validationFailure(
+          step.stepId,
+          'ACTION_PLAN_SCHEMA_SNAPSHOT_INVALID',
+          'Frozen Action schema identity is malformed.'
+        );
+      }
+      const inputSchema = validateActionSchema(definition.input.schema);
+      const outputSchema = validateActionSchema(definition.output.schema);
+      if (!inputSchema.ok || !outputSchema.ok ||
+        actionSchemaFingerprint(
+          definition.input.schemaId,
+          definition.input.revision,
+          definition.input.schema
+        ) !== definition.input.fingerprint ||
+        actionSchemaFingerprint(
+          definition.output.schemaId,
+          definition.output.revision,
+          definition.output.schema
+        ) !== definition.output.fingerprint) {
+        return validationFailure(
+          step.stepId,
+          'ACTION_PLAN_SCHEMA_SNAPSHOT_INVALID',
+          'Frozen Action schema snapshot is invalid.'
+        );
+      }
+    }
+    if (step.authority === undefined) {
+      return validPlan();
+    }
+    const authority = step.authority;
+    if (authority.kind === 'offer') {
+      if (step.offerId !== authority.offerId ||
+        !isNonemptyString(authority.offerId) ||
+        !isNonemptyString(authority.dataTaskId) ||
+        !isNonemptyString(authority.sourceToolId) ||
+        authority.sourceToolId !== context.sourceToolId) {
+        return validationFailure(
+          step.stepId,
+          'ACTION_PLAN_AUTHORITY_INVALID',
+          'Frozen Offer authority is malformed.'
+        );
+      }
+      return validPlan();
+    }
+    if (authority.kind === 'derived') {
+      if (step.offerId !== null ||
+        authority.actionTaskId !== context.taskId ||
+        authority.allowedActionId !== step.actionId) {
+        return validationFailure(
+          step.stepId,
+          'ACTION_PLAN_AUTHORITY_INVALID',
+          'Frozen derived Action authority is malformed.'
+        );
+      }
+      return validPlan();
+    }
+    if (authority.kind === 'virtual_intent') {
+      const authorityOfferId = authority.offerId;
+      const offerMatches: boolean = authorityOfferId === undefined ?
+        step.offerId === null :
+        isNonemptyString(authorityOfferId) &&
+          step.offerId === authorityOfferId;
+      if (!offerMatches ||
+        authority.actionTaskId !== context.taskId ||
+        context.virtualAction !== true) {
+        return validationFailure(
+          step.stepId,
+          'ACTION_PLAN_AUTHORITY_INVALID',
+          'Frozen virtual Action authority is malformed.'
+        );
+      }
+      return validPlan();
+    }
+    if (authority.kind === 'surface') {
+      if (step.offerId !== null ||
+        authority.surfaceId !== context.surfaceId ||
+        typeof authority.pageActionId !== 'string' ||
+        (context.pageActionId !== undefined &&
+          authority.pageActionId !== context.pageActionId)) {
+        return validationFailure(
+          step.stepId,
+          'ACTION_PLAN_AUTHORITY_INVALID',
+          'Frozen Surface Action authority is malformed.'
+        );
+      }
+      return validPlan();
+    }
+    return validationFailure(
+      step.stepId,
+      'ACTION_PLAN_AUTHORITY_INVALID',
+      'Frozen Action authority kind is unknown.'
+    );
+  }
+
+  private stepIsStale(step: FrozenActionPlanStep): boolean {
+    if (step.definition !== undefined) {
+      if (this.definitions === null) {
+        return true;
+      }
+      const current = this.definitions.find(step.actionId);
+      return !current.ok ||
+        current.definition === null ||
+        current.definition.definitionFingerprint !==
+          step.definition.definitionFingerprint ||
+        current.definition.inputSchemaFingerprint !==
+          step.definition.input.fingerprint ||
+        current.definition.outputSchemaFingerprint !==
+          step.definition.output.fingerprint;
+    }
+    return step.definitionFingerprint !== undefined &&
+      step.definitionFingerprint.length > 0 &&
+      this.catalog.definitionFingerprint(step.actionId) !==
+        step.definitionFingerprint;
   }
 
   private snapshotCompleted(
@@ -727,6 +1016,21 @@ export class ActionPlanRunner {
           message: 'Action resume output is invalid.'
         };
       }
+      const frozenDefinition = plan.steps[index].definition;
+      if (frozenDefinition !== undefined) {
+        const schemaValidation = validateActionValue(
+          frozenDefinition.output.schema,
+          output.value as JsonValue
+        );
+        if (!schemaValidation.ok) {
+          return {
+            ok: false,
+            completed: [],
+            errorCode: 'ACTION_RESUME_STATE_INVALID',
+            message: 'Action resume output does not match the frozen schema.'
+          };
+        }
+      }
       completed.push({
         stepId: prior.stepId,
         output: output.value as JsonValue
@@ -749,7 +1053,9 @@ export class ActionPlanRunner {
   ): ActionCatalogResult {
     const step = plan.steps[index];
     if (context.virtualAction === true) {
-      return this.catalog.validateActionIntentExecution(step.actionId, args);
+      return index === 0 ?
+        this.catalog.validateActionIntentExecution(step.actionId, args) :
+        this.catalog.validateRegisteredAction(step.actionId);
     }
     if (index === 0) {
       if (context.pageActionId !== undefined && context.pageActionId.length > 0) {
@@ -823,7 +1129,7 @@ export class ActionPlanRunner {
       };
     }
     let bound: JsonValue = argsClone.value as JsonValue;
-    const bindings: ActionInputBinding[] = step.inputFrom === undefined ? [] : step.inputFrom;
+    const bindings: ActionInputBinding[] = step.inputFrom;
     for (let index = 0; index < bindings.length; index++) {
       const source = completedOutput(completed, bindings[index].stepId);
       if (source === undefined) {

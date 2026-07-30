@@ -24,6 +24,7 @@ export type LeaderRoundAction = 'execute' | 'answer' | 'clarify';
 export interface LeaderActionIntent {
   goal: string;
   allowedActionIds: string[];
+  executionMode?: 'frozen_sequence';
 }
 
 export interface LeaderDecisionDataTask {

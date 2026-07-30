@@ -1173,14 +1173,23 @@ export class LeaderAgent extends MessageDrivenAgent {
   }
 
   private validActionIntent(intent: Object | string | number | boolean | null): boolean {
-    if (intent === null || typeof intent !== 'object' || Array.isArray(intent) ||
-      Object.keys(intent).sort().join(',') !== 'allowedActionIds,goal') {
+    if (intent === null || typeof intent !== 'object' || Array.isArray(intent)) {
+      return false;
+    }
+    const keys: string = Object.keys(intent).sort().join(',');
+    if (keys !== 'allowedActionIds,goal' &&
+      keys !== 'allowedActionIds,executionMode,goal') {
       return false;
     }
     const values = intent as Record<string, Object | string | number | boolean | null | undefined>;
     const allowedIds = values['allowedActionIds'];
+    const executionMode = values['executionMode'];
     if (typeof values['goal'] !== 'string' || (values['goal'] as string).trim().length === 0 ||
       !Array.isArray(allowedIds) || !this.validUniqueStrings(allowedIds as Object[], false)) {
+      return false;
+    }
+    if (executionMode !== undefined &&
+      (executionMode !== 'frozen_sequence' || allowedIds.length < 2)) {
       return false;
     }
     for (let index = 0; index < allowedIds.length; index++) {
@@ -1532,6 +1541,10 @@ export class LeaderAgent extends MessageDrivenAgent {
     };
     if (decision.normalizationCurrentLocalDate !== undefined) {
       payload.currentLocalDate = decision.normalizationCurrentLocalDate;
+    }
+    if (decision.actionIntent !== undefined &&
+      decision.actionIntent.executionMode === 'frozen_sequence') {
+      payload.executionMode = 'frozen_sequence';
     }
     if (virtual) {
       payload.virtual = true;

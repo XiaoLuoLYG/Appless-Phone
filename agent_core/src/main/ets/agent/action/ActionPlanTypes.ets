@@ -1,4 +1,5 @@
 import { ActionOffer } from './ActionOfferTypes';
+import { ActionJsonSchema } from './schema/ActionJsonSchema';
 
 export type JsonValue = Object | string | number | boolean | null;
 
@@ -11,12 +12,63 @@ export interface ActionInputBinding {
 export interface ActionPlanStep {
   stepId: string;
   actionId: string;
-  args?: Object;
-  inputFrom?: ActionInputBinding[];
+  offerId: string | null;
+  args: Object;
+  inputFrom: ActionInputBinding[];
 }
 
-export interface FrozenActionPlanStep extends ActionPlanStep {
+export interface FrozenActionSchemaSnapshot {
+  schemaId: string;
+  revision: string;
+  fingerprint: string;
+  schema: ActionJsonSchema;
+}
+
+export interface FrozenActionDefinitionSnapshot {
   definitionFingerprint: string;
+  input: FrozenActionSchemaSnapshot;
+  output: FrozenActionSchemaSnapshot;
+}
+
+export interface FrozenOfferAuthority {
+  kind: 'offer';
+  offerId: string;
+  dataTaskId: string;
+  sourceToolId: string;
+}
+
+export interface FrozenDerivedAuthority {
+  kind: 'derived';
+  actionTaskId: string;
+  allowedActionId: string;
+}
+
+export interface FrozenVirtualIntentAuthority {
+  kind: 'virtual_intent';
+  actionTaskId: string;
+  /** Exact resolver-owned Offer used by the first frozen virtual step. */
+  offerId?: string;
+}
+
+export interface FrozenSurfaceAuthority {
+  kind: 'surface';
+  surfaceId: string;
+  pageActionId: string;
+}
+
+export type FrozenActionAuthority =
+  FrozenOfferAuthority |
+  FrozenDerivedAuthority |
+  FrozenVirtualIntentAuthority |
+  FrozenSurfaceAuthority;
+
+export interface FrozenActionPlanStep extends ActionPlanStep {
+  /** Legacy catalog fingerprint retained for PR #15 compatibility. */
+  definitionFingerprint: string;
+  /** Present when the schema-aware registry is connected at freeze time. */
+  definition?: FrozenActionDefinitionSnapshot;
+  /** Deterministic record of why this step was authorized. */
+  authority?: FrozenActionAuthority;
 }
 
 export interface ActionPlanDraft {
@@ -77,6 +129,8 @@ export interface ActionExecutionContext {
 export interface ActionStepSuccessResult {
   status: 'success';
   output: JsonValue;
+  /** Kept internal until the validated success is committed. */
+  followUp?: Object;
 }
 
 export interface ActionStepPausedResult {
@@ -109,6 +163,21 @@ export interface ActionStepExecutor {
     args: Object,
     context: ActionExecutionContext
   ): Promise<ActionStepExecutionResult>;
+}
+
+export interface ActionStepCommitResult {
+  ok: boolean;
+  errorCode: string;
+  message: string;
+}
+
+export interface ActionStepExecutionObserver {
+  commitValidatedSuccess(
+    actionId: string,
+    output: JsonValue,
+    context: ActionExecutionContext,
+    followUp?: Object
+  ): ActionStepCommitResult;
 }
 
 export interface ActionPlanStepOutput {

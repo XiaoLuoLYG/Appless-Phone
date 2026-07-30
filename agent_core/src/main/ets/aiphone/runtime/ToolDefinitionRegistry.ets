@@ -494,8 +494,8 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     riskLevel: 'read',
     backendPriority: ['system_intent'],
     authModes: ['none'],
-    inputSchema: 'origin:string,destination:string,travelMode?:driving|walking|bicycling|transit|two-wheeler,navigate?:boolean',
-    outputSchema: 'genericToolResults',
+    inputSchema: 'mapsRouteOpenRequest',
+    outputSchema: 'mapsRouteOpenResult',
     a2uiComponent: 'GenericToolResults',
     actions: ['maps.open.web']
   },
@@ -701,7 +701,7 @@ export function toolPlanningDescriptionForToolId(toolId: string): string {
   } else if (definition.toolId === 'social.community.search') {
     description += '. Use for read-only public community content on Reddit, LinkedIn, Instagram, or X when the user asks for the SocialHub community view. Preserve platform, query, resourceId, and limit. Do not use x.post.search for SocialHub community requests. Never fabricate posts or hide provider auth/network failures.';
   } else if (definition.toolId === 'social.post.preview') {
-    description += '. Use only for a standalone public X, LinkedIn, Instagram, or Reddit post draft. It creates a reviewable preview and does not publish. Include platform, operation="publish", and non-empty text. Never replace this with social.reply.draft, which requires a selected real inbox/feed item.';
+    description += '. Use for a public X, LinkedIn, Instagram, or Reddit post draft, either standalone or as a preview step inside an explicitly ordered workflow. It creates a reviewable preview and does not publish. Include platform, operation="publish", and non-empty text. Never replace this with social.reply.draft, which requires a selected real inbox/feed item.';
   } else if (definition.toolId === 'social.reply.draft') {
     description += '. Use only to draft a reply after a real SocialHub inbox/feed item is selected. Include itemId, platform, and instruction when available. Never use for a standalone public post. Do not send.';
   } else if (definition.toolId === 'x.post.search') {

@@ -15,6 +15,15 @@ interface JsonInspectionResult {
   message: string;
 }
 
+interface JsonCloneState {
+  active: Set<Object>;
+  nodes: number;
+}
+
+const MAX_JSON_VALUE_DEPTH: number = 32;
+const MAX_JSON_VALUE_NODES: number = 10000;
+const MAX_JSON_STRING_LENGTH: number = 1048576;
+
 export interface JsonPointerResult {
   ok: boolean;
   value: JsonValue | undefined;
@@ -149,7 +158,18 @@ function invalidJson(message: string): JsonPointerResult {
   return pointerFailure('JSON_VALUE_INVALID', message);
 }
 
-function cloneJson(value: JsonValue | undefined, active: Set<Object>): JsonPointerResult {
+function cloneJson(
+  value: JsonValue | undefined,
+  state: JsonCloneState,
+  depth: number
+): JsonPointerResult {
+  state.nodes++;
+  if (depth > MAX_JSON_VALUE_DEPTH || state.nodes > MAX_JSON_VALUE_NODES) {
+    return invalidJson('JSON value exceeds the execution size limit.');
+  }
+  if (typeof value === 'string' && value.length > MAX_JSON_STRING_LENGTH) {
+    return invalidJson('JSON string exceeds the execution size limit.');
+  }
   if (value === null || typeof value === 'string' || typeof value === 'boolean') {
     return {
       ok: true,
@@ -173,31 +193,35 @@ function cloneJson(value: JsonValue | undefined, active: Set<Object>): JsonPoint
     return invalidJson('Value is not JSON-compatible.');
   }
   const objectValue = value as Object;
-  if (active.has(objectValue)) {
+  if (state.active.has(objectValue)) {
     return invalidJson('Cyclic JSON values are not allowed.');
   }
-  active.add(objectValue);
+  state.active.add(objectValue);
   if (Array.isArray(value)) {
     const keys = Object.keys(value);
     if (keys.length !== value.length) {
-      active.delete(objectValue);
+      state.active.delete(objectValue);
       return invalidJson('JSON arrays cannot contain holes or named properties.');
     }
     const arrayClone: JsonValue[] = [];
     for (let index = 0; index < value.length; index++) {
       const key = index.toString();
       if (keys.indexOf(key) < 0) {
-        active.delete(objectValue);
+        state.active.delete(objectValue);
         return invalidJson('JSON arrays cannot contain holes.');
       }
-      const nested = cloneJson(value[index] as JsonValue | undefined, active);
+      const nested = cloneJson(
+        value[index] as JsonValue | undefined,
+        state,
+        depth + 1
+      );
       if (!nested.ok) {
-        active.delete(objectValue);
+        state.active.delete(objectValue);
         return nested;
       }
       arrayClone.push(nested.value as JsonValue);
     }
-    active.delete(objectValue);
+    state.active.delete(objectValue);
     return {
       ok: true,
       value: arrayClone,
@@ -211,17 +235,17 @@ function cloneJson(value: JsonValue | undefined, active: Set<Object>): JsonPoint
   for (let index = 0; index < keys.length; index++) {
     const key = keys[index];
     if (isPrototypeSegment(key)) {
-      active.delete(objectValue);
+      state.active.delete(objectValue);
       return invalidJson('JSON prototype member names are forbidden.');
     }
-    const nested = cloneJson(record[key], active);
+    const nested = cloneJson(record[key], state, depth + 1);
     if (!nested.ok) {
-      active.delete(objectValue);
+      state.active.delete(objectValue);
       return nested;
     }
     objectClone[key] = nested.value;
   }
-  active.delete(objectValue);
+  state.active.delete(objectValue);
   return {
     ok: true,
     value: objectClone,
@@ -232,7 +256,10 @@ function cloneJson(value: JsonValue | undefined, active: Set<Object>): JsonPoint
 
 export function inspectJsonValue(value: JsonValue | undefined): JsonInspectionResult {
   try {
-    const cloned = cloneJson(value, new Set<Object>());
+    const cloned = cloneJson(value, {
+      active: new Set<Object>(),
+      nodes: 0
+    }, 0);
     return {
       ok: cloned.ok,
       errorCode: cloned.errorCode,
@@ -249,7 +276,10 @@ export function inspectJsonValue(value: JsonValue | undefined): JsonInspectionRe
 
 export function cloneJsonValue(value: JsonValue): JsonPointerResult {
   try {
-    return cloneJson(value, new Set<Object>());
+    return cloneJson(value, {
+      active: new Set<Object>(),
+      nodes: 0
+    }, 0);
   } catch (_error) {
     return pointerFailure('JSON_VALUE_INVALID', 'JSON value cloning failed.');
   }

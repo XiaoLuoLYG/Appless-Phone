@@ -38,13 +38,22 @@ import {
   ActionPlanPausedOutcome,
   ActionPlanRunContext,
   ActionPlanStep,
+  ActionStepCommitResult,
+  ActionStepErrorResult,
+  ActionStepExecutionObserver,
   FrozenActionPlanStep,
+  FrozenActionAuthority,
+  FrozenActionDefinitionSnapshot,
   ActionPlanStepOutput,
   ActionStepExecutionResult,
   ActionStepExecutor,
   JsonValue
 } from './ActionPlanTypes';
 import { cloneJsonValue } from './JsonPointer';
+import {
+  SchemaAwareActionDefinitionLookup
+} from './schema/SchemaAwareActionDefinition';
+import { aiLogError, aiLogInfo } from '../../aiphone/runtime/AiphoneLogger';
 
 const WORKFLOW_RUN_ACTION_ID: string = 'workflow.run';
 const LIVE_RUN_LIMIT: number = 128;
@@ -66,6 +75,11 @@ interface ActiveActionRun {
   completedStepIds: string[];
   outputs: ActionPlanStepOutput[];
   generation: number;
+}
+
+interface TerminalActionRun {
+  stored: StoredActionRun;
+  outcome: ActionPlanOutcome;
 }
 
 interface RunIdentityResult {
@@ -132,6 +146,15 @@ interface DirectSurfaceAuthorization {
   pageActionId: string;
   confirmed: boolean;
   generation: number;
+}
+
+type FrozenPlanAuthorityMode = 'data' | 'virtual_intent' | 'surface';
+
+interface FrozenPlanAuthorityContext {
+  mode: FrozenPlanAuthorityMode;
+  dataTaskId: string;
+  sourceToolId: string;
+  pageActionId: string;
 }
 
 function nonempty(value: string | undefined): boolean {
@@ -224,25 +247,91 @@ function frozenPlan(
   surfaceId: string,
   label: string,
   steps: ActionPlanStep[],
-  catalog: ActionCatalog
+  catalog: ActionCatalog,
+  definitions: SchemaAwareActionDefinitionLookup | null,
+  authorityContext: FrozenPlanAuthorityContext
 ): ActionPlan | null {
   const frozenSteps: FrozenActionPlanStep[] = [];
+  const virtualEntryOffer: boolean =
+    authorityContext.mode === 'virtual_intent' &&
+    steps.length > 0 && steps[0].offerId !== null;
   for (let index = 0; index < steps.length; index++) {
     const step = steps[index];
     const fingerprint = catalog.definitionFingerprint(step.actionId);
     if (fingerprint.length === 0) {
       return null;
     }
+    let definition: FrozenActionDefinitionSnapshot | undefined = undefined;
+    if (definitions !== null) {
+      const resolved = definitions.find(step.actionId);
+      if (!resolved.ok || resolved.definition === null) {
+        return null;
+      }
+      const current = resolved.definition;
+      definition = {
+        definitionFingerprint: current.definitionFingerprint,
+        input: {
+          schemaId: current.inputSchemaId,
+          revision: current.inputSchemaRevision,
+          fingerprint: current.inputSchemaFingerprint,
+          schema: current.inputSchema
+        },
+        output: {
+          schemaId: current.outputSchemaId,
+          revision: current.outputSchemaRevision,
+          fingerprint: current.outputSchemaFingerprint,
+          schema: current.outputSchema
+        }
+      };
+    }
+    let authority: FrozenActionAuthority;
+    if (authorityContext.mode === 'virtual_intent') {
+      if (virtualEntryOffer && index > 0) {
+        authority = {
+          kind: 'derived',
+          actionTaskId: message.taskId,
+          allowedActionId: step.actionId
+        };
+      } else {
+        authority = {
+          kind: 'virtual_intent',
+          actionTaskId: message.taskId
+        };
+        if (step.offerId !== null) {
+          authority.offerId = step.offerId;
+        }
+      }
+    } else if (authorityContext.mode === 'surface') {
+      authority = {
+        kind: 'surface',
+        surfaceId,
+        pageActionId: authorityContext.pageActionId
+      };
+    } else if (step.offerId !== null) {
+      authority = {
+        kind: 'offer',
+        offerId: step.offerId,
+        dataTaskId: authorityContext.dataTaskId,
+        sourceToolId: authorityContext.sourceToolId
+      };
+    } else {
+      authority = {
+        kind: 'derived',
+        actionTaskId: message.taskId,
+        allowedActionId: step.actionId
+      };
+    }
     const frozen: FrozenActionPlanStep = {
       stepId: step.stepId,
       actionId: step.actionId,
-      definitionFingerprint: fingerprint
+      offerId: step.offerId,
+      args: step.args,
+      inputFrom: step.inputFrom,
+      definitionFingerprint: fingerprint,
+      authority
     };
-    if (step.args !== undefined) {
-      frozen.args = step.args;
-    }
-    if (step.inputFrom !== undefined) {
-      frozen.inputFrom = step.inputFrom;
+    if (definition !== undefined) {
+      frozen.definition = definition;
     }
     frozenSteps.push(frozen);
   }
@@ -257,30 +346,46 @@ function frozenPlan(
   };
 }
 
-function directPlan(message: AgentMessage, payload: ActionRunPayload): ActionPlan {
-  return {
-    conversationId: message.conversationId,
-    taskId: message.taskId,
-    planId: `direct:${payload.runId}`,
-    turnId: message.turnId,
-    surfaceId: payload.surfaceId,
-    label: payload.actionId,
-    steps: [{
+function directPlan(
+  message: AgentMessage,
+  payload: ActionRunPayload,
+  catalog: ActionCatalog,
+  definitions: SchemaAwareActionDefinitionLookup | null,
+  virtualAction: boolean,
+  pageActionId: string
+): ActionPlan | null {
+  return frozenPlan(
+    message,
+    `direct:${payload.runId}`,
+    payload.surfaceId,
+    payload.actionId,
+    [{
       stepId: 'step-1',
       actionId: payload.actionId,
+      offerId: null,
       args: payload.args,
-      definitionFingerprint: ''
-    }]
-  };
+      inputFrom: []
+    }],
+    catalog,
+    definitions,
+    {
+      mode: virtualAction ? 'virtual_intent' : 'surface',
+      dataTaskId: '',
+      sourceToolId: payload.sourceToolId === undefined ? '' : payload.sourceToolId,
+      pageActionId
+    }
+  );
 }
 
-export class ActionAgent extends MessageDrivenAgent implements ActionStepExecutor {
+export class ActionAgent extends MessageDrivenAgent
+  implements ActionStepExecutor, ActionStepExecutionObserver {
   private readonly bus: LinkedMessageBus;
   private readonly catalog: ActionCatalog;
   private readonly offerResolver: ActionOfferResolver;
   private readonly registeredExecutor: RegisteredActionExecutor;
   private readonly compiler: ActionPlanCompiler | null;
   private readonly virtualResolver: VirtualActionIntentResolver | null;
+  private readonly definitions: SchemaAwareActionDefinitionLookup | null;
   private readonly runner: ActionPlanRunner;
   private readonly readyRuns: Map<string, StoredActionRun> =
     new Map<string, StoredActionRun>();
@@ -291,6 +396,8 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
   // Compact identities intentionally live for this ActionAgent session. Evicting
   // them would allow an old write or confirmed workflow to execute twice.
   private readonly terminalRuns: Set<string> = new Set<string>();
+  private readonly terminalRunOutcomes: Map<string, TerminalActionRun> =
+    new Map<string, TerminalActionRun>();
   private readonly canceledTurns: Set<string> = new Set<string>();
   private readonly observedDataTasks: Map<string, ObservedDataTask> =
     new Map<string, ObservedDataTask>();
@@ -315,7 +422,8 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     offerResolver: ActionOfferResolver,
     executor: RegisteredActionExecutor,
     compiler?: ActionPlanCompiler,
-    virtualResolver?: VirtualActionIntentResolver
+    virtualResolver?: VirtualActionIntentResolver,
+    definitions?: SchemaAwareActionDefinitionLookup
   ) {
     super(bus);
     this.bus = bus;
@@ -324,7 +432,8 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     this.registeredExecutor = executor;
     this.compiler = compiler === undefined ? null : compiler;
     this.virtualResolver = virtualResolver === undefined ? null : virtualResolver;
-    this.runner = new ActionPlanRunner(catalog, this);
+    this.definitions = definitions === undefined ? null : definitions;
+    this.runner = new ActionPlanRunner(catalog, this, this.definitions, this);
   }
 
   start(): void {
@@ -344,6 +453,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     this.pausedRuns.clear();
     this.activeRuns.clear();
     this.terminalRuns.clear();
+    this.terminalRunOutcomes.clear();
     this.canceledTurns.clear();
     this.observedDataTasks.clear();
     this.pendingDrafts.clear();
@@ -570,12 +680,6 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
           message: 'Registered action output is invalid.'
         };
       }
-      if (result.followUp !== undefined) {
-        const followUpError = this.publishFollowUp(stillActive, result.followUp);
-        if (followUpError !== null) {
-          return followUpError;
-        }
-      }
       const outputClone = cloneJsonValue(result.output);
       if (!outputClone.ok || outputClone.value === undefined) {
         return {
@@ -584,16 +688,15 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
           message: 'Registered action output is invalid.'
         };
       }
-      stillActive.completedStepIds.push(context.stepId);
-      stillActive.outputs.push({
-        stepId: context.stepId,
-        output: outputClone.value as JsonValue
-      });
-      this.publishProgress(stillActive, context, actionId, 'success');
-      return {
+      const success: ActionStepExecutionResult = {
         status: 'success',
-        output: result.output
+        output: outputClone.value as JsonValue
       };
+      if (result.followUp !== undefined) {
+        (success as Object as Record<string, Object>)['followUp'] =
+          result.followUp as Object;
+      }
+      return success;
     }
     if ((result.status === 'canceled' || result.status === 'error') &&
       typeof result.errorCode === 'string' &&
@@ -608,6 +711,59 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       status: 'error',
       errorCode: 'ACTION_EXECUTOR_RESULT_INVALID',
       message: 'Registered action executor returned an unknown result.'
+    };
+  }
+
+  commitValidatedSuccess(
+    actionId: string,
+    output: JsonValue,
+    context: ActionExecutionContext,
+    followUp?: Object
+  ): ActionStepCommitResult {
+    const key = this.runKey(
+      context.conversationId,
+      context.turnId,
+      context.surfaceId,
+      context.runId
+    );
+    const active = this.activeRuns.get(key);
+    if (!this.matchesExecution(active, actionId, context)) {
+      return {
+        ok: false,
+        errorCode: 'ACTION_RUN_INACTIVE',
+        message: 'Action run is no longer active.'
+      };
+    }
+    const outputClone = cloneJsonValue(output);
+    if (!outputClone.ok || outputClone.value === undefined) {
+      return {
+        ok: false,
+        errorCode: 'ACTION_OUTPUT_INVALID',
+        message: 'Validated action output could not be committed.'
+      };
+    }
+    const current = active as ActiveActionRun;
+    if (followUp !== undefined &&
+      this.sanitizeFollowUp(followUp as ActionFollowUp) === null) {
+      return {
+        ok: false,
+        errorCode: 'ACTION_FOLLOW_UP_INVALID',
+        message: 'Action follow-up is malformed.'
+      };
+    }
+    current.completedStepIds.push(context.stepId);
+    current.outputs.push({
+      stepId: context.stepId,
+      output: outputClone.value as JsonValue
+    });
+    this.publishProgress(current, context, actionId, 'success');
+    if (followUp !== undefined) {
+      this.publishFollowUp(current, followUp as ActionFollowUp);
+    }
+    return {
+      ok: true,
+      errorCode: '',
+      message: ''
     };
   }
 
@@ -786,6 +942,9 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       allowedActionIds: parsed.allowedActionIds.slice(),
       skillId: parsed.skillId
     };
+    if (parsed.executionMode === 'frozen_sequence') {
+      request.executionMode = 'frozen_sequence';
+    }
     if (parsed.personaId !== undefined) {
       request.personaId = parsed.personaId;
     }
@@ -849,6 +1008,15 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
         );
         return;
       }
+      if (request.executionMode === 'frozen_sequence' && this.compiler === null) {
+        this.pendingPlanRequests.delete(key);
+        this.rememberTerminalPlanRequest(key);
+        this.publishVirtualInputError(
+          message, 'ACTION_PLAN_COMPILER_UNAVAILABLE',
+          'Action plan compiler is unavailable.'
+        );
+        return;
+      }
       this.startVirtualResolution(key, stored);
       return;
     }
@@ -870,6 +1038,22 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       return;
     }
     stored.compiling = true;
+    if (stored.request.executionMode === 'frozen_sequence') {
+      const entryRequest = this.singleVirtualRequest(
+        stored.request,
+        stored.request.allowedActionIds[0]
+      );
+      try {
+        resolver.resolve(entryRequest).then((intent: VirtualActionIntent | null) => {
+          this.finishFrozenVirtualResolution(key, stored, intent);
+        }).catch((_error: Object) => {
+          this.finishFrozenVirtualResolution(key, stored, null);
+        });
+      } catch (_error) {
+        this.finishFrozenVirtualResolution(key, stored, null);
+      }
+      return;
+    }
     if (stored.request.allowedActionIds.length > 1) {
       const pending: Promise<VirtualActionIntent | null>[] = [];
       for (let index = 0; index < stored.request.allowedActionIds.length; index++) {
@@ -927,6 +1111,169 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     return request;
   }
 
+  private finishFrozenVirtualResolution(
+    key: string,
+    stored: StoredPlanRequest,
+    intent: VirtualActionIntent | null
+  ): void {
+    if (!this.compilationIsActive(key, stored)) {
+      return;
+    }
+    if (intent === null || typeof intent !== 'object' || Array.isArray(intent) ||
+      Object.keys(intent).sort().join(',') !== 'autoRun,offer,sourceToolId' ||
+      intent.autoRun !== true ||
+      intent.sourceToolId !== VIRTUAL_ACTION_INTENT_SOURCE_TOOL_ID ||
+      intent.offer === null || typeof intent.offer !== 'object' ||
+      Array.isArray(intent.offer) ||
+      intent.offer.actionId !== stored.request.allowedActionIds[0]) {
+      this.finishFrozenVirtualCompilationError(
+        key,
+        stored,
+        'ACTION_VIRTUAL_INTENT_INVALID',
+        'Virtual Action resolver did not produce the required entry Offer.'
+      );
+      return;
+    }
+    const offer = this.sanitizeActionIntentOffer(intent.offer);
+    if (offer === null) {
+      this.finishFrozenVirtualCompilationError(
+        key,
+        stored,
+        'ACTION_VIRTUAL_INTENT_INVALID',
+        'Virtual Action resolver returned an unauthorized entry Offer.'
+      );
+      return;
+    }
+    const compiler = this.compiler;
+    if (compiler === null) {
+      this.finishFrozenVirtualCompilationError(
+        key,
+        stored,
+        'ACTION_PLAN_COMPILER_UNAVAILABLE',
+        'Action plan compiler is unavailable.'
+      );
+      return;
+    }
+    try {
+      compiler.compile(
+        stored.request.goal,
+        [offer],
+        stored.request.allowedActionIds.slice()
+      ).then((draft: ActionPlanDraft) => {
+        this.finishFrozenVirtualCompilation(key, stored, offer, draft);
+      }).catch((_error: Object) => {
+        this.finishFrozenVirtualCompilationError(
+          key,
+          stored,
+          'ACTION_PLAN_COMPILE_FAILED',
+          'Action plan compiler failed.'
+        );
+      });
+    } catch (_error) {
+      this.finishFrozenVirtualCompilationError(
+        key,
+        stored,
+        'ACTION_PLAN_COMPILE_FAILED',
+        'Action plan compiler failed.'
+      );
+    }
+  }
+
+  private finishFrozenVirtualCompilation(
+    key: string,
+    stored: StoredPlanRequest,
+    entryOffer: ActionOffer,
+    candidate: ActionPlanDraft
+  ): void {
+    if (!this.compilationIsActive(key, stored)) {
+      return;
+    }
+    this.pendingPlanRequests.delete(key);
+    this.rememberTerminalPlanRequest(key);
+    const draft = cloneDraft(candidate);
+    if (draft === null || !this.validDraft(draft)) {
+      this.publishVirtualInputError(
+        stored.message,
+        'ACTION_PLAN_MALFORMED',
+        'Compiled frozen Action sequence is malformed.'
+      );
+      return;
+    }
+    if (draft.steps.length !== stored.request.allowedActionIds.length) {
+      this.publishVirtualInputError(
+        stored.message,
+        'ACTION_PLAN_SEQUENCE_MISMATCH',
+        'Compiled frozen Action sequence is incomplete.'
+      );
+      return;
+    }
+    for (let index = 0; index < draft.steps.length; index++) {
+      const step = draft.steps[index];
+      if (step.actionId !== stored.request.allowedActionIds[index]) {
+        this.publishVirtualInputError(
+          stored.message,
+          'ACTION_PLAN_SEQUENCE_MISMATCH',
+          'Compiled frozen Action sequence changed the Leader order.'
+        );
+        return;
+      }
+      if (index === 0) {
+        if (step.offerId !== entryOffer.offerId ||
+          step.actionId !== entryOffer.actionId ||
+          !sameJson(step.args as JsonValue, entryOffer.args as JsonValue) ||
+          step.inputFrom.length !== 0) {
+          this.publishVirtualInputError(
+            stored.message,
+            'ACTION_PLAN_OFFER_MISMATCH',
+            'Compiled entry step must preserve the resolver-owned Offer.'
+          );
+          return;
+        }
+      } else if (step.offerId !== null) {
+        this.publishVirtualInputError(
+          stored.message,
+          'ACTION_PLAN_OFFER_MISMATCH',
+          'Only the entry step may use the resolver-owned Offer.'
+        );
+        return;
+      }
+    }
+    aiLogInfo(
+      '[AIPhone][ActionPlanCompiled] mode=frozen_sequence actions=' +
+      stored.request.allowedActionIds.join(',') +
+      ' entryOffer=true steps=' + draft.steps.length.toString()
+    );
+    for (let stepIndex = 0; stepIndex < draft.steps.length; stepIndex++) {
+      const step = draft.steps[stepIndex];
+      for (let bindingIndex = 0; bindingIndex < step.inputFrom.length; bindingIndex++) {
+        const binding = step.inputFrom[bindingIndex];
+        aiLogInfo(
+          '[AIPhone][ActionPlanBinding] source=' + binding.stepId + ':' +
+          binding.path + ' target=' + step.stepId + ':' + binding.target
+        );
+      }
+    }
+    this.startVirtualPlan(stored, draft.steps);
+  }
+
+  private finishFrozenVirtualCompilationError(
+    key: string,
+    stored: StoredPlanRequest,
+    errorCode: string,
+    message: string
+  ): void {
+    if (!this.compilationIsActive(key, stored)) {
+      return;
+    }
+    this.pendingPlanRequests.delete(key);
+    this.rememberTerminalPlanRequest(key);
+    aiLogError(
+      '[AIPhone][ActionPlanCompileFailed] mode=frozen_sequence code=' +
+      errorCode
+    );
+    this.publishVirtualInputError(stored.message, errorCode, message);
+  }
+
   private finishVirtualResolutions(
     key: string,
     stored: StoredPlanRequest,
@@ -974,7 +1321,9 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       steps.push({
         stepId: 'step-' + (index + 1).toString(),
         actionId: offer.actionId,
-        args: offer.args
+        offerId: null,
+        args: offer.args,
+        inputFrom: []
       });
     }
     this.startVirtualPlan(stored, steps);
@@ -1006,7 +1355,14 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       surfaceId,
       stored.request.goal,
       steps,
-      this.catalog
+      this.catalog,
+      this.definitions,
+      {
+        mode: 'virtual_intent',
+        dataTaskId: '',
+        sourceToolId: VIRTUAL_ACTION_INTENT_SOURCE_TOOL_ID,
+        pageActionId: ''
+      }
     );
     if (plan === null) {
       this.publishVirtualInputError(
@@ -1042,7 +1398,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       context,
       taskId: stored.message.taskId,
       followUpPublished: false
-    }, null, 'step-1');
+    }, null, plan.steps[0].stepId);
   }
 
   private finishVirtualResolution(
@@ -1209,30 +1565,81 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       );
       return;
     }
+    if (stored.request.executionMode === 'frozen_sequence') {
+      if (draft.steps.length !== stored.request.allowedActionIds.length) {
+        this.publishInputError(
+          stored.message, draft.planId, draft.runId, '',
+          'ACTION_PLAN_SEQUENCE_MISMATCH',
+          'Compiled frozen Action sequence is incomplete.'
+        );
+        return;
+      }
+      for (let index = 0; index < draft.steps.length; index++) {
+        if (draft.steps[index].actionId !== stored.request.allowedActionIds[index]) {
+          this.publishInputError(
+            stored.message, draft.planId, draft.runId, '',
+            'ACTION_PLAN_SEQUENCE_MISMATCH',
+            'Compiled frozen Action sequence changed the Leader order.',
+            draft.steps[index].stepId
+          );
+          return;
+        }
+      }
+    }
     let entry: MatchedActionOffer | null = null;
     for (let stepIndex = 0; stepIndex < draft.steps.length; stepIndex++) {
       const step = draft.steps[stepIndex];
-      const args = step.args === undefined ? new Object() : step.args;
-      let matched: MatchedActionOffer | null = null;
-      for (let offerIndex = 0; offerIndex < offers.length; offerIndex++) {
-        if (offers[offerIndex].offer.actionId === step.actionId &&
-          sameJson(offers[offerIndex].offer.args as JsonValue, args as JsonValue)) {
-          matched = offers[offerIndex];
-          break;
-        }
-      }
-      if (matched === null) {
+      if (stored.request.allowedActionIds.indexOf(step.actionId) < 0) {
         this.publishInputError(
           stored.message, draft.planId, draft.runId, '',
-          'ACTION_PLAN_OFFER_MISMATCH',
-          'Compiled action steps must match current immutable offers.',
+          'ACTION_PLAN_ACTION_UNAUTHORIZED',
+          'Compiled action step is not allowed by the Leader request.',
           step.stepId
         );
         return;
       }
-      if (stepIndex === 0) {
-        entry = matched;
+      if (step.offerId !== null) {
+        let matched: MatchedActionOffer | null = null;
+        for (let offerIndex = 0; offerIndex < offers.length; offerIndex++) {
+          if (offers[offerIndex].offer.offerId === step.offerId &&
+            offers[offerIndex].offer.actionId === step.actionId &&
+            sameJson(
+              offers[offerIndex].offer.args as JsonValue,
+              step.args as JsonValue
+            )) {
+            matched = offers[offerIndex];
+            break;
+          }
+        }
+        if (matched === null) {
+          this.publishInputError(
+            stored.message, draft.planId, draft.runId, '',
+            'ACTION_PLAN_OFFER_MISMATCH',
+            'Compiled Offer steps must match current immutable offers.',
+            step.stepId
+          );
+          return;
+        }
+        if (stepIndex === 0) {
+          entry = matched;
+        }
+      } else if (stepIndex === 0) {
+        this.publishInputError(
+          stored.message, draft.planId, draft.runId, '',
+          'ACTION_PLAN_ENTRY_OFFER_REQUIRED',
+          'An Action plan must start from a current Offer.',
+          step.stepId
+        );
+        return;
       }
+    }
+    if (entry === null) {
+      this.publishInputError(
+        stored.message, draft.planId, draft.runId, '',
+        'ACTION_PLAN_ENTRY_OFFER_REQUIRED',
+        'An Action plan must start from a current Offer.'
+      );
+      return;
     }
     const first = entry as MatchedActionOffer;
     const validation = this.runner.validateDraft(draft, first.sourceToolId);
@@ -1422,7 +1829,14 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       surfaceId,
       storedDraft.draft.label,
       storedDraft.draft.steps,
-      this.catalog
+      this.catalog,
+      this.definitions,
+      {
+        mode: 'data',
+        dataTaskId: storedDraft.dataTaskId,
+        sourceToolId: storedDraft.sourceToolId,
+        pageActionId: ''
+      }
     );
     if (plan === null) {
       this.publishInputError(
@@ -1577,7 +1991,25 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       return;
     }
     const authorization = this.directSurfaceAuthorization(message, payload, key, false);
-    const plan = directPlan(message, payload);
+    const plan = directPlan(
+      message,
+      payload,
+      this.catalog,
+      this.definitions,
+      virtualAction,
+      authorization === null ? '' : authorization.pageActionId
+    );
+    if (plan === null) {
+      this.publishInputError(
+        message,
+        `direct:${payload.runId}`,
+        payload.runId,
+        payload.surfaceId,
+        'ACTION_PLAN_FINGERPRINT_UNAVAILABLE',
+        'Registered action definition is unavailable.'
+      );
+      return;
+    }
     const context: ActionPlanRunContext = {
       conversationId: message.conversationId,
       turnId: message.turnId,
@@ -1636,6 +2068,27 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       payload.surfaceId,
       identity.runId
     );
+    const terminal = this.terminalRunOutcomes.get(key);
+    if (terminal !== undefined) {
+      if (!this.matchesStored(
+        message,
+        payload,
+        identity.planId,
+        terminal.stored
+      )) {
+        this.publishInputError(
+          message,
+          identity.planId,
+          identity.runId,
+          payload.surfaceId,
+          'ACTION_RUN_IDENTITY_MISMATCH',
+          'Action run does not match the terminal plan.'
+        );
+        return;
+      }
+      this.publishOutcome(terminal.stored, terminal.outcome);
+      return;
+    }
     if (this.terminalRuns.has(key)) {
       this.publishInputError(
         message,
@@ -1804,6 +2257,10 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       return;
     }
     this.rememberTerminal(key);
+    this.terminalRunOutcomes.set(key, {
+      stored,
+      outcome
+    });
     this.publishOutcome(stored, outcome);
   }
 
@@ -1928,6 +2385,12 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
         payload.outputs = outcome.outputs;
       }
     }
+    aiLogInfo(
+      '[AIPhone][ActionPlanTerminal] status=' + outcome.status +
+      ' completed=' + outcome.completedStepIds.join(',') +
+      (outcome.failedStepId === undefined ? '' :
+        ' failedStep=' + outcome.failedStepId)
+    );
     this.bus.publish({
       type: AgentMessageType.ACTION_RESULT,
       conversationId: stored.context.conversationId,
@@ -2006,6 +2469,10 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       actionId,
       status
     };
+    aiLogInfo(
+      '[AIPhone][ActionPlanStep] step=' + context.stepId +
+      ' action=' + actionId + ' status=' + status
+    );
     this.bus.publish({
       type: AgentMessageType.ACTION_PROGRESS,
       conversationId: context.conversationId,
@@ -2018,7 +2485,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
   private publishFollowUp(
     active: ActiveActionRun,
     followUp: ActionFollowUp
-  ): ActionStepExecutionResult | null {
+  ): ActionStepErrorResult | null {
     if (active.followUpPublished) {
       return null;
     }
@@ -2282,11 +2749,18 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     }
     const current = payload as ActionPlanRequestPayload;
     const keys: string = Object.keys(payload).sort().join(',');
-    if (keys !== 'allowedActionIds,dataTaskIds,goal,skillId,uiTaskId' &&
+    const minimal: boolean =
+      keys === 'allowedActionIds,dataTaskIds,goal,skillId,uiTaskId' ||
+      keys === 'allowedActionIds,dataTaskIds,executionMode,goal,skillId,uiTaskId';
+    if (!minimal &&
       keys !== 'allowedActionIds,dataTaskIds,goal,inputText,personaId,skillId,uiTaskId' &&
       keys !== 'allowedActionIds,currentLocalDate,dataTaskIds,goal,inputText,personaId,skillId,uiTaskId' &&
       keys !== 'allowedActionIds,dataTaskIds,goal,inputText,personaId,skillId,uiTaskId,virtual' &&
-      keys !== 'allowedActionIds,currentLocalDate,dataTaskIds,goal,inputText,personaId,skillId,uiTaskId,virtual') {
+      keys !== 'allowedActionIds,currentLocalDate,dataTaskIds,goal,inputText,personaId,skillId,uiTaskId,virtual' &&
+      keys !== 'allowedActionIds,dataTaskIds,executionMode,goal,inputText,personaId,skillId,uiTaskId' &&
+      keys !== 'allowedActionIds,currentLocalDate,dataTaskIds,executionMode,goal,inputText,personaId,skillId,uiTaskId' &&
+      keys !== 'allowedActionIds,dataTaskIds,executionMode,goal,inputText,personaId,skillId,uiTaskId,virtual' &&
+      keys !== 'allowedActionIds,currentLocalDate,dataTaskIds,executionMode,goal,inputText,personaId,skillId,uiTaskId,virtual') {
       return null;
     }
     const virtual: boolean = current.virtual === true;
@@ -2298,8 +2772,11 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       !Array.isArray(current.allowedActionIds) || current.allowedActionIds.length === 0 ||
       !this.validUniqueIds(current.dataTaskIds, current.uiTaskId) ||
       !this.validUniqueIds(current.allowedActionIds, '') ||
-      (keys !== 'allowedActionIds,dataTaskIds,goal,skillId,uiTaskId' && !hasContext) ||
+      (!minimal && !hasContext) ||
       (current.currentLocalDate !== undefined && !nonempty(current.currentLocalDate)) ||
+      (current.executionMode !== undefined &&
+        (current.executionMode !== 'frozen_sequence' ||
+          current.allowedActionIds.length < 2)) ||
       (virtual && current.dataTaskIds.length !== 0) ||
       (!virtual && current.dataTaskIds.length === 0)) {
       return null;
@@ -2328,8 +2805,14 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     const stepIds: Set<string> = new Set<string>();
     for (let index = 0; index < draft.steps.length; index++) {
       const step = draft.steps[index];
-      if (step === undefined || !nonempty(step.stepId) ||
-        !nonempty(step.actionId) || stepIds.has(step.stepId)) {
+      if (step === undefined ||
+        Object.keys(step).sort().join(',') !==
+          'actionId,args,inputFrom,offerId,stepId' ||
+        !nonempty(step.stepId) || !nonempty(step.actionId) ||
+        (step.offerId !== null && !nonempty(step.offerId)) ||
+        step.args === null || typeof step.args !== 'object' ||
+        Array.isArray(step.args) || !Array.isArray(step.inputFrom) ||
+        stepIds.has(step.stepId)) {
         return false;
       }
       stepIds.add(step.stepId);
