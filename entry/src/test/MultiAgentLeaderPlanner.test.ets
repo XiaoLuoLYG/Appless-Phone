@@ -947,6 +947,13 @@ function actionDecision(actionId: string): string {
     '"allowedActionIds":["' + actionId + '"]}}';
 }
 
+function missingActionIntentDecision(actionId: string): string {
+  return actionDecision(actionId).replace(
+    ',"actionIntent":{"goal":"perform requested action","allowedActionIds":["' + actionId + '"]}',
+    ''
+  );
+}
+
 function actionAsDataDecision(actionId: string): string {
   return '{"personaId":"travel_companion","skillId":"",' +
     '"requestedCapabilityIds":["' + actionId + '"],"roundAction":"execute","continuationMode":"complete",' +
@@ -3327,6 +3334,24 @@ export default function multiAgentLeaderPlannerTest() {
         expect(decision.dataTasks.length).assertEqual(0);
         expect(decision.actionIntent!.allowedActionIds[0]).assertEqual(actionId);
       }
+    });
+
+    it('repairs one requested Action omitted from execution positions', 0, async () => {
+      const model = new QueueLocalModel([
+        missingActionIntentDecision('payment.send'),
+        actionDecision('payment.send')
+      ]);
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: '用 PayPal 给罗一格转 1 美元' },
+        actionOwnerContext(),
+        1,
+        (): boolean => true
+      );
+
+      expect(model.prompts.length).assertEqual(2);
+      expect(decision.dataTasks.length).assertEqual(0);
+      expect(decision.actionIntent!.allowedActionIds[0]).assertEqual('payment.send');
     });
 
     it('gives Action ownership repair its one permitted Data-to-Action move', 0, async () => {
