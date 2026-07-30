@@ -87,6 +87,7 @@ const SAME_ROUND_DEPENDENCY_ERROR: string = 'LEADER_SAME_ROUND_DEPENDENCY';
 const OVERLAPPING_VIDEO_TOOLS_ERROR: string = 'LEADER_OVERLAPPING_VIDEO_TOOLS';
 const TASK_INPUT_INVALID_ERROR: string = 'LEADER_TASK_INPUT_INVALID';
 const ACTION_OWNED_DATA_TASK_ERROR: string = 'LEADER_ACTION_OWNED_DATA_TASK';
+const MISSING_ACTION_INTENT_ERROR: string = 'LEADER_MISSING_ACTION_INTENT';
 const SKILL_CAPABILITY_ERROR: string = 'LEADER_SKILL_CAPABILITY_VIOLATION';
 const PERSONA_SKILL_SWITCH_ERROR: string = 'LEADER_PERSONA_SKILL_SWITCH';
 const EXPLICIT_MAPS_SELECTION_ERROR: string = 'LEADER_EXPLICIT_MAPS_SELECTION';
@@ -100,6 +101,10 @@ const PREMATURE_CALENDAR_DELETE_ACTION_ERROR: string =
 const REQUESTED_CAPABILITY_MISMATCH_ERROR: string =
   'Leader requested capabilities do not exactly match its execution plan.';
 const REPAIR_SCOPE_INVALID_ERROR: string = 'LEADER_REPAIR_SCOPE_INVALID';
+const MISSING_ACTION_INTENT_REPAIR_INSTRUCTION: string =
+  'Correction: LEADER_MISSING_ACTION_INTENT. The one requested capability is Action-only. Keep dataTasks empty ' +
+  'and add actionIntent with that exact ID in allowedActionIds. Preserve every other decision field exactly. ' +
+  FULL_DECISION_CONTRACT;
 const COMPLETED_TOOL_REPAIR_INSTRUCTION: string =
   'Correction: previous decision repeated a completed Data tool. ' +
   'Every completed Data tool is terminal for this turn. Return answer or clarify with a truthful summary, ' +
@@ -492,11 +497,15 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         correction = TASK_INPUT_REPAIR_INSTRUCTION + '\nRejected decision: ' + output;
       } else if (error instanceof Error && error.message === ACTION_OWNED_DATA_TASK_ERROR) {
         correction = ACTION_OWNED_DATA_TASK_REPAIR_INSTRUCTION + '\nRejected decision: ' + output;
+      } else if (error instanceof Error && error.message === MISSING_ACTION_INTENT_ERROR) {
+        correction = MISSING_ACTION_INTENT_REPAIR_INSTRUCTION + '\nRejected decision: ' + output;
       } else if (error instanceof Error && error.message === SKILL_CAPABILITY_ERROR) {
         correction = SKILL_CAPABILITY_REPAIR_INSTRUCTION + '\nRejected decision: ' + output;
       }
       const actionOwnedRepair: boolean = error instanceof Error &&
         error.message === ACTION_OWNED_DATA_TASK_ERROR;
+      const missingActionIntentRepair: boolean = error instanceof Error &&
+        error.message === MISSING_ACTION_INTENT_ERROR;
       const allowsTerminalExecutionDrop: boolean = error instanceof Error &&
         (error.message === COMPLETED_TOOL_REUSE_ERROR ||
           error.message === UNBOUND_LATER_TOOL_ERROR ||
@@ -513,6 +522,9 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
           'uiIntent, each non-Action Data task, all existing Action IDs, and the original request intent exactly. ' +
           'Move exactly one Action-only capability ID from Data positions to actionIntent.allowedActionIds. ' +
           'Do not add, remove, reorder, or change any other field or capability.' :
+        missingActionIntentRepair ?
+        '\nMissing Action repair freeze: preserve the one requested Action-only capability, keep dataTasks empty, ' +
+          'and place that exact ID in actionIntent.allowedActionIds.' :
         allowsTerminalExecutionDrop ?
         '\nA corrected answer or clarify decision may clear both execution-position sets to empty. ' +
           'It must preserve requestedCapabilityIds exactly and must not introduce any new Data or Action capability.' :
@@ -537,6 +549,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         const repairedScope: LeaderRepairScope | null = this.repairScope(repaired);
         if (repairedScope === null || (actionOwnedRepair ?
           !this.sameActionOwnedRepair(output, repaired, context, frozenScope, repairedScope) :
+          missingActionIntentRepair ?
+          !this.sameMissingActionIntentRepair(output, repaired, frozenScope, repairedScope) :
           !this.sameRepairScope(frozenScope, repairedScope, allowsTerminalExecutionDrop))) {
           throw new Error(REPAIR_SCOPE_INVALID_ERROR);
         }
@@ -756,6 +770,36 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       (repaired.roundAction === 'answer' || repaired.roundAction === 'clarify') &&
       repaired.dataCapabilityIds.length === 0 &&
       repaired.actionCapabilityIds.length === 0;
+  }
+
+  private sameMissingActionIntentRepair(
+    originalOutput: string,
+    repairedOutput: string,
+    originalScope: LeaderRepairScope,
+    repairedScope: LeaderRepairScope
+  ): boolean {
+    const original = this.rawDecisionObject(originalOutput);
+    const repaired = this.rawDecisionObject(repairedOutput);
+    if (original === null || repaired === null ||
+      original['actionIntent'] !== undefined ||
+      original['personaId'] !== repaired['personaId'] ||
+      original['skillId'] !== repaired['skillId'] ||
+      original['roundAction'] !== repaired['roundAction'] ||
+      original['continuationMode'] !== repaired['continuationMode'] ||
+      original['answer'] !== repaired['answer'] ||
+      original['reasonCode'] !== repaired['reasonCode'] ||
+      !this.sameJsonValue(original['dataTasks'], repaired['dataTasks']) ||
+      !this.sameJsonValue(original['uiIntent'], repaired['uiIntent']) ||
+      !this.sameStringSet(originalScope.requestedCapabilityIds, repairedScope.requestedCapabilityIds)) {
+      return false;
+    }
+    return originalScope.roundAction === 'execute' &&
+      repairedScope.roundAction === 'execute' &&
+      originalScope.requestedCapabilityIds.length === 1 &&
+      originalScope.dataCapabilityIds.length === 0 &&
+      originalScope.actionCapabilityIds.length === 0 &&
+      repairedScope.dataCapabilityIds.length === 0 &&
+      this.sameStringSet(originalScope.requestedCapabilityIds, repairedScope.actionCapabilityIds);
   }
 
   private sameActionOwnedRepair(
@@ -1934,6 +1978,13 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     const actionValue = values['actionIntent'];
     const actionIntent: LeaderActionIntent | null = actionValue === undefined ? null :
       this.actionIntent(actionValue, context);
+    if (selectedAction === 'execute' &&
+      tasks.length === 0 &&
+      actionIntent === null &&
+      requestedCapabilityIds.length === 1 &&
+      this.actionOnlyCapability(context, requestedCapabilityIds[0])) {
+      throw new Error(MISSING_ACTION_INTENT_ERROR);
+    }
     if ((selectedAction === 'execute' && tasks.length === 0 && actionIntent === null) ||
       (selectedAction !== 'execute' && tasks.length !== 0)) {
       throw new Error('Leader round action does not match its Data tasks.');
