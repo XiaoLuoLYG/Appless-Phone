@@ -901,10 +901,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     const repairedActionRecord = repairedAction as
       Record<string, Object | string | number | boolean | null | undefined>;
     if (originalAction === undefined) {
-      const repairedGoal = repairedActionRecord['goal'];
-      if ((missingActionIds.length === 0 && repairedGoal !== misplacedGoal) ||
-        (missingActionIds.length > 0 &&
-          (typeof repairedGoal !== 'string' || repairedGoal.trim().length === 0))) {
+      if (repairedActionRecord['goal'] !== misplacedGoal) {
         return false;
       }
     } else {

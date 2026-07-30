@@ -3208,7 +3208,7 @@ async function runQuery(query, index, expectedTool, expectedCaseOverride = null,
   const evidenceText = scrollEvidence.text;
   const evidenceLayout = scrollEvidence.currentLayout;
   const luckinMemoryProof = hasLuckinMemoryEvidence(evidenceText) ||
-    /\[BrandMcpRequest\] provider=瑞幸/.test(safeLogText);
+    /\[AIPhone\]\[PersonaMemoryApplied\][^\n]*personaId=food_companion[^\n]*kind=luckin_only/.test(safeLogText);
   if (isPersonaCoffeeQuery(query) && /饮食搭子上线|饮食搭子/.test(evidenceText)) {
     summary.personaCoffeeProof = true;
     summary.personaExpectedMemoryProof = expectedPersonaMemory !== 'luckin_only' || luckinMemoryProof;

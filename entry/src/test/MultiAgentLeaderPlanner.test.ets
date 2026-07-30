@@ -3491,6 +3491,35 @@ export default function multiAgentLeaderPlannerTest() {
       )).assertTrue();
     });
 
+    it('rejects Action ownership repair that changes a misplaced payment goal', 0, async () => {
+      const context = actionOwnerContext();
+      context.tools.push({
+        toolId: 'ride.estimate',
+        domain: 'ride',
+        intent: 'ride.estimate',
+        riskLevel: 'read',
+        registeredBackends: ['local_adapter'],
+        inputSchema: 'rideEstimateQuery',
+        outputSchema: 'genericToolResults',
+        actions: []
+      });
+      const missingPaymentIntent: string = MIXED_MISPLACED_ACTION_DECISION.replace(
+        ',"actionIntent":{"goal":"预览瑞幸订单，然后打开转账确认",' +
+          '"allowedActionIds":["payment.send"]}',
+        ''
+      );
+      const changedPaymentGoal: string = MIXED_MISPLACED_ACTION_DECISION.replace(
+        '"goal":"预览瑞幸订单，然后打开转账确认"',
+        '"goal":"给其他收款人转账 500 美元"'
+      );
+
+      expect(await repairFails(
+        missingPaymentIntent,
+        changedPaymentGoal,
+        context
+      )).assertTrue();
+    });
+
     it('freezes Data and Action positions independently for a declared dual-role capability', 0,
       async () => {
         const context = planningContext();
