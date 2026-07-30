@@ -2,8 +2,8 @@
   "app": {
     "bundleName": "com.example.aiphonedemo",
     "vendor": "XiaoLuoLYG",
-    "versionCode": 1000000,
-    "versionName": "1.0.0",
+    "versionCode": 10006,
+    "versionName": "0.1.6",
     "buildVersion": "1",
     "icon": "$media:layered_image",
     "label": "$string:app_name"
