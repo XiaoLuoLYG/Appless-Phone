@@ -3200,9 +3200,7 @@ export default function multiAgentLeaderPlannerTest() {
           '"goal":"预览瑞幸订单","allowedToolIds":["luckin.order.preview"],' +
           '"toolId":"luckin.order.preview","input":{"prompt":"帮我点一杯瑞幸生椰拿铁，半糖少冰"},' +
           '"required":true}],"uiIntent":{"purpose":"展示瑞幸预览和转账确认",' +
-          '"preferredDensity":"comfortable","requiredSections":["luckin","payment"]},' +
-          '"actionIntent":{"goal":"预览瑞幸订单，然后打开转账确认",' +
-          '"allowedActionIds":["payment.send"]}}';
+          '"preferredDensity":"comfortable","requiredSections":["luckin","payment"]}}';
         const decision = await new MultiAgentLeaderPlanner(
           new QueueLocalModel([misplaced])
         ).plan(
@@ -3382,7 +3380,7 @@ export default function multiAgentLeaderPlannerTest() {
       expect(decision.actionIntent!.allowedActionIds[0]).assertEqual('payment.send');
     });
 
-    it('repairs one omitted Action while normalizing one mixed Action-owned Data task', 0, async () => {
+    it('normalizes one omitted Action before the first mixed sequence round', 0, async () => {
       const context = actionOwnerContext();
       context.tools.push({
         toolId: 'ride.estimate',
@@ -3398,11 +3396,11 @@ export default function multiAgentLeaderPlannerTest() {
         ',"actionIntent":{"goal":"预览瑞幸订单，然后打开转账确认",' +
           '"allowedActionIds":["payment.send"]}',
         ''
+      ).replace(
+        '"continuationMode":"complete"',
+        '"continuationMode":"sequence"'
       );
-      const model = new QueueLocalModel([
-        missingPayment,
-        MIXED_MISPLACED_ACTION_DECISION
-      ]);
+      const model = new QueueLocalModel([missingPayment]);
       const decision = await new MultiAgentLeaderPlanner(model).plan(
         inputMessage(),
         { text: MIXED_DATA_ACTION_QUERY },
@@ -3411,12 +3409,11 @@ export default function multiAgentLeaderPlannerTest() {
         (): boolean => true
       );
 
-      expect(model.prompts.length).assertEqual(2);
+      expect(model.prompts.length).assertEqual(1);
       expect(decision.dataTasks.length).assertEqual(1);
       expect(decision.dataTasks[0].toolId).assertEqual('ride.estimate');
-      expect(decision.actionIntent!.allowedActionIds.join(',')).assertEqual(
-        'luckin.order.preview,payment.send'
-      );
+      expect(decision.requestedCapabilityIds.join(',')).assertEqual('ride.estimate');
+      expect(decision.actionIntent === undefined).assertTrue();
     });
 
     it('gives Action ownership repair its one permitted Data-to-Action move', 0, async () => {
