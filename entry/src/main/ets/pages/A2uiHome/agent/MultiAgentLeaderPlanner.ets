@@ -549,12 +549,9 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         const repairedScope: LeaderRepairScope | null = this.repairScope(repaired);
         if (repairedScope === null || (actionOwnedRepair ?
           !this.sameActionOwnedRepair(output, repaired, context, frozenScope, repairedScope) :
-          !this.sameRepairScope(
-            frozenScope,
-            repairedScope,
-            allowsTerminalExecutionDrop,
-            missingActionIntentRepair
-          ))) {
+          missingActionIntentRepair ?
+          !this.sameMissingActionIntentRepair(output, repaired, frozenScope, repairedScope) :
+          !this.sameRepairScope(frozenScope, repairedScope, allowsTerminalExecutionDrop))) {
           throw new Error(REPAIR_SCOPE_INVALID_ERROR);
         }
         const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
@@ -752,8 +749,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
   private sameRepairScope(
     original: LeaderRepairScope,
     repaired: LeaderRepairScope,
-    allowsTerminalExecutionDrop: boolean,
-    allowsMissingActionIntent: boolean
+    allowsTerminalExecutionDrop: boolean
   ): boolean {
     if (!this.sameStringSet(
       original.requestedCapabilityIds,
@@ -770,20 +766,40 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     )) {
       return true;
     }
-    if (allowsMissingActionIntent &&
-      original.roundAction === 'execute' &&
-      repaired.roundAction === 'execute' &&
-      original.requestedCapabilityIds.length === 1 &&
-      original.dataCapabilityIds.length === 0 &&
-      original.actionCapabilityIds.length === 0 &&
-      repaired.dataCapabilityIds.length === 0 &&
-      this.sameStringSet(original.requestedCapabilityIds, repaired.actionCapabilityIds)) {
-      return true;
-    }
     return allowsTerminalExecutionDrop &&
       (repaired.roundAction === 'answer' || repaired.roundAction === 'clarify') &&
       repaired.dataCapabilityIds.length === 0 &&
       repaired.actionCapabilityIds.length === 0;
+  }
+
+  private sameMissingActionIntentRepair(
+    originalOutput: string,
+    repairedOutput: string,
+    originalScope: LeaderRepairScope,
+    repairedScope: LeaderRepairScope
+  ): boolean {
+    const original = this.rawDecisionObject(originalOutput);
+    const repaired = this.rawDecisionObject(repairedOutput);
+    if (original === null || repaired === null ||
+      original['actionIntent'] !== undefined ||
+      original['personaId'] !== repaired['personaId'] ||
+      original['skillId'] !== repaired['skillId'] ||
+      original['roundAction'] !== repaired['roundAction'] ||
+      original['continuationMode'] !== repaired['continuationMode'] ||
+      original['answer'] !== repaired['answer'] ||
+      original['reasonCode'] !== repaired['reasonCode'] ||
+      !this.sameJsonValue(original['dataTasks'], repaired['dataTasks']) ||
+      !this.sameJsonValue(original['uiIntent'], repaired['uiIntent']) ||
+      !this.sameStringSet(originalScope.requestedCapabilityIds, repairedScope.requestedCapabilityIds)) {
+      return false;
+    }
+    return originalScope.roundAction === 'execute' &&
+      repairedScope.roundAction === 'execute' &&
+      originalScope.requestedCapabilityIds.length === 1 &&
+      originalScope.dataCapabilityIds.length === 0 &&
+      originalScope.actionCapabilityIds.length === 0 &&
+      repairedScope.dataCapabilityIds.length === 0 &&
+      this.sameStringSet(originalScope.requestedCapabilityIds, repairedScope.actionCapabilityIds);
   }
 
   private sameActionOwnedRepair(
