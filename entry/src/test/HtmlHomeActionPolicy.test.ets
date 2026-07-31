@@ -506,11 +506,15 @@ export default function htmlHomeActionPolicyTest() {
       wrongProvider.provider = 'qq';
       const wrongRecipient: MailReplyArgsFixture = JSON.parse(JSON.stringify(allowed)) as MailReplyArgsFixture;
       wrongRecipient.to = ['mallory@example.com'];
+      const displayNameRecipient: MailReplyArgsFixture = JSON.parse(JSON.stringify(allowed)) as MailReplyArgsFixture;
+      displayNameRecipient.to = ['OpenReview <alice@example.com>'];
       const emptyBody: MailReplyArgsFixture = JSON.parse(JSON.stringify(allowed)) as MailReplyArgsFixture;
       emptyBody.body = '   ';
 
       expect(isHtmlHomeActionAllowed(doc,
         action('html_mail_reply_save', 'gmail:thread-123', 'client', allowed))).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc,
+        action('html_mail_reply_save', 'gmail:thread-123', 'client', displayNameRecipient))).assertTrue();
       expect(isHtmlHomeActionAllowed(doc,
         action('html_mail_reply_send', 'gmail:thread-123', 'client', allowed))).assertTrue();
       expect(isHtmlHomeActionAllowed(doc,

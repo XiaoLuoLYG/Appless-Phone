@@ -966,6 +966,9 @@ export function composioPreferredToolScore(prompt: string, tool: ComposioSearchT
     (slugContainsAny(slug, ['search', 'find', 'list']) && slugContainsAny(slug, ['twitter', 'tweet', 'post', 'x_']))) {
     score += 400;
   }
+  if (fixedToolId === 'x.post.search' && slug === 'twitter_recent_search') {
+    score += 700;
+  }
   if (toolkit === 'outlook' && (slug.indexOf('mail') >= 0 || slug.indexOf('message') >= 0 || description.indexOf('mail') >= 0)) {
     score += 90;
   }
@@ -2091,6 +2094,9 @@ function selectedSlugAuthorizationMessage(
 ): string {
   const lowerSlug = toolSlug.trim().toLowerCase();
   const exactFixed = composioExactToolSlugForFixedTool(fixedToolId).toLowerCase();
+  if (allowFixedContract && fixedToolId === 'x.post.search' && lowerSlug === 'twitter_recent_search') {
+    return '';
+  }
   if (allowFixedContract && ((exactFixed.length > 0 && lowerSlug === exactFixed) ||
     fixedToolAllowsSideEffectSlug(fixedToolId, lowerSlug))) {
     return '';
@@ -2115,6 +2121,9 @@ function blockedSelectedSlugResult(toolSlug: string, message: string): DynamicGe
 }
 
 function isXPostReadSlug(toolSlug: string): boolean {
+  if (toolSlug.trim().toUpperCase() === 'TWITTER_RECENT_SEARCH') {
+    return true;
+  }
   if (selectedSlugGrammarMessage(toolSlug).length > 0) {
     return false;
   }

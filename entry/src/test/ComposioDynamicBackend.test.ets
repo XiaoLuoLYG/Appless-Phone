@@ -380,6 +380,32 @@ export default function composioDynamicBackendTest() {
       expect(JSON.stringify(postData.data).indexOf('tweet-real-1')).assertLarger(-1);
     });
 
+    it('executes the current Composio recent-search tool for fixed X post reads', 0, async () => {
+      const searchObservation = '{"source":"Composio","authorizedToolkits":["twitter"],"tools":[' +
+        '{"toolSlug":"TWITTER_FULL_ARCHIVE_SEARCH","description":"Search the full archive",' +
+          '"inputSchema":"{\\"type\\":\\"object\\",\\"properties\\":{\\"query\\":{\\"type\\":\\"string\\"}}}"},' +
+        '{"toolSlug":"TWITTER_RECENT_SEARCH","description":"Search recent public posts",' +
+          '"inputSchema":"{\\"type\\":\\"object\\",\\"properties\\":{\\"query\\":{\\"type\\":\\"string\\"}}}"},' +
+        '{"toolSlug":"TWITTER_USER_LOOKUP_ME","description":"Read the current user","inputSchema":"{}"}' +
+        '],"instruction":"execute selected tool"}';
+      const client = new RecordingComposioSearchExecuteClient(
+        searchObservation,
+        '{"data":{"posts":[{"id":"recent-1","text":"OpenAI recent post"}]}}'
+      );
+
+      const result = await callComposioFixedSearchAndExecuteForTest(
+        client,
+        '搜索 OpenAI 最近公开 post',
+        'x.post.search',
+        looseObject('{"query":"from:OpenAI","pageSize":5}')
+      );
+
+      expect(result.status).assertEqual('success');
+      expect(result.providerPhase).assertEqual('execution');
+      expect(client.executedSlugs.length).assertEqual(1);
+      expect(client.executedSlugs[0]).assertEqual('TWITTER_RECENT_SEARCH');
+    });
+
     it('maps Gmail fixed-tool args into the matched Composio schema', 0, () => {
       expect(composioExactToolSlugForFixedTool('gmail.message.read'))
         .assertEqual('GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID');
