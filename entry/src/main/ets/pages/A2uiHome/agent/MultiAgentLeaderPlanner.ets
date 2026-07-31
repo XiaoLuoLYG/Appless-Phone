@@ -31,7 +31,8 @@ import {
   leaderTasksHaveSameRoundDependency,
   StreamingLeaderToolParser,
   ModelContentListener,
-  aiLogInfo
+  aiLogInfo,
+  extractJsonObjects
 } from '@loop/agent-core';
 import { HotelLocalDateProvider, hotelSearchPlanningContract } from './HotelLeaderPlanner';
 
@@ -556,6 +557,9 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         }
         const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
         this.normalizeModelContinuationDecision(repairedDecision);
+        this.normalizeIncompleteSerialCalendarCreate(
+          message, input, repairedDecision, currentLocalDate, round
+        );
         if (error instanceof Error && error.message === SKILL_CAPABILITY_ERROR &&
           (rejectedDecision === null || !this.skillOnlyRepair(rejectedDecision, repairedDecision))) {
           throw new Error(SKILL_CAPABILITY_ERROR);
@@ -1010,20 +1014,32 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
   private rawDecisionObject(
     output: string
   ): Record<string, Object | string | number | boolean | null | undefined> | null {
-    try {
-      const trimmed: string = this.withoutToolTags(output).trim();
-      if (!trimmed.startsWith('{') || !trimmed.endsWith('}') ||
-        this.hasDuplicateObjectKeys(trimmed)) {
-        return null;
+    const trimmed: string = this.withoutToolTags(output).trim();
+    const candidates: string[] = [trimmed].concat(extractJsonObjects(trimmed));
+    for (let index = 0; index < candidates.length; index++) {
+      const candidate: string = candidates[index];
+      try {
+        if (!candidate.startsWith('{') || !candidate.endsWith('}') ||
+          this.hasDuplicateObjectKeys(candidate)) {
+          continue;
+        }
+        const parsed: Object = JSON.parse(candidate) as Object;
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          continue;
+        }
+        const values = parsed as
+          Record<string, Object | string | number | boolean | null | undefined>;
+        if (candidate === trimmed ||
+          (Array.isArray(values['requestedCapabilityIds']) &&
+            Array.isArray(values['dataTasks']) &&
+            typeof values['roundAction'] === 'string')) {
+          return values;
+        }
+      } catch (_error) {
+        continue;
       }
-      const parsed: Object = JSON.parse(trimmed) as Object;
-      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        return null;
-      }
-      return parsed as Record<string, Object | string | number | boolean | null | undefined>;
-    } catch (_error) {
-      return null;
     }
+    return null;
   }
 
   private scopeStrings(
@@ -1994,13 +2010,18 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     }
     const selectedAction: LeaderRoundAction = roundAction as LeaderRoundAction;
     const tasks: LeaderDecisionDataTask[] = this.dataTasks(rawTasks as Object[], context);
-    const requestedCapabilityIds: string[] = this.requestedCapabilities(
+    let requestedCapabilityIds: string[] = this.requestedCapabilities(
       rawRequestedCapabilities as Object[],
       context
     );
     const actionValue = values['actionIntent'];
     const actionIntent: LeaderActionIntent | null = actionValue === undefined ? null :
       this.actionIntent(actionValue, context);
+    if (continuationMode === 'sequence' && actionIntent === null) {
+      requestedCapabilityIds = requestedCapabilityIds.filter(
+        (capabilityId: string): boolean => !this.actionOnlyCapability(context, capabilityId)
+      );
+    }
     if (selectedAction === 'execute' &&
       tasks.length === 0 &&
       actionIntent === null &&
