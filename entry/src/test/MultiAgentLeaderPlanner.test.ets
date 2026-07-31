@@ -98,6 +98,24 @@ const SOCIAL_WITH_DATE_DECISION: string = SOCIAL_ONLY_DECISION.replace(
   '"input":{"platforms":["x","slack"]}',
   '"input":{"platforms":["x","slack"],"date":"2026-07-23"}'
 );
+const FIRECRAWL_PUBLIC_SOCIAL_DECISION: string =
+  '{"personaId":"travel_companion","skillId":"","requestedCapabilityIds":["social.public.search"],' +
+  '"roundAction":"execute","continuationMode":"complete","dataTasks":[{"localId":"public-social",' +
+  '"goal":"搜索小红书公开讨论","allowedToolIds":["social.public.search"],' +
+  '"toolId":"social.public.search","input":{"query":"鸿蒙应用开发","platforms":["xiaohongshu"]},' +
+  '"required":true}],"uiIntent":{"purpose":"展示公开讨论","preferredDensity":"comfortable",' +
+  '"requiredSections":["social"]}}';
+const FIRECRAWL_MIXED_PUBLIC_SOCIAL_DECISION: string =
+  '{"personaId":"travel_companion","skillId":"","requestedCapabilityIds":' +
+  '["social.public.search","web.research.search"],"roundAction":"execute","continuationMode":"complete",' +
+  '"dataTasks":[{"localId":"xiaohongshu","goal":"搜索小红书公开讨论",' +
+  '"allowedToolIds":["social.public.search"],"toolId":"social.public.search",' +
+  '"input":{"query":"鸿蒙应用开发","platforms":["xiaohongshu"]},"required":true},' +
+  '{"localId":"zhihu","goal":"搜索知乎公开讨论","allowedToolIds":["web.research.search"],' +
+  '"toolId":"web.research.search","input":{"query":"site:zhihu.com 鸿蒙应用开发"},"required":true}],' +
+  '"uiIntent":{"purpose":"展示公开讨论","preferredDensity":"comfortable","requiredSections":["social"]}}';
+const COMMUNITY_SOCIAL_DECISION: string = FIRECRAWL_PUBLIC_SOCIAL_DECISION
+  .split('social.public.search').join('social.community.search');
 const SOCIAL_MAIL_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
   '"requestedCapabilityIds":["social.feed.search","mail.search"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"social","goal":"查看 X 和 Slack 消息",' +
@@ -590,6 +608,15 @@ class C10C11PromptAwareModel implements LocalModel {
       return hasSelectionContract ? actionDecision('luckin.order.preview') : FOOD_COFFEE_DECISION;
     }
     return hasSelectionContract ? actionDecision('memory.update') : FOOD_COFFEE_DECISION;
+  }
+}
+
+class FirecrawlSocialPromptAwareModel implements LocalModel {
+  async complete(prompt: string): Promise<string> {
+    return prompt.indexOf(
+      'Firecrawl public social selection contract: Explicit Xiaohongshu/小红书 public search uses ' +
+        'social.public.search. When other public sources are also named'
+    ) >= 0 ? FIRECRAWL_MIXED_PUBLIC_SOCIAL_DECISION : COMMUNITY_SOCIAL_DECISION;
   }
 }
 
@@ -1698,6 +1725,50 @@ export default function multiAgentLeaderPlannerTest() {
       expect(luckinOrder.dataTasks.length).assertEqual(0);
       expect(luckinOrder.actionIntent!.allowedActionIds.join(',')).assertEqual('luckin.order.preview');
       expect(model.prompts[0].indexOf('C10/C11 selection contract:')).assertLarger(-1);
+    });
+
+    it('routes explicit Xiaohongshu public searches to Firecrawl public search', 0, async () => {
+      const context = planningContext();
+      context.tools.push({
+        toolId: 'social.community.search',
+        domain: 'social',
+        intent: 'Search public communities',
+        riskLevel: 'read',
+        registeredBackends: ['local_adapter'],
+        inputSchema: 'socialCommunitySearchQuery',
+        outputSchema: 'socialHubFeed',
+        actions: []
+      }, {
+        toolId: 'social.public.search',
+        domain: 'firecrawl',
+        intent: 'Search public Xiaohongshu pages',
+        riskLevel: 'read',
+        registeredBackends: ['local_adapter'],
+        inputSchema: 'socialPublicSearchQuery',
+        outputSchema: 'genericToolResults',
+        actions: []
+      }, {
+        toolId: 'web.research.search',
+        domain: 'firecrawl',
+        intent: 'Research public web sources',
+        riskLevel: 'read',
+        registeredBackends: ['local_adapter'],
+        inputSchema: 'webResearchQuery',
+        outputSchema: 'genericToolResults',
+        actions: []
+      });
+      const decision = await new MultiAgentLeaderPlanner(
+        new FirecrawlSocialPromptAwareModel()
+      ).plan(
+        inputMessage(),
+        { text: '搜索小红书和知乎上关于鸿蒙应用开发的公开讨论，只展示公开可验证内容' },
+        context,
+        1
+      );
+
+      expect(decision.dataTasks.length).assertEqual(2);
+      expect(decision.dataTasks[0].toolId).assertEqual('social.public.search');
+      expect(decision.dataTasks[1].toolId).assertEqual('web.research.search');
     });
 
     it('keeps internal intent aliases from becoming Leader capability IDs', 0, async () => {
