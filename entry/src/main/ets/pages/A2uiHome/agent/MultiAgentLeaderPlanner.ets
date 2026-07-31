@@ -212,6 +212,11 @@ const SOCIAL_SELECTION_CONTRACT: string =
   'social.community.search. Standalone public post draft -> social.post.preview. ' +
   'social.reply.draft only after a selected real inbox/feed item. social.post.preview is preview-only; ' +
   'never infer or invoke a provider publish write from the preview request.';
+const FIRECRAWL_PUBLIC_SOCIAL_SELECTION_CONTRACT: string =
+  'Firecrawl public social selection contract: Explicit Xiaohongshu/小红书 public search uses ' +
+  'social.public.search. When other public sources are also named, keep Xiaohongshu in social.public.search and ' +
+  'schedule each other source as a separate compatible Data task in the same round; never put non-Xiaohongshu ' +
+  'sources into social.public.search or silently drop them.';
 const AGGREGATE_MEDIA_SELECTION_CONTRACT: string =
   'Aggregate media selection contract: A request for both 新闻 and 讨论 about the same topic uses exactly ' +
   'media.aggregate.search, not social.community.search.';
@@ -1912,6 +1917,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       MAPS_SELECTION_CONTRACT,
       C10_C11_SELECTION_CONTRACT,
       SOCIAL_SELECTION_CONTRACT,
+      FIRECRAWL_PUBLIC_SOCIAL_SELECTION_CONTRACT,
       AGGREGATE_MEDIA_SELECTION_CONTRACT,
       CALENDAR_UPDATE_SELECTION_CONTRACT,
       CALENDAR_DELETE_SELECTION_CONTRACT,
