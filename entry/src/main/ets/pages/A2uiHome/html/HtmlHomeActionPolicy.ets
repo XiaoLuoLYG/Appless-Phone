@@ -176,12 +176,21 @@ function policyStringList(value: HtmlHomePolicyValue): string[] {
   return result;
 }
 
+function policyMailRecipients(value: HtmlHomePolicyValue): string[] {
+  return policyStringList(value).map((recipient: string) => {
+    const left = recipient.indexOf('<');
+    const right = recipient.lastIndexOf('>');
+    return left >= 0 && right === recipient.length - 1 && right > left + 1 ?
+      recipient.substring(left + 1, right).trim() : recipient;
+  });
+}
+
 function mailReplySubmissionAllowed(block: HtmlHomeBlock, action: A2uiAction): boolean {
   if (block.kind !== 'generic-tool-result' || action.kind !== 'client' || action.args === undefined) {
     return false;
   }
   const actual = action.args as HtmlMailReplyPayload;
-  const recipients = policyStringList(actual.to);
+  const recipients = policyMailRecipients(actual.to);
   if (policyText(actual.body).trim().length === 0 || recipients.length === 0) {
     return false;
   }
@@ -211,7 +220,7 @@ function mailReplySubmissionAllowed(block: HtmlHomeBlock, action: A2uiAction): b
     matchesOptionalMailIdentity(actual.accountLabel, expected.accountLabel) &&
     matchesOptionalMailIdentity(actual.subject, expected.subject) &&
     matchesOptionalMailIdentity(actual.replyMode, expected.replyMode) &&
-    policyStringList(actual.to).join('\n') === policyStringList(expected.to).join('\n');
+    recipients.join('\n') === policyMailRecipients(expected.to).join('\n');
 }
 
 function mailReplyAiGenerateAllowed(block: HtmlHomeBlock, action: A2uiAction): boolean {
