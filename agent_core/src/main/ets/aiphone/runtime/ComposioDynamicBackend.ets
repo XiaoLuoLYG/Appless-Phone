@@ -2094,7 +2094,7 @@ function selectedSlugAuthorizationMessage(
 ): string {
   const lowerSlug = toolSlug.trim().toLowerCase();
   const exactFixed = composioExactToolSlugForFixedTool(fixedToolId).toLowerCase();
-  if (allowFixedContract && fixedToolId === 'x.post.search' && lowerSlug === 'twitter_recent_search') {
+  if (fixedToolId === 'x.post.search' && lowerSlug === 'twitter_recent_search') {
     return '';
   }
   if (allowFixedContract && ((exactFixed.length > 0 && lowerSlug === exactFixed) ||

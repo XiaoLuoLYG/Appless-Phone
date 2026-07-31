@@ -393,11 +393,11 @@ export default function composioDynamicBackendTest() {
         '{"data":{"posts":[{"id":"recent-1","text":"OpenAI recent post"}]}}'
       );
 
-      const result = await callComposioFixedSearchAndExecuteForTest(
+      const result = await callComposioSearchAndExecute(
         client,
         '搜索 OpenAI 最近公开 post',
-        'x.post.search',
-        looseObject('{"query":"from:OpenAI","pageSize":5}')
+        looseObject('{"fixedToolId":"x.post.search",' +
+          '"fixedArgs":{"query":"from:OpenAI","pageSize":5}}')
       );
 
       expect(result.status).assertEqual('success');
