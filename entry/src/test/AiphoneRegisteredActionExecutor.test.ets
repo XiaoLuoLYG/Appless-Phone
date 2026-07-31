@@ -943,13 +943,16 @@ export default function aiphoneRegisteredActionExecutorTest() {
         '{"conversationId":"conversation-1","taskId":"calendar-lifecycle-task",' +
         '"planId":"calendar-lifecycle","turnId":"turn-1","surfaceId":"surface-1",' +
         '"label":"Calendar lifecycle","steps":[' +
-        '{"stepId":"create","actionId":"calendar.event.create","args":' + JSON.stringify(createArgs) + '},' +
+        '{"stepId":"create","actionId":"calendar.event.create","offerId":null,' +
+        '"args":' + JSON.stringify(createArgs) + ',"inputFrom":[]},' +
         '{"stepId":"update","actionId":"calendar.event.update",' +
+        '"offerId":null,' +
         '"args":{"title":"Appless QA","start":"2026-07-29T16:00:00+08:00",' +
         '"end":"2026-07-29T16:30:00+08:00","calendarId":"primary"},' +
         '"inputFrom":[{"target":"/eventId","stepId":"create",' +
         '"path":"/data/genericToolResults/0/rows/0/value"}]},' +
         '{"stepId":"delete","actionId":"calendar.event.delete",' +
+        '"offerId":null,' +
         '"args":{"calendarId":"primary"},' +
         '"inputFrom":[{"target":"/eventId","stepId":"update",' +
         '"path":"/data/genericToolResults/0/rows/0/value"}]}]}'
@@ -996,8 +999,10 @@ export default function aiphoneRegisteredActionExecutorTest() {
         '{"conversationId":"conversation-1","taskId":"calendar-stop-task",' +
         '"planId":"calendar-stop","turnId":"turn-1","surfaceId":"surface-1",' +
         '"label":"Calendar stop","steps":[' +
-        '{"stepId":"create","actionId":"calendar.event.create","args":' + JSON.stringify(createArgs) + '},' +
+        '{"stepId":"create","actionId":"calendar.event.create","offerId":null,' +
+        '"args":' + JSON.stringify(createArgs) + ',"inputFrom":[]},' +
         '{"stepId":"update","actionId":"calendar.event.update",' +
+        '"offerId":null,' +
         '"args":{"title":"Appless QA","start":"2026-07-29T16:00:00+08:00",' +
         '"end":"2026-07-29T16:30:00+08:00"},' +
         '"inputFrom":[{"target":"/eventId","stepId":"create",' +

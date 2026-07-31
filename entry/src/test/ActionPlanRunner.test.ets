@@ -42,8 +42,8 @@ function validPlan(): ActionPlan {
     '{"planId":"plan-1","turnId":"turn-1","surfaceId":"surface-1",' +
       '"label":"AI 回复并保存草稿","steps":[' +
       '{"stepId":"draft","actionId":"gmail.ai.reply.draft",' +
-      '"args":{"threadId":"thread-real-1"}},' +
-      '{"stepId":"save","actionId":"gmail.draft.create","args":{},' +
+      '"offerId":null,"args":{"threadId":"thread-real-1"},"inputFrom":[]},' +
+      '{"stepId":"save","actionId":"gmail.draft.create","offerId":null,"args":{},' +
       '"inputFrom":[' +
       '{"target":"/to","stepId":"draft","path":"/to"},' +
       '{"target":"/subject","stepId":"draft","path":"/subject"},' +
@@ -337,15 +337,16 @@ export default function actionPlanRunnerTest() {
       const one = plan(
         '{"planId":"plan-1","turnId":"turn-1","surfaceId":"surface-1","label":"x",' +
           '"steps":[{"stepId":"1","actionId":"gmail.ai.reply.draft",' +
-          '"args":{"threadId":"thread-real-1"}}]}'
+          '"offerId":null,"args":{"threadId":"thread-real-1"},"inputFrom":[]}]}'
       );
       const five = plan(
         '{"planId":"plan-1","turnId":"turn-1","surfaceId":"surface-1","label":"x","steps":[' +
-          '{"stepId":"1","actionId":"gmail.ai.reply.draft","args":{"threadId":"thread-real-1"}},' +
-          '{"stepId":"2","actionId":"gmail.draft.create","args":{}},' +
-          '{"stepId":"3","actionId":"gmail.draft.create","args":{}},' +
-          '{"stepId":"4","actionId":"gmail.draft.create","args":{}},' +
-          '{"stepId":"5","actionId":"gmail.draft.create","args":{}}]}'
+          '{"stepId":"1","actionId":"gmail.ai.reply.draft","offerId":null,' +
+          '"args":{"threadId":"thread-real-1"},"inputFrom":[]},' +
+          '{"stepId":"2","actionId":"gmail.draft.create","offerId":null,"args":{},"inputFrom":[]},' +
+          '{"stepId":"3","actionId":"gmail.draft.create","offerId":null,"args":{},"inputFrom":[]},' +
+          '{"stepId":"4","actionId":"gmail.draft.create","offerId":null,"args":{},"inputFrom":[]},' +
+          '{"stepId":"5","actionId":"gmail.draft.create","offerId":null,"args":{},"inputFrom":[]}]}'
       );
 
       expect(runner(new RecordingExecutor([])).validate(one, context()).ok).assertTrue();
@@ -358,12 +359,13 @@ export default function actionPlanRunnerTest() {
       );
       const six = plan(
         '{"planId":"p","turnId":"turn-1","surfaceId":"surface-1","label":"x","steps":[' +
-          '{"stepId":"1","actionId":"gmail.ai.reply.draft","args":{"threadId":"thread-real-1"}},' +
-          '{"stepId":"2","actionId":"gmail.draft.create","args":{}},' +
-          '{"stepId":"3","actionId":"gmail.draft.create","args":{}},' +
-          '{"stepId":"4","actionId":"gmail.draft.create","args":{}},' +
-          '{"stepId":"5","actionId":"gmail.draft.create","args":{}},' +
-          '{"stepId":"6","actionId":"gmail.draft.create","args":{}}]}'
+          '{"stepId":"1","actionId":"gmail.ai.reply.draft","offerId":null,' +
+          '"args":{"threadId":"thread-real-1"},"inputFrom":[]},' +
+          '{"stepId":"2","actionId":"gmail.draft.create","offerId":null,"args":{},"inputFrom":[]},' +
+          '{"stepId":"3","actionId":"gmail.draft.create","offerId":null,"args":{},"inputFrom":[]},' +
+          '{"stepId":"4","actionId":"gmail.draft.create","offerId":null,"args":{},"inputFrom":[]},' +
+          '{"stepId":"5","actionId":"gmail.draft.create","offerId":null,"args":{},"inputFrom":[]},' +
+          '{"stepId":"6","actionId":"gmail.draft.create","offerId":null,"args":{},"inputFrom":[]}]}'
       );
       const emptyId = plan(
         '{"planId":"p","turnId":"turn-1","surfaceId":"surface-1","label":"x",' +
@@ -371,8 +373,9 @@ export default function actionPlanRunnerTest() {
       );
       const duplicate = plan(
         '{"planId":"p","turnId":"turn-1","surfaceId":"surface-1","label":"x","steps":[' +
-          '{"stepId":"same","actionId":"gmail.ai.reply.draft","args":{"threadId":"thread-real-1"}},' +
-          '{"stepId":"same","actionId":"gmail.draft.create","args":{}}]}'
+          '{"stepId":"same","actionId":"gmail.ai.reply.draft","offerId":null,' +
+          '"args":{"threadId":"thread-real-1"},"inputFrom":[]},' +
+          '{"stepId":"same","actionId":"gmail.draft.create","offerId":null,"args":{},"inputFrom":[]}]}'
       );
 
       expect(validationCode(empty)).assertEqual('ACTION_PLAN_STEP_COUNT');
@@ -384,12 +387,15 @@ export default function actionPlanRunnerTest() {
     it('rejects unknown actions and a first action outside the exact source surface', 0, () => {
       const unknown = plan(
         '{"planId":"p","turnId":"turn-1","surfaceId":"surface-1","label":"x","steps":[' +
-          '{"stepId":"draft","actionId":"gmail.ai.reply.draft","args":{"threadId":"thread-real-1"}},' +
-          '{"stepId":"invented","actionId":"gmail.send.invented","args":{}}]}'
+          '{"stepId":"draft","actionId":"gmail.ai.reply.draft","offerId":null,' +
+          '"args":{"threadId":"thread-real-1"},"inputFrom":[]},' +
+          '{"stepId":"invented","actionId":"gmail.send.invented","offerId":null,' +
+          '"args":{},"inputFrom":[]}]}'
       );
       const wrongFirst = plan(
         '{"planId":"p","turnId":"turn-1","surfaceId":"surface-1","label":"x",' +
-          '"steps":[{"stepId":"save","actionId":"gmail.draft.create","args":{}}]}'
+          '"steps":[{"stepId":"save","actionId":"gmail.draft.create","offerId":null,' +
+          '"args":{},"inputFrom":[]}]}'
       );
 
       expect(validationCode(unknown)).assertEqual('ACTION_NOT_REGISTERED');
@@ -399,14 +405,17 @@ export default function actionPlanRunnerTest() {
     it('allows bindings only from existing earlier steps', 0, () => {
       const same = plan(
         '{"planId":"p","turnId":"turn-1","surfaceId":"surface-1","label":"x","steps":[' +
-          '{"stepId":"draft","actionId":"gmail.ai.reply.draft","args":{"threadId":"thread-real-1"},' +
+          '{"stepId":"draft","actionId":"gmail.ai.reply.draft","offerId":null,' +
+          '"args":{"threadId":"thread-real-1"},' +
           '"inputFrom":[{"target":"/body","stepId":"draft","path":"/body"}]}]}'
       );
       const later = plan(
         '{"planId":"p","turnId":"turn-1","surfaceId":"surface-1","label":"x","steps":[' +
-          '{"stepId":"draft","actionId":"gmail.ai.reply.draft","args":{"threadId":"thread-real-1"},' +
+          '{"stepId":"draft","actionId":"gmail.ai.reply.draft","offerId":null,' +
+          '"args":{"threadId":"thread-real-1"},' +
           '"inputFrom":[{"target":"/body","stepId":"save","path":"/body"}]},' +
-          '{"stepId":"save","actionId":"gmail.draft.create","args":{}}]}'
+          '{"stepId":"save","actionId":"gmail.draft.create","offerId":null,' +
+          '"args":{},"inputFrom":[]}]}'
       );
       const nonexistent = validPlan();
       (nonexistent.steps[1].inputFrom as ActionInputBinding[])[0].stepId = 'missing';
@@ -423,13 +432,13 @@ export default function actionPlanRunnerTest() {
       (badEscape.steps[1].inputFrom as ActionInputBinding[])[0].target = '/bad~2key';
       const dangerous = plan(
         '{"planId":"p","turnId":"turn-1","surfaceId":"surface-1","label":"x","steps":[' +
-          '{"stepId":"draft","actionId":"gmail.ai.reply.draft","args":{' +
-          '"threadId":"thread-real-1","nested":{"parallel":[]}}}]}'
+          '{"stepId":"draft","actionId":"gmail.ai.reply.draft","offerId":null,"args":{' +
+          '"threadId":"thread-real-1","nested":{"parallel":[]}},"inputFrom":[]}]}'
       );
       const topLevelDangerous = plan(
         '{"planId":"p","turnId":"turn-1","surfaceId":"surface-1","label":"x","script":"bad",' +
           '"steps":[{"stepId":"draft","actionId":"gmail.ai.reply.draft",' +
-          '"args":{"threadId":"thread-real-1"}}]}'
+          '"offerId":null,"args":{"threadId":"thread-real-1"},"inputFrom":[]}]}'
       );
       const expression = validPlan();
       (expression.steps[0].args as JsonRecord)['expression'] = 'bad';
@@ -675,7 +684,7 @@ export default function actionPlanRunnerTest() {
       const single = plan(
         '{"planId":"plan-1","turnId":"turn-1","surfaceId":"surface-1","label":"x",' +
           '"steps":[{"stepId":"draft","actionId":"gmail.ai.reply.draft",' +
-          '"args":{"threadId":"thread-real-1"}}]}'
+          '"offerId":null,"args":{"threadId":"thread-real-1"},"inputFrom":[]}]}'
       );
 
       const outcome = await runner(executor).run(single, context()) as ActionPlanSuccessOutcome;
@@ -788,7 +797,7 @@ export default function actionPlanRunnerTest() {
 
     it('uses root-target replacement only when the bound result is an args object', 0, async () => {
       const candidate = validPlan();
-      candidate.steps[1].args = json('{"old":true}');
+      candidate.steps[1].args = json('{}');
       candidate.steps[1].inputFrom = [
         { target: '', stepId: 'draft', path: '' }
       ];
@@ -817,7 +826,8 @@ export default function actionPlanRunnerTest() {
       const candidate = validPlan();
       candidate.steps.push(plan(
         '{"planId":"p","turnId":"turn-1","surfaceId":"surface-1","label":"x",' +
-          '"steps":[{"stepId":"audit","actionId":"gmail.audit.record","args":{}}]}'
+          '"steps":[{"stepId":"audit","actionId":"gmail.audit.record","offerId":null,' +
+          '"args":{},"inputFrom":[]}]}'
       ).steps[0]);
       const executor = new RecordingExecutor([
         success(json(
@@ -847,7 +857,8 @@ export default function actionPlanRunnerTest() {
       const candidate = validPlan();
       candidate.steps.push(plan(
         '{"planId":"p","turnId":"turn-1","surfaceId":"surface-1","label":"x",' +
-          '"steps":[{"stepId":"audit","actionId":"gmail.audit.record","args":{}}]}'
+          '"steps":[{"stepId":"audit","actionId":"gmail.audit.record","offerId":null,' +
+          '"args":{},"inputFrom":[]}]}'
       ).steps[0]);
       const firstOutput = json(
         '{"to":"alice@example.com","subject":"Re: Status","body":"Draft body",' +
@@ -889,13 +900,13 @@ export default function actionPlanRunnerTest() {
       const single = plan(
         '{"planId":"plan-1","turnId":"turn-1","surfaceId":"surface-1","label":"x",' +
           '"steps":[{"stepId":"draft","actionId":"gmail.ai.reply.draft",' +
-          '"args":{"threadId":"thread-real-1"}}]}'
+          '"offerId":null,"args":{"threadId":"thread-real-1"},"inputFrom":[]}]}'
       );
       const outcome = await runner(new MalformedExecutor()).run(single, context());
 
       expect(outcome.status).assertEqual('error');
       expect(outcome.failedStepId).assertEqual('draft');
-      expect(outcome.errorCode).assertEqual('ACTION_OUTPUT_INVALID');
+      expect(outcome.errorCode).assertEqual('ACTION_EXECUTOR_RESULT_INVALID');
     });
 
     it('contains executor throws as typed error outcomes', 0, async () => {
@@ -960,7 +971,7 @@ export default function actionPlanRunnerTest() {
       const single = plan(
         '{"planId":"plan-1","turnId":"turn-1","surfaceId":"surface-1","label":"confirm",' +
           '"steps":[{"stepId":"draft","actionId":"gmail.ai.reply.draft",' +
-          '"args":{"threadId":"thread-real-1"}}]}'
+          '"offerId":null,"args":{"threadId":"thread-real-1"},"inputFrom":[]}]}'
       );
       const executor = new RecordingExecutor([
         success(json('{"draftId":"draft-real-1"}'))

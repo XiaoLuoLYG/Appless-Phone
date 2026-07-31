@@ -57,6 +57,7 @@ import {
   isMultiTaskSurface,
   appendMultiTaskSlot,
   mergeSurfaceIntoMultiTaskSurface,
+  normalizeMapsRouteInput,
   resolveMultiTaskSlotId,
   normalizedCalendarArgsForPrompt,
   parseA2uiJsonl,
@@ -337,6 +338,7 @@ class MailDetailInPlaceBridge implements UiTaskRenderer, UiSurfaceWriter, MailDe
   private readonly canceledPrepared: Map<string, PreparedMailDetail> = new Map<string, PreparedMailDetail>();
   private readonly surfaces: Map<string, MailDetailSurfaceState> = new Map<string, MailDetailSurfaceState>();
   private epoch: number = 1;
+  private admissionSequence: number = 0;
   private disposed: boolean = false;
 
   constructor(
@@ -390,6 +392,7 @@ class MailDetailInPlaceBridge implements UiTaskRenderer, UiSurfaceWriter, MailDe
       !validateRegisteredPageActionArgs(actionId, request).ok) {
       return false;
     }
+    this.admissionSequence++;
     this.prepared.set(uiTaskId, {
       request: {
         requestKey: request.requestKey,
@@ -401,6 +404,10 @@ class MailDetailInPlaceBridge implements UiTaskRenderer, UiSurfaceWriter, MailDe
       generation
     });
     return true;
+  }
+
+  currentAdmissionSequence(): number {
+    return this.admissionSequence;
   }
 
   async skeleton(task: CreateUiTaskPayload, surfaceId: string): Promise<UiRenderResult> {
@@ -561,14 +568,18 @@ class MailDetailInPlaceBridge implements UiTaskRenderer, UiSurfaceWriter, MailDe
       !this.disposed && this.epoch === expectedEpoch &&
         this.currentGeneration() === generation
     );
-    await this.callback({
-      requestKey: request.requestKey,
-      provider: request.provider,
-      identityDigest: mailDetailIdentityDigest(request),
-      status: 'error',
-      error: message.trim().length > 0 ?
-        message : 'Mail detail action could not start.'
-    }, generation, lease);
+    try {
+      await this.callback({
+        requestKey: request.requestKey,
+        provider: request.provider,
+        identityDigest: mailDetailIdentityDigest(request),
+        status: 'error',
+        error: message.trim().length > 0 ?
+          message : 'Mail detail action could not start.'
+      }, generation, lease);
+    } catch (_error) {
+      return;
+    }
   }
 
   dispose(): void {
@@ -1232,7 +1243,23 @@ class MemoryIntentResolver implements VirtualActionIntentResolver {
     const actionId = request.allowedActionIds[0];
     if (actionId !== MEMORY_ACTION_ID) {
       let action: A2uiAction | null = null;
-      if (actionId === 'gmail.draft.apply') {
+      if (request.virtualEntryArgs !== undefined) {
+        if (actionId !== 'maps.route.open') {
+          return null;
+        }
+        const args = normalizeMapsRouteInput(request.virtualEntryArgs);
+        if (args === null) {
+          return null;
+        }
+        action = {
+          id: actionId,
+          label: actionId,
+          prompt: request.inputText.trim(),
+          variant: 'primary',
+          kind: 'button',
+          args: args as Object
+        };
+      } else if (actionId === 'gmail.draft.apply') {
         action = request.inputText.trim() === '确认应用刚才的 Gmail 草稿' ?
           this.currentGmailDraftApply() : null;
       } else {
@@ -1731,6 +1758,7 @@ export class MultiAgentCanaryRuntime {
       pageActionId: context.pageActionId
     };
     const admissionSequence: number = this.hotelDetailAdmissionSequence;
+    const mailAdmissionSequence: number = this.mailDetailBridge.currentAdmissionSequence();
     const actionResult = this.runtime.runAction(action, execution, this.currentHostGeneration());
     const ownerRunId: string = action.id === 'hotel.detail' &&
       this.hotelDetailAdmissionSequence !== admissionSequence ? this.lastHotelDetailAdmissionRunId : '';
@@ -1741,8 +1769,9 @@ export class MultiAgentCanaryRuntime {
         }
         this.mailDetailBridge.actionSettled(ok);
         if (!ok && action.args !== undefined &&
+          this.mailDetailBridge.currentAdmissionSequence() === mailAdmissionSequence &&
           (action.id === 'mail.thread.read' || action.id === 'gmail.thread.read')) {
-          await this.mailDetailBridge.reportActionFailure(
+          this.mailDetailBridge.reportActionFailure(
             action.args as MailDetailRequest,
             'Mail detail action was rejected before the read task started.'
           );

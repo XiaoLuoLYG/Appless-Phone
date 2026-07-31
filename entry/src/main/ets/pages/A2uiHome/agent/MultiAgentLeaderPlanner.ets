@@ -16,7 +16,6 @@ import {
   LeaderToolMetadata,
   LeaderUiIntent,
   LocalModel,
-  MapsRouteArgs,
   MAX_LEADER_DATA_TASKS_PER_ROUND,
   normalizeMapsRouteInput,
   normalizedCalendarArgsForPrompt,
@@ -41,10 +40,12 @@ const DECISION_KEYS: string[] = [
 const DATA_TASK_KEYS: string = 'allowedToolIds,goal,input,localId,required,toolId';
 const UI_INTENT_KEYS: string = 'preferredDensity,purpose,requiredSections';
 const ACTION_INTENT_KEYS: string = 'allowedActionIds,goal';
+const SINGLE_MAPS_VIRTUAL_ENTRY_ACTION_INTENT_KEYS: string =
+  'allowedActionIds,goal,virtualEntryArgs';
 const FROZEN_ACTION_INTENT_KEYS: string =
   'allowedActionIds,executionMode,goal';
-const FROZEN_MAPS_ACTION_INTENT_KEYS: string =
-  'allowedActionIds,executionMode,goal,mapsRouteInput';
+const FROZEN_VIRTUAL_ENTRY_ACTION_INTENT_KEYS: string =
+  'allowedActionIds,executionMode,goal,virtualEntryArgs';
 const ANSWER_FIELD_RULE: string = 'For roundAction answer or clarify, include answer as a non-empty string. ' +
   'For roundAction execute, omit answer.';
 const REASON_CODE_FIELD_RULE: string = 'Omit reasonCode. The host creates deterministic diagnostic reason metadata.';
@@ -241,13 +242,16 @@ const EXPLICIT_SERIAL_SEQUENCE_CONTRACT: string =
   'to later planning rounds in the requested order. When Context.orderedContinuationAuthorized is true, the host ' +
   'has authorized the next ordered capability even when it does not consume an entity ID from the prior result.';
 const MAPS_FROZEN_ENTRY_CONTRACT: string =
-  'Maps frozen-sequence entry contract: when dataTasks is [] and the first allowedActionId is maps.route.open, ' +
-  'include actionIntent.mapsRouteInput with exactly origin, destination, travelMode, and navigate. Copy origin ' +
+  'Maps frozen-sequence entry contract: only when dataTasks is [], allowedActionIds contains at least two IDs, ' +
+  'executionMode is "frozen_sequence", and the first allowedActionId is maps.route.open, include ' +
+  'actionIntent.virtualEntryArgs with exactly origin, destination, travelMode, and navigate. Copy origin ' +
   'and destination only from the current user request. travelMode must be driving, walking, bicycling, transit, ' +
   'or two-wheeler; use driving when the user does not specify a mode. navigate is true only when the user asks ' +
   'to start navigation, otherwise false. This field supplies only the first Action input; keep the complete ' +
-  'ordered workflow and all downstream constants or dependencies in actionIntent.goal. Omit mapsRouteInput for ' +
-  'every other actionIntent.';
+  'ordered workflow and all downstream constants or dependencies in actionIntent.goal. A single ' +
+  'maps.route.open Action already owns both route lookup and optional navigation through navigate; never set ' +
+  'executionMode or virtualEntryArgs for that single-Action request. Omit virtualEntryArgs for every other ' +
+  'actionIntent.';
 
 interface JsonContainerFrame {
   object: boolean;
@@ -264,21 +268,6 @@ interface LeaderRepairScope {
 
 interface ParsedLeaderActionIntent {
   intent: LeaderActionIntent;
-  normalizedActionInputText?: string;
-}
-
-function mapsRouteActionInput(args: MapsRouteArgs): string {
-  let routeLabel: string = '的驾车路线';
-  if (args.travelMode === 'walking') {
-    routeLabel = '的步行路线';
-  } else if (args.travelMode === 'bicycling' || args.travelMode === 'two-wheeler') {
-    routeLabel = '的骑行路线';
-  } else if (args.travelMode === 'transit') {
-    routeLabel = '的公交路线';
-  }
-  const navigate: string = args.navigate === true ? '并导航' : '';
-  return '从' + (args.origin as string) + '到' +
-    (args.destination as string) + routeLabel + navigate;
 }
 
 export class MultiAgentLeaderPlanner implements LeaderPlanner {
@@ -1582,7 +1571,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         '"toolId":"string","input":{},"required":true}],"uiIntent":{' +
         '"purpose":"string","preferredDensity":"string","requiredSections":["string"]},' +
         '"actionIntent":{"goal":"string","allowedActionIds":["string"],' +
-        '"executionMode":"frozen_sequence" optional,"mapsRouteInput":{' +
+        '"executionMode":"frozen_sequence" optional,"virtualEntryArgs":{' +
         '"origin":"string","destination":"string",' +
         '"travelMode":"driving|walking|bicycling|transit|two-wheeler",' +
         '"navigate":boolean} optional} optional,' +
@@ -1631,7 +1620,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       EXPLICIT_SERIAL_SEQUENCE_CONTRACT,
       MAPS_FROZEN_ENTRY_CONTRACT,
       'Never emit provider facts, downstream Action args, inputFrom, A2UI, credentials, or unregistered tool IDs. ' +
-        'The only permitted first-Action args are mapsRouteInput when the Maps frozen-sequence entry contract requires it.',
+        'The only permitted first-Action args are virtualEntryArgs when the Maps frozen-sequence entry contract requires it.',
       hotelSearchPlanningContract(currentLocalDate),
       'Maximum planning rounds: 3.',
       'Round: ' + round.toString(),
@@ -1813,10 +1802,6 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     if (actionIntent !== null) {
       decision.actionIntent = actionIntent;
     }
-    if (parsedActionIntent?.normalizedActionInputText !== undefined) {
-      decision.normalizedActionInputText =
-        parsedActionIntent.normalizedActionInputText;
-    }
     return decision;
   }
 
@@ -1837,7 +1822,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     const actionKeys: string = Object.keys(rawAction).sort().join(',');
     if ((actionKeys !== ACTION_INTENT_KEYS &&
       actionKeys !== FROZEN_ACTION_INTENT_KEYS &&
-      actionKeys !== FROZEN_MAPS_ACTION_INTENT_KEYS) ||
+      actionKeys !== FROZEN_VIRTUAL_ENTRY_ACTION_INTENT_KEYS) ||
       !Array.isArray(rawActionIds)) {
       return;
     }
@@ -1896,6 +1881,18 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       (_task: Object, index: number): boolean => index !== misplacedIndex
     );
     actionValues['allowedActionIds'] = orderedActionIds;
+    if (tasks.length === 1 && misplacedId === 'maps.route.open' &&
+      orderedActionIds.length >= 2 && orderedActionIds[0] === misplacedId) {
+      const misplacedTask = tasks[misplacedIndex] as
+        Record<string, Object | string | number | boolean | null | undefined>;
+      const input = misplacedTask['input'];
+      if (input !== null && input !== undefined &&
+        typeof input === 'object' && !Array.isArray(input) &&
+        normalizeMapsRouteInput(input as Object) !== null) {
+        actionValues['executionMode'] = 'frozen_sequence';
+        actionValues['virtualEntryArgs'] = input;
+      }
+    }
   }
 
   private hostReasonCode(action: LeaderRoundAction): string {
@@ -2056,15 +2053,16 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     }
     const keys: string = Object.keys(raw).sort().join(',');
     if (keys !== ACTION_INTENT_KEYS &&
+      keys !== SINGLE_MAPS_VIRTUAL_ENTRY_ACTION_INTENT_KEYS &&
       keys !== FROZEN_ACTION_INTENT_KEYS &&
-      keys !== FROZEN_MAPS_ACTION_INTENT_KEYS) {
+      keys !== FROZEN_VIRTUAL_ENTRY_ACTION_INTENT_KEYS) {
       throw new Error('Leader action intent contains missing or unknown fields.');
     }
     const values = raw as Record<string, Object | string | number | boolean | null | undefined>;
     const goal = values['goal'];
     const allowedActionIds = values['allowedActionIds'];
     const executionMode = values['executionMode'];
-    const mapsRouteInput = values['mapsRouteInput'];
+    const virtualEntryArgs = values['virtualEntryArgs'];
     if (typeof goal !== 'string' || goal.trim().length === 0 ||
       !Array.isArray(allowedActionIds) || allowedActionIds.length === 0) {
       throw new Error('Leader action intent fields are malformed.');
@@ -2083,23 +2081,28 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     if (executionMode === 'frozen_sequence') {
       result.executionMode = 'frozen_sequence';
     }
-    const requiresMapsRouteInput: boolean = zeroData &&
+    const requiresVirtualEntryArgs: boolean = zeroData &&
       executionMode === 'frozen_sequence' &&
+      ids.length >= 2 &&
       ids[0] === 'maps.route.open';
-    if (!requiresMapsRouteInput) {
-      if (mapsRouteInput !== undefined) {
-        throw new Error('Leader Maps route input is not allowed for this action intent.');
+    if (!requiresVirtualEntryArgs) {
+      if (virtualEntryArgs !== undefined) {
+        if (zeroData && executionMode === undefined &&
+          ids.length === 1 && ids[0] === 'maps.route.open') {
+          return { intent: result };
+        }
+        throw new Error('Leader virtual entry args are not allowed for this action intent.');
       }
       return { intent: result };
     }
-    if (mapsRouteInput === null || mapsRouteInput === undefined ||
-      typeof mapsRouteInput !== 'object' || Array.isArray(mapsRouteInput)) {
-      throw new Error('Leader Maps route input is malformed.');
+    if (virtualEntryArgs === null || virtualEntryArgs === undefined ||
+      typeof virtualEntryArgs !== 'object' || Array.isArray(virtualEntryArgs)) {
+      throw new Error('Leader virtual entry args are malformed.');
     }
-    const routeValues = mapsRouteInput as
+    const routeValues = virtualEntryArgs as
       Record<string, Object | string | number | boolean | null | undefined>;
     const routeTravelMode = routeValues['travelMode'];
-    if (Object.keys(mapsRouteInput).sort().join(',') !==
+    if (Object.keys(virtualEntryArgs).sort().join(',') !==
         'destination,navigate,origin,travelMode' ||
       typeof routeValues['origin'] !== 'string' ||
       typeof routeValues['destination'] !== 'string' ||
@@ -2107,17 +2110,14 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       ['driving', 'walking', 'bicycling', 'transit', 'two-wheeler']
         .indexOf(routeTravelMode) < 0 ||
       typeof routeValues['navigate'] !== 'boolean') {
-      throw new Error('Leader Maps route input is malformed.');
+      throw new Error('Leader virtual entry args are malformed.');
     }
-    const routeArgs: MapsRouteArgs | null =
-      normalizeMapsRouteInput(mapsRouteInput as Object);
+    const routeArgs = normalizeMapsRouteInput(virtualEntryArgs as Object);
     if (routeArgs === null) {
-      throw new Error('Leader Maps route input is malformed.');
+      throw new Error('Leader virtual entry args are malformed.');
     }
-    return {
-      intent: result,
-      normalizedActionInputText: mapsRouteActionInput(routeArgs)
-    };
+    result.virtualEntryArgs = routeArgs as Object;
+    return { intent: result };
   }
 
   private uniqueStrings(values: Object[], label: string): string[] {

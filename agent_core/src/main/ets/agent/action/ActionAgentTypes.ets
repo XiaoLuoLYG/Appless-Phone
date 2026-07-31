@@ -30,6 +30,7 @@ export interface ActionPlanRequestPayload {
   goal: string;
   allowedActionIds: string[];
   executionMode?: 'frozen_sequence';
+  virtualEntryArgs?: Object;
   personaId?: string;
   skillId: string;
   inputText?: string;

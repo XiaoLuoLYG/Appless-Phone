@@ -950,6 +950,19 @@ export class ActionAgent extends MessageDrivenAgent
     if (parsed.executionMode === 'frozen_sequence') {
       request.executionMode = 'frozen_sequence';
     }
+    if (parsed.virtualEntryArgs !== undefined) {
+      const clonedEntryArgs = cloneJsonValue(parsed.virtualEntryArgs);
+      if (!clonedEntryArgs.ok || clonedEntryArgs.value === null ||
+        typeof clonedEntryArgs.value !== 'object' ||
+        Array.isArray(clonedEntryArgs.value)) {
+        this.publishInputError(
+          message, '', '', '', 'ACTION_PLAN_REQUEST_INVALID',
+          'Virtual entry args are malformed.'
+        );
+        return;
+      }
+      request.virtualEntryArgs = clonedEntryArgs.value as Object;
+    }
     if (parsed.personaId !== undefined) {
       request.personaId = parsed.personaId;
     }
@@ -1112,6 +1125,9 @@ export class ActionAgent extends MessageDrivenAgent
     }
     if (source.currentLocalDate !== undefined) {
       request.currentLocalDate = source.currentLocalDate;
+    }
+    if (source.virtualEntryArgs !== undefined) {
+      request.virtualEntryArgs = source.virtualEntryArgs;
     }
     return request;
   }
@@ -2786,7 +2802,9 @@ export class ActionAgent extends MessageDrivenAgent
       keys !== 'allowedActionIds,dataTaskIds,executionMode,goal,inputText,personaId,skillId,uiTaskId' &&
       keys !== 'allowedActionIds,currentLocalDate,dataTaskIds,executionMode,goal,inputText,personaId,skillId,uiTaskId' &&
       keys !== 'allowedActionIds,dataTaskIds,executionMode,goal,inputText,personaId,skillId,uiTaskId,virtual' &&
-      keys !== 'allowedActionIds,currentLocalDate,dataTaskIds,executionMode,goal,inputText,personaId,skillId,uiTaskId,virtual') {
+      keys !== 'allowedActionIds,currentLocalDate,dataTaskIds,executionMode,goal,inputText,personaId,skillId,uiTaskId,virtual' &&
+      keys !== 'allowedActionIds,dataTaskIds,executionMode,goal,inputText,personaId,skillId,uiTaskId,virtual,virtualEntryArgs' &&
+      keys !== 'allowedActionIds,currentLocalDate,dataTaskIds,executionMode,goal,inputText,personaId,skillId,uiTaskId,virtual,virtualEntryArgs') {
       return null;
     }
     const virtual: boolean = current.virtual === true;
@@ -2803,6 +2821,12 @@ export class ActionAgent extends MessageDrivenAgent
       (current.executionMode !== undefined &&
         (current.executionMode !== 'frozen_sequence' ||
           current.allowedActionIds.length < 2)) ||
+      (current.virtualEntryArgs !== undefined &&
+        (current.executionMode !== 'frozen_sequence' ||
+          !virtual || current.dataTaskIds.length !== 0 ||
+          current.virtualEntryArgs === null ||
+          typeof current.virtualEntryArgs !== 'object' ||
+          Array.isArray(current.virtualEntryArgs))) ||
       (virtual && current.dataTaskIds.length !== 0) ||
       (!virtual && current.dataTaskIds.length === 0)) {
       return null;

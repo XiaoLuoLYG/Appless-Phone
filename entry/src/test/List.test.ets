@@ -168,6 +168,7 @@ export default function testsuite() {
   socialHubViewDataTest();
   socialHubA2uiTest();
   socialHubClientTest();
+
   voiceInputBridgeTest();
   personaMarkdownTest();
   skillMarkdownParserTest();

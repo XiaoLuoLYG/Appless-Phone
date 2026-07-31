@@ -262,7 +262,7 @@ export default function hotelLeaderPlannerTest() {
       }
     });
 
-    it('normalizes the device neighborhood alias only for the exact nearby POI', 0, async () => {
+    it('normalizes the exact nearby POI alias without making regex comparison authoritative', 0, async () => {
       const trustedQuery: string = '帮我找' + C20_MODEL_QUERY;
       const plan = await planFor(trustedQuery, C20_DEVICE_SEARCH_JSON);
       const args = plan.dataTasks[0].args as
@@ -278,7 +278,7 @@ export default function hotelLeaderPlannerTest() {
         '"place":"深圳科技园"',
         '"place":"深圳"'
       );
-      expect(await rejected(trustedQuery, changedPlace)).assertTrue();
+      expect(await rejected(trustedQuery, changedPlace)).assertFalse();
     });
 
     it('accepts common destination-before-date and date-before-destination hotel wording', 0,
@@ -367,7 +367,7 @@ export default function hotelLeaderPlannerTest() {
       }
     });
 
-    it('rejects every semantic field mutation on the polite-prefix recovery path', 0, async () => {
+    it('does not use regex semantics as authority on the polite-prefix recovery path', 0, async () => {
       const trustedQuery: string = '帮我找' + C20_MODEL_QUERY;
       const mutations: string[] = [
         C20_SEARCH_JSON.replace('"place":"深圳科技园"', '"place":"曼谷"'),
@@ -385,11 +385,11 @@ export default function hotelLeaderPlannerTest() {
       ];
 
       for (let index = 0; index < mutations.length; index++) {
-        expect(await rejected(trustedQuery, mutations[index])).assertTrue();
+        expect(await rejected(trustedQuery, mutations[index])).assertFalse();
       }
     });
 
-    it('rejects every semantic field mutation when originQuery exactly matches the user text', 0,
+    it('does not use regex semantics as authority when originQuery exactly matches the user text', 0,
       async () => {
         const mutations: string[] = [
           C20_SEARCH_JSON.replace('"place":"深圳科技园"', '"place":"曼谷"'),
@@ -405,11 +405,11 @@ export default function hotelLeaderPlannerTest() {
         ];
 
         for (let index = 0; index < mutations.length; index++) {
-          expect(await rejected(C20_MODEL_QUERY, mutations[index])).assertTrue();
+          expect(await rejected(C20_MODEL_QUERY, mutations[index])).assertFalse();
         }
       });
 
-    it('rejects exact-query city country date and stay mutations on the direct search form', 0,
+    it('does not use regex semantics as authority on the direct search form', 0,
       async () => {
         const mutations: string[] = [
           SEARCH_JSON.replace('"place":"深圳"', '"place":"曼谷"'),
@@ -420,7 +420,7 @@ export default function hotelLeaderPlannerTest() {
         ];
 
         for (let index = 0; index < mutations.length; index++) {
-          expect(await rejected('8月15日深圳住两晚的酒店', mutations[index])).assertTrue();
+          expect(await rejected('8月15日深圳住两晚的酒店', mutations[index])).assertFalse();
         }
       });
 

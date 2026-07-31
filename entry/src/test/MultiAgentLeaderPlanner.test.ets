@@ -243,7 +243,7 @@ const HOTEL_SEARCH_NAVIGATE_QUERY: string =
   'Search hotels near Shenzhen Science Park from August 8 to 10 for two adults, then navigate to the first hotel.';
 const HOTEL_SEARCH_NAVIGATE_DECISION: string =
   '{"personaId":"travel_companion","skillId":"","requestedCapabilityIds":[' +
-  '"hotel.search","hotel.navigate"],"roundAction":"execute","dataTasks":[{' +
+  '"hotel.search","hotel.navigate"],"roundAction":"execute","continuationMode":"complete","dataTasks":[{' +
   '"localId":"hotel","goal":"Search matching hotels","allowedToolIds":["hotel.search"],' +
   '"toolId":"hotel.search","input":{},"required":true}],"uiIntent":{' +
   '"purpose":"Show hotels and open navigation","preferredDensity":"comfortable",' +
@@ -3030,7 +3030,7 @@ export default function multiAgentLeaderPlannerTest() {
         const frozenDecision: string =
           '{"personaId":"travel_companion","skillId":"",' +
           '"requestedCapabilityIds":["social.post.preview","gmail.draft.create"],' +
-          '"roundAction":"execute","dataTasks":[],"uiIntent":{' +
+          '"roundAction":"execute","continuationMode":"complete","dataTasks":[],"uiIntent":{' +
           '"purpose":"preview and save","preferredDensity":"comfortable",' +
           '"requiredSections":[]},"actionIntent":{' +
           '"goal":"Use the social preview output text as the Gmail draft body for alice@example.com.",' +
@@ -3059,18 +3059,18 @@ export default function multiAgentLeaderPlannerTest() {
         ) >= 0).assertTrue();
       });
 
-    it('normalizes a structured Maps first step for a frozen Gmail sequence', 0,
+    it('preserves structured virtual entry args for a frozen Maps Gmail sequence', 0,
       async () => {
         const frozenDecision: string =
           '{"personaId":"travel_companion","skillId":"",' +
           '"requestedCapabilityIds":["maps.route.open","gmail.draft.create"],' +
-          '"roundAction":"execute","dataTasks":[],"uiIntent":{' +
+          '"roundAction":"execute","continuationMode":"complete","dataTasks":[],"uiIntent":{' +
           '"purpose":"open route and save link","preferredDensity":"comfortable",' +
           '"requiredSections":[]},"actionIntent":{' +
           '"goal":"Generate a driving route from 深圳坂田华为基地 to 深圳北站, then use the returned Maps URL ' +
           'as the body of a Gmail draft to alice@example.com with subject 路线链接. Save only; do not send.",' +
           '"allowedActionIds":["maps.route.open","gmail.draft.create"],' +
-          '"executionMode":"frozen_sequence","mapsRouteInput":{' +
+          '"executionMode":"frozen_sequence","virtualEntryArgs":{' +
           '"origin":"深圳坂田华为基地","destination":"深圳北站",' +
           '"travelMode":"driving","navigate":false}}}';
         const model = new QueueLocalModel([frozenDecision]);
@@ -3088,13 +3088,16 @@ export default function multiAgentLeaderPlannerTest() {
         expect(decision.actionIntent?.allowedActionIds.join(',')).assertEqual(
           'maps.route.open,gmail.draft.create'
         );
-        expect(decision.normalizedActionInputText).assertEqual(
-          '从深圳坂田华为基地到深圳北站的驾车路线'
+        expect(JSON.stringify(decision.actionIntent?.virtualEntryArgs)).assertEqual(
+          '{"origin":"深圳坂田华为基地","destination":"深圳北站",' +
+            '"travelMode":"driving","navigate":false}'
         );
-        expect(JSON.stringify(decision.actionIntent).indexOf('mapsRouteInput'))
-          .assertEqual(-1);
+        expect(decision.normalizedActionInputText === undefined).assertTrue();
         expect(model.prompts[0].indexOf(
-          'include actionIntent.mapsRouteInput with exactly origin, destination, travelMode, and navigate'
+          'actionIntent.virtualEntryArgs with exactly origin, destination, travelMode, and navigate'
+        ) >= 0).assertTrue();
+        expect(model.prompts[0].indexOf(
+          'never set executionMode or virtualEntryArgs for that single-Action request'
         ) >= 0).assertTrue();
       });
 
@@ -3103,7 +3106,7 @@ export default function multiAgentLeaderPlannerTest() {
         const frozenDecision: string =
           '{"personaId":"travel_companion","skillId":"",' +
           '"requestedCapabilityIds":["maps.route.open","gmail.draft.create"],' +
-          '"roundAction":"execute","dataTasks":[],"uiIntent":{' +
+          '"roundAction":"execute","continuationMode":"complete","dataTasks":[],"uiIntent":{' +
           '"purpose":"open route and save link","preferredDensity":"comfortable",' +
           '"requiredSections":[]},"actionIntent":{' +
           '"goal":"Open the route and save its URL to a Gmail draft.",' +
@@ -3121,17 +3124,64 @@ export default function multiAgentLeaderPlannerTest() {
           );
         } catch (error) {
           failed = error instanceof Error &&
-            error.message === 'Leader Maps route input is malformed.';
+            error.message === 'Leader virtual entry args are malformed.';
         }
         expect(failed).assertTrue();
+      });
+
+    it('keeps a single Maps route Action on the non-frozen virtual path', 0,
+      async () => {
+        const singleDecision: string =
+          '{"personaId":"travel_companion","skillId":"",' +
+          '"requestedCapabilityIds":["maps.route.open"],' +
+          '"roundAction":"execute","continuationMode":"complete","dataTasks":[],"uiIntent":{' +
+          '"purpose":"open route","preferredDensity":"compact",' +
+          '"requiredSections":[]},"actionIntent":{' +
+          '"goal":"查询从深圳北站到深圳湾口岸的驾车路线并启动导航",' +
+          '"allowedActionIds":["maps.route.open"]}}';
+        const decision = await new MultiAgentLeaderPlanner(
+          new QueueLocalModel([singleDecision])
+        ).plan(
+          inputMessage(),
+          { text: '帮我用 Google Maps 查询从深圳北站到深圳湾口岸的驾车路线并发起导航' },
+          actionOwnerContext(),
+          1
+        );
+
+        expect(decision.actionIntent?.allowedActionIds.join(',')).assertEqual(
+          'maps.route.open'
+        );
+        expect(decision.actionIntent?.executionMode === undefined).assertTrue();
+        expect(decision.actionIntent?.virtualEntryArgs === undefined).assertTrue();
+      });
+
+    it('ignores redundant virtual entry args on a single Maps route Action', 0,
+      async () => {
+        const singleDecision: string =
+          '{"personaId":"travel_companion","skillId":"","requestedCapabilityIds":["maps.route.open"],' +
+          '"roundAction":"execute","continuationMode":"complete","dataTasks":[],"uiIntent":{"purpose":"open route",' +
+          '"preferredDensity":"comfortable","requiredSections":[]},"actionIntent":{' +
+          '"goal":"Open a driving route from 深圳北站 to 深圳湾口岸.",' +
+          '"allowedActionIds":["maps.route.open"],"virtualEntryArgs":{' +
+          '"origin":"深圳北站","destination":"深圳湾口岸","travelMode":"driving","navigate":true}}}';
+        const decision = await new MultiAgentLeaderPlanner(new QueueLocalModel([singleDecision])).plan(
+          inputMessage(),
+          { text: '帮我用 Google Maps 查询从深圳北站到深圳湾口岸的驾车路线并发起导航' },
+          actionOwnerContext(),
+          1
+        );
+
+        expect(decision.actionIntent?.allowedActionIds.join(',')).assertEqual('maps.route.open');
+        expect(decision.actionIntent?.executionMode === undefined).assertTrue();
+        expect(decision.actionIntent?.virtualEntryArgs === undefined).assertTrue();
       });
 
     it('removes a frozen Action duplicated in Data without invoking repair', 0,
       async () => {
         const duplicatedDecision: string =
-          '{"personaId":"work_companion","skillId":"",' +
+          '{"personaId":"travel_companion","skillId":"",' +
           '"requestedCapabilityIds":["social.post.preview","gmail.draft.create"],' +
-          '"roundAction":"execute","dataTasks":[{"localId":"dt1",' +
+          '"roundAction":"execute","continuationMode":"complete","dataTasks":[{"localId":"dt1",' +
           '"goal":"Generate the preview","allowedToolIds":["social.post.preview"],' +
           '"toolId":"social.post.preview","input":{"platform":"x",' +
           '"operation":"publish","text":"device test"},"required":true}],' +

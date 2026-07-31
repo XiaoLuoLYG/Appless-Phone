@@ -25,6 +25,7 @@ export interface LeaderActionIntent {
   goal: string;
   allowedActionIds: string[];
   executionMode?: 'frozen_sequence';
+  virtualEntryArgs?: Object;
 }
 
 export interface LeaderDecisionDataTask {

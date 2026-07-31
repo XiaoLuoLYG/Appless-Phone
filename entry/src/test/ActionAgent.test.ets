@@ -480,7 +480,7 @@ function compiledPlan(firstArgs: Object = new Object()): ActionPlanDraft {
       inputFrom: []
     }, {
       stepId: 'save',
-      offerId: 'offer-save',
+      offerId: null,
       actionId: 'gmail.draft.create',
       args: new Object(),
       inputFrom: [{
@@ -540,9 +540,11 @@ function compositePlan(
   return JSON.parse(
     `{"planId":"${planId}","turnId":"${turnId}","surfaceId":"${surfaceId}",` +
       '"label":"Open detail then navigate","steps":[' +
-      '{"stepId":"detail","actionId":"hotel.detail","args":{"hotelId":101}},' +
+      '{"stepId":"detail","actionId":"hotel.detail","offerId":null,' +
+      '"args":{"hotelId":101},"inputFrom":[]},' +
       '{"stepId":"navigate","actionId":"hotel.navigate",' +
-      '"args":{"hotelId":101,"latitude":22.5,"longitude":114}}]}'
+      '"offerId":null,"args":{"hotelId":101,"latitude":22.5,"longitude":114},' +
+      '"inputFrom":[]}]}'
   ) as ActionPlan;
 }
 
@@ -550,9 +552,12 @@ function followUpThenConfirmPlan(planId: string): ActionPlan {
   return JSON.parse(
     `{"planId":"${planId}","turnId":"turn-1","surfaceId":"surface-1",` +
       '"label":"Open detail then confirm booking","steps":[' +
-      '{"stepId":"detail","actionId":"hotel.detail","args":{"hotelId":101}},' +
+      '{"stepId":"detail","actionId":"hotel.detail","offerId":null,' +
+      '"args":{"hotelId":101},"inputFrom":[]},' +
       '{"stepId":"booking","actionId":"hotel.booking.open",' +
-      '"args":{"hotelId":101,"bookingUrl":"https://rollinggo.cn/pages/hotel/detail/index?id=101&checkInDate=2026-08-15&checkOutDate=2026-08-17&roomCount=1&adultCount=2&childCount=0"}}]}'
+      '"offerId":null,"args":{"hotelId":101,' +
+      '"bookingUrl":"https://rollinggo.cn/pages/hotel/detail/index?id=101&checkInDate=2026-08-15&checkOutDate=2026-08-17&roomCount=1&adultCount=2&childCount=0"},' +
+      '"inputFrom":[]}]}'
   ) as ActionPlan;
 }
 
@@ -2608,7 +2613,7 @@ export default function actionAgentTest() {
       observer.close();
     });
 
-    it('retains an old workflow identity after many terminals', 0, async () => {
+    it('retains an old workflow identity and rejects a mismatched replay after many terminals', 0, async () => {
       const bus = new LinkedMessageBus();
       const executor = new RecordingRegisteredExecutor();
       const agent = new ActionAgent(bus, catalog(new ActionLookup()), noOffers, executor);
@@ -2682,7 +2687,7 @@ export default function actionAgentTest() {
         AgentMessageType.ACTION_RESULT
       )).payload as ActionResultPayload;
       expect(workflowReplay.status).assertEqual('error');
-      expect(workflowReplay.errorCode).assertEqual('ACTION_RUN_DUPLICATE');
+      expect(workflowReplay.errorCode).assertEqual('ACTION_RUN_IDENTITY_MISMATCH');
       expect(executor.actionIds.length).assertEqual(executorCount);
 
       agent.stop();

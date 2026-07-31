@@ -282,7 +282,11 @@ export class MultiAgentEvidenceFormatter {
     if (surfaceId.startsWith('virtual:')) {
       return 'virtual-' + this.token('v', surfaceId);
     }
-    return evidenceAllowed(surfaceId, [], /^(?:loop_surface_[0-9]+(?:_[0-9]+)?|calendar-review:[1-9]\d*|surface_seed)$/);
+    return evidenceAllowed(
+      surfaceId,
+      [],
+      /^(?:loop_surface_[0-9]+(?:_[0-9]+)?|calendar-review:[1-9]\d*|surface_seed(?:_slot_[1-9]\d*)?)$/
+    );
   }
   dynamicDiscoveryLine(message: AgentMessage): string {
     if (message.type !== AgentMessageType.TASK_RESULT_DATA) return '';
@@ -924,7 +928,9 @@ export class MultiAgentRuntime {
       keys === 'allowedActionIds,dataTaskIds,executionMode,goal,inputText,personaId,skillId,uiTaskId' ||
       keys === 'allowedActionIds,currentLocalDate,dataTaskIds,executionMode,goal,inputText,personaId,skillId,uiTaskId' ||
       keys === 'allowedActionIds,dataTaskIds,executionMode,goal,inputText,personaId,skillId,uiTaskId,virtual' ||
-      keys === 'allowedActionIds,currentLocalDate,dataTaskIds,executionMode,goal,inputText,personaId,skillId,uiTaskId,virtual';
+      keys === 'allowedActionIds,currentLocalDate,dataTaskIds,executionMode,goal,inputText,personaId,skillId,uiTaskId,virtual' ||
+      keys === 'allowedActionIds,dataTaskIds,executionMode,goal,inputText,personaId,skillId,uiTaskId,virtual,virtualEntryArgs' ||
+      keys === 'allowedActionIds,currentLocalDate,dataTaskIds,executionMode,goal,inputText,personaId,skillId,uiTaskId,virtual,virtualEntryArgs';
     if (!exactShape ||
       request.uiTaskId !== message.taskId ||
       !nonempty(request.goal) ||
@@ -938,6 +944,12 @@ export class MultiAgentRuntime {
       (request.currentLocalDate === undefined || nonempty(request.currentLocalDate)) &&
       (request.executionMode === undefined ||
         request.executionMode === 'frozen_sequence') &&
+      (request.virtualEntryArgs === undefined ||
+        (request.virtual === true && request.dataTaskIds.length === 0 &&
+          request.executionMode === 'frozen_sequence' &&
+          request.virtualEntryArgs !== null &&
+          typeof request.virtualEntryArgs === 'object' &&
+          !Array.isArray(request.virtualEntryArgs))) &&
       (request.virtual === undefined || typeof request.virtual === 'boolean');
   }
 

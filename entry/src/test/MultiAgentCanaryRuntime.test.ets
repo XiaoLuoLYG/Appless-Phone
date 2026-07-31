@@ -1853,7 +1853,8 @@ export default function multiAgentCanaryRuntimeTest() {
         'Reddit/LinkedIn/Instagram/public community reading -> social.community.search'
       )).assertLarger(-1);
       expect(prompt.indexOf(
-        'Standalone public post draft -> social.post.preview'
+        'A public post draft or public post preview step inside a larger requested workflow ' +
+          'uses social.post.preview'
       )).assertLarger(-1);
       expect(prompt.indexOf(
         'social.reply.draft only after a selected real inbox/feed item'
