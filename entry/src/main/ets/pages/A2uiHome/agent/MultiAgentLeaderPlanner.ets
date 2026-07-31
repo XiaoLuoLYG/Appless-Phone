@@ -31,7 +31,8 @@ import {
   leaderTasksHaveSameRoundDependency,
   StreamingLeaderToolParser,
   ModelContentListener,
-  aiLogInfo
+  aiLogInfo,
+  extractJsonObjects
 } from '@loop/agent-core';
 import { HotelLocalDateProvider, hotelSearchPlanningContract } from './HotelLeaderPlanner';
 
@@ -480,7 +481,11 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
           new Error(REPAIR_SCOPE_INVALID_ERROR);
         throw failure;
       }
-      let correction: string = REPAIR_INSTRUCTION;
+      const explicitMapsScopeRepair: boolean =
+        this.explicitMapsSelectionScope(input, frozenScope);
+      let correction: string = explicitMapsScopeRepair ?
+        EXPLICIT_MAPS_SELECTION_REPAIR_INSTRUCTION + '\nRejected decision: ' + output :
+        REPAIR_INSTRUCTION;
       if (error instanceof Error && error.message === COMPLETED_TOOL_REUSE_ERROR) {
         correction = COMPLETED_TOOL_REPAIR_INSTRUCTION;
       } else if (error instanceof Error && error.message === UNBOUND_LATER_TOOL_ERROR) {
@@ -511,13 +516,15 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
           error.message === UNBOUND_LATER_TOOL_ERROR ||
           error.message === PREMATURE_CALENDAR_DELETE_ACTION_ERROR ||
           error.message === PREMATURE_CALENDAR_UPDATE_AFTER_SEARCH_ERROR);
-      correction += '\nFrozen requestedCapabilityIds: ' +
-        JSON.stringify(frozenScope.requestedCapabilityIds) +
-        '\nFrozen Data-position capability IDs: ' +
-        JSON.stringify(frozenScope.dataCapabilityIds) +
-        '\nFrozen actionIntent-position capability IDs: ' +
-        JSON.stringify(frozenScope.actionCapabilityIds);
-      correction += actionOwnedRepair ?
+      if (!explicitMapsScopeRepair) {
+        correction += '\nFrozen requestedCapabilityIds: ' +
+          JSON.stringify(frozenScope.requestedCapabilityIds) +
+          '\nFrozen Data-position capability IDs: ' +
+          JSON.stringify(frozenScope.dataCapabilityIds) +
+          '\nFrozen actionIntent-position capability IDs: ' +
+          JSON.stringify(frozenScope.actionCapabilityIds);
+      }
+      correction += explicitMapsScopeRepair ? '' : actionOwnedRepair ?
         '\nAction-owned repair freeze: preserve personaId, skillId, requestedCapabilityIds, roundAction, answer, ' +
           'uiIntent, each non-Action Data task, all existing Action IDs, and the original request intent exactly. ' +
           'Move exactly one Action-only capability ID from Data positions to actionIntent.allowedActionIds. ' +
@@ -547,7 +554,9 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         await this.completeBounded(prompt + '\n' + correction);
       try {
         const repairedScope: LeaderRepairScope | null = this.repairScope(repaired);
-        if (repairedScope === null || (actionOwnedRepair ?
+        if (repairedScope === null || (explicitMapsScopeRepair ?
+          !this.explicitMapsSelectionScopeOnlyRepair(frozenScope, repairedScope) :
+          actionOwnedRepair ?
           !this.sameActionOwnedRepair(output, repaired, context, frozenScope, repairedScope) :
           missingActionIntentRepair ?
           !this.sameMissingActionIntentRepair(output, repaired, frozenScope, repairedScope) :
@@ -556,6 +565,9 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         }
         const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
         this.normalizeModelContinuationDecision(repairedDecision);
+        this.normalizeIncompleteSerialCalendarCreate(
+          message, input, repairedDecision, currentLocalDate, round
+        );
         if (error instanceof Error && error.message === SKILL_CAPABILITY_ERROR &&
           (rejectedDecision === null || !this.skillOnlyRepair(rejectedDecision, repairedDecision))) {
           throw new Error(SKILL_CAPABILITY_ERROR);
@@ -566,6 +578,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
           throw new Error(TASK_INPUT_INVALID_ERROR);
         }
         this.rejectOverlappingVideoTools(repairedDecision);
+        this.rejectExplicitMapsSelection(input, repairedDecision);
         this.normalizeSameRoundDependency(
           repairedDecision,
           leaderSameRoundDependencyProducerTaskToolIds(repairedDecision.dataTasks),
@@ -1010,20 +1023,32 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
   private rawDecisionObject(
     output: string
   ): Record<string, Object | string | number | boolean | null | undefined> | null {
-    try {
-      const trimmed: string = this.withoutToolTags(output).trim();
-      if (!trimmed.startsWith('{') || !trimmed.endsWith('}') ||
-        this.hasDuplicateObjectKeys(trimmed)) {
-        return null;
+    const trimmed: string = this.withoutToolTags(output).trim();
+    const candidates: string[] = [trimmed].concat(extractJsonObjects(trimmed));
+    for (let index = 0; index < candidates.length; index++) {
+      const candidate: string = candidates[index];
+      try {
+        if (!candidate.startsWith('{') || !candidate.endsWith('}') ||
+          this.hasDuplicateObjectKeys(candidate)) {
+          continue;
+        }
+        const parsed: Object = JSON.parse(candidate) as Object;
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          continue;
+        }
+        const values = parsed as
+          Record<string, Object | string | number | boolean | null | undefined>;
+        if (candidate === trimmed ||
+          (Array.isArray(values['requestedCapabilityIds']) &&
+            Array.isArray(values['dataTasks']) &&
+            typeof values['roundAction'] === 'string')) {
+          return values;
+        }
+      } catch (_error) {
+        continue;
       }
-      const parsed: Object = JSON.parse(trimmed) as Object;
-      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        return null;
-      }
-      return parsed as Record<string, Object | string | number | boolean | null | undefined>;
-    } catch (_error) {
-      return null;
     }
+    return null;
   }
 
   private scopeStrings(
@@ -1365,6 +1390,39 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     if (!hasMapsSearch && hasFoodSearch) {
       throw new Error(EXPLICIT_MAPS_SELECTION_ERROR);
     }
+  }
+
+  private explicitMapsSelectionScope(
+    input: InputUserPayload,
+    scope: LeaderRepairScope
+  ): boolean {
+    const text: string = input.text.trim().toLowerCase();
+    const explicitMaps: boolean = text.indexOf('google maps') >= 0 ||
+      text.indexOf('google places') >= 0 ||
+      text.indexOf('gmap') >= 0 ||
+      text.indexOf('谷歌地图') >= 0;
+    return explicitMaps &&
+      scope.roundAction === 'execute' &&
+      scope.requestedCapabilityIds.indexOf('food.search') >= 0 &&
+      scope.requestedCapabilityIds.indexOf('maps.place.search') < 0 &&
+      scope.dataCapabilityIds.indexOf('food.search') >= 0 &&
+      scope.dataCapabilityIds.indexOf('maps.place.search') < 0;
+  }
+
+  private explicitMapsSelectionScopeOnlyRepair(
+    original: LeaderRepairScope,
+    repaired: LeaderRepairScope
+  ): boolean {
+    const requested: string[] = original.requestedCapabilityIds.map(
+      (toolId: string): string => toolId === 'food.search' ? 'maps.place.search' : toolId
+    );
+    const data: string[] = original.dataCapabilityIds.map(
+      (toolId: string): string => toolId === 'food.search' ? 'maps.place.search' : toolId
+    );
+    return original.roundAction === repaired.roundAction &&
+      this.sameStringSet(requested, repaired.requestedCapabilityIds) &&
+      this.sameStringSet(data, repaired.dataCapabilityIds) &&
+      this.sameStringSet(original.actionCapabilityIds, repaired.actionCapabilityIds);
   }
 
   private explicitMapsSelectionOnlyRepair(
@@ -1994,13 +2052,18 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     }
     const selectedAction: LeaderRoundAction = roundAction as LeaderRoundAction;
     const tasks: LeaderDecisionDataTask[] = this.dataTasks(rawTasks as Object[], context);
-    const requestedCapabilityIds: string[] = this.requestedCapabilities(
+    let requestedCapabilityIds: string[] = this.requestedCapabilities(
       rawRequestedCapabilities as Object[],
       context
     );
     const actionValue = values['actionIntent'];
     const actionIntent: LeaderActionIntent | null = actionValue === undefined ? null :
       this.actionIntent(actionValue, context);
+    if (continuationMode === 'sequence' && actionIntent === null) {
+      requestedCapabilityIds = requestedCapabilityIds.filter(
+        (capabilityId: string): boolean => !this.actionOnlyCapability(context, capabilityId)
+      );
+    }
     if (selectedAction === 'execute' &&
       tasks.length === 0 &&
       actionIntent === null &&

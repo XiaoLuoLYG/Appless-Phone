@@ -87,7 +87,7 @@ interface LeaderPendingDataTask {
   outputSchema: string;
 }
 
-const MAX_POST_OBSERVATION_PLANNING_MS: number = 12000;
+const MAX_POST_OBSERVATION_PLANNING_MS: number = 20000;
 const MAX_POST_OBSERVATION_UI_RESERVE_MS: number = 8000;
 const OBSERVATION_FALLBACK_ANSWER: string = 'Showing the available tool results.';
 

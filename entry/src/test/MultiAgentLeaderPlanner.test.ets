@@ -1749,6 +1749,23 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.prompts[1].indexOf(EXPLICIT_GOOGLE_MAPS_AS_FOOD_DECISION) >= 0).assertTrue();
     });
 
+    it('corrects malformed explicit Google Maps scope instead of freezing food search', 0, async () => {
+      const malformed: string = EXPLICIT_GOOGLE_MAPS_AS_FOOD_DECISION.split(',"uiIntent":')[0] + '}';
+      const model = new QueueLocalModel([malformed, EXPLICIT_GOOGLE_MAPS_DECISION]);
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: '请用 Google Maps 查伦敦国王十字车站附近的中餐' },
+        planningContext(),
+        1,
+        (): boolean => true
+      );
+
+      expect(decision.requestedCapabilityIds.join(',')).assertEqual('maps.place.search');
+      expect(decision.dataTasks[0].toolId).assertEqual('maps.place.search');
+      expect(model.prompts.length).assertEqual(2);
+      expect(model.prompts[1].indexOf('LEADER_EXPLICIT_MAPS_SELECTION') >= 0).assertTrue();
+    });
+
     it('accepts the device C04 Maps repair with one redundant terminal object closure', 0, async () => {
       const model = new QueueLocalModel([DEVICE_C04_FOOD_DECISION, DEVICE_C04_MAPS_REPAIR]);
       const context = planningContext();
@@ -3132,6 +3149,46 @@ export default function multiAgentLeaderPlannerTest() {
         expect(thirdWithDuration.actionIntent === undefined).assertFalse();
       });
 
+    it('defers an omitted future Action from the current sequence round', 0, async () => {
+      const context = actionOwnerContext();
+      context.tools.push({
+        toolId: 'time',
+        domain: 'system',
+        intent: 'time.now',
+        riskLevel: 'read',
+        registeredBackends: ['local_adapter'],
+        inputSchema: 'emptyObject',
+        outputSchema: 'genericToolResults',
+        actions: []
+      }, {
+        toolId: 'ride.estimate',
+        domain: 'ride',
+        intent: 'ride.estimate',
+        riskLevel: 'read',
+        registeredBackends: ['local_adapter'],
+        inputSchema: 'rideEstimateQuery',
+        outputSchema: 'genericToolResults',
+        actions: []
+      });
+      const omittedCalendarAction = EXPLICIT_SERIAL_FIRST_DECISION.replace(
+        ',"actionIntent":{"goal":"创建明天同一时间的会议日程",' +
+          '"allowedActionIds":["calendar.event.create"]}',
+        ''
+      );
+      const decision = await new MultiAgentLeaderPlanner(
+        new QueueLocalModel([omittedCalendarAction])
+      ).plan(
+        inputMessage(),
+        { text: EXPLICIT_SERIAL_QUERY },
+        context,
+        1
+      );
+
+      expect(decision.dataTasks.length).assertEqual(1);
+      expect(decision.dataTasks[0].toolId).assertEqual('time');
+      expect(decision.requestedCapabilityIds.join(',')).assertEqual('time');
+    });
+
     it('keeps mixed read and Action-owned capabilities in their declared agents', 0, async () => {
       const context = actionOwnerContext();
       context.tools.push({
@@ -3378,6 +3435,51 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.prompts.length).assertEqual(2);
       expect(decision.dataTasks.length).assertEqual(0);
       expect(decision.actionIntent!.allowedActionIds[0]).assertEqual('payment.send');
+    });
+
+    it('normalizes a repaired serial calendar Action before execution', 0, async () => {
+      const model = new QueueLocalModel([
+        missingActionIntentDecision('calendar.event.create'),
+        actionDecision('calendar.event.create')
+      ]);
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        {
+          text: EXPLICIT_SERIAL_QUERY,
+          orderedContinuationAuthorized: true,
+          recentObservations: [{
+            taskId: 'input-1:round-1:time',
+            toolId: 'time',
+            status: 'success',
+            summary: '2026-07-31 10:23',
+            entityRefs: []
+          }]
+        },
+        actionOwnerContext(),
+        3,
+        (): boolean => true
+      );
+
+      expect(model.prompts.length).assertEqual(2);
+      expect(decision.roundAction).assertEqual('clarify');
+      expect(decision.actionIntent === undefined).assertTrue();
+    });
+
+    it('repairs malformed trailing model output from its frozen JSON scope', 0, async () => {
+      const model = new QueueLocalModel([
+        TRAVEL_DECISION + '"<appless_tool>{}</appless_tool>',
+        TRAVEL_DECISION
+      ]);
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: '我明天要从北京去上海，帮我搜索出行方案' },
+        planningContext(),
+        1,
+        (): boolean => true
+      );
+
+      expect(model.prompts.length).assertEqual(2);
+      expect(decision.dataTasks[0].toolId).assertEqual('travel.search');
     });
 
     it('normalizes one omitted Action before the first mixed sequence round', 0, async () => {
