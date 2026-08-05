@@ -26,7 +26,14 @@ import {
   isSurfaceDerivedHotelActionId,
   toolDefinitionForToolId
 } from '@loop/agent-core';
-import { BackendAvailability, BackendResolution, ToolBackendType, ToolDefinition } from '@loop/agent-core';
+import {
+  BackendAvailability,
+  BackendResolution,
+  ToolBackendType,
+  ToolDefinition,
+  ToolInputJsonSchema,
+  validateToolInputValue
+} from '@loop/agent-core';
 
 function availability(
   backend: ToolBackendType,
@@ -202,9 +209,31 @@ export default function toolDefinitionRegistryTest() {
       expect(search.backendPriority.join(',')).assertEqual('local_adapter');
       expect(search.authModes.join(',')).assertEqual('provider_key');
       expect(search.inputSchema).assertEqual('hotelSearchRequest');
+      expect(search.inputJsonSchema === undefined).assertFalse();
+      const searchSchema = search.inputJsonSchema as ToolInputJsonSchema;
+      expect(validateToolInputValue(searchSchema, JSON.parse(
+        '{"originQuery":"query","place":"Huawei Bantian Base","placeType":"POI",' +
+          '"countryCode":"CN","checkInDate":"2026-08-05","stayNights":1,' +
+          '"adultCount":1,"childCount":0,"childAgeDetails":[],"roomCount":1,' +
+          '"currency":"","size":0}'
+      ) as Object).ok).assertTrue();
+      expect(validateToolInputValue(searchSchema, JSON.parse(
+        '{"originQuery":"query","placeType":"POI","countryCode":"CN",' +
+          '"checkInDate":"2026-08-05","stayNights":1,"adultCount":1,"childCount":0,' +
+          '"childAgeDetails":[],"roomCount":1,"currency":"","size":0}'
+      ) as Object).code).assertEqual('TOOL_INPUT_REQUIRED_PROPERTY_MISSING');
       expect(search.outputSchema).assertEqual('hotelSearchResults');
       expect(search.a2uiComponent).assertEqual('GenericToolResults');
       expect(search.actions.join(',')).assertEqual('hotel.detail,hotel.navigate');
+      const food = toolDefinitionForToolId('food.search') as ToolDefinition;
+      const foodSchema = food.inputJsonSchema as ToolInputJsonSchema;
+      expect(food.inputSchema).assertEqual('foodSearchQuery');
+      expect(validateToolInputValue(foodSchema, JSON.parse(
+        '{"query":"Huawei Bantian Base nearby milk tea","sweetness":"half sugar"}'
+      ) as Object).ok).assertTrue();
+      expect(validateToolInputValue(foodSchema, JSON.parse(
+        '{"query":"Huawei Bantian Base nearby food","unknown":true}'
+      ) as Object).code).assertEqual('TOOL_INPUT_ADDITIONAL_PROPERTY');
       expect(detail.domain).assertEqual('hotel');
       expect(detail.riskLevel).assertEqual('read');
       expect(detail.backendPriority.join(',')).assertEqual('local_adapter');

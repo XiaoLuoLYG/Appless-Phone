@@ -1,5 +1,6 @@
 import { HtmlHomeBlock, HtmlHomeDocument } from './HtmlHomeTypes';
 import { escapeScriptJson, renderHtmlHomeDocument } from './HtmlHomeRenderer';
+import { SUGGESTED_ACTIONS_JS } from './HtmlSuggestedActionsModule';
 
 interface MultiTaskEmbedPayload {
   sectionId: string;
@@ -21,6 +22,7 @@ export interface MultiTaskHomePayload {
   title: string;
   subtitle: string;
   activeSectionId: string;
+  allowActiveSectionUpdate: boolean;
   blocks: MultiTaskSectionBlockPayload[];
   embeds: MultiTaskEmbedPayload[];
   isBusy: boolean;
@@ -341,6 +343,9 @@ const MULTI_TASK_SCRIPT: string = `
     var embeds = embedMap(data);
     var blocks = sectionBlocks(data);
     var payloadActiveId = resolveActiveId(data, blocks);
+    if (data && data.allowActiveSectionUpdate === true) {
+      ui.userPinned = false;
+    }
     var targetActiveId = ui.userPinned && ui.activeId.length > 0 ? ui.activeId : payloadActiveId;
     var orderedIds = [];
     blocks.forEach(function (block) {
@@ -436,7 +441,11 @@ function multiTaskPayloadBlocks(blocks: HtmlHomeBlock[]): MultiTaskSectionBlockP
   return next;
 }
 
-export function buildMultiTaskHomePayload(document: HtmlHomeDocument, isBusy: boolean = false): MultiTaskHomePayload {
+export function buildMultiTaskHomePayload(
+  document: HtmlHomeDocument,
+  isBusy: boolean = false,
+  allowActiveSectionUpdate: boolean = true
+): MultiTaskHomePayload {
   const embeds: MultiTaskEmbedPayload[] = [];
   document.blocks.forEach((block: HtmlHomeBlock) => {
     if (block.kind !== 'multi-task-section') {
@@ -456,6 +465,7 @@ export function buildMultiTaskHomePayload(document: HtmlHomeDocument, isBusy: bo
     title: document.title,
     subtitle: document.subtitle,
     activeSectionId: document.activeSectionId ?? '',
+    allowActiveSectionUpdate: allowActiveSectionUpdate,
     blocks: multiTaskPayloadBlocks(document.blocks),
     embeds: embeds,
     isBusy: isBusy
@@ -483,6 +493,7 @@ export function renderMultiTaskHomeDocument(document: HtmlHomeDocument, isBusy: 
 <body data-scene="multi-task">
 <div id="app"></div>
 <script id="multi-task-data" type="application/json">${payloadJson}</script>
+<script>${SUGGESTED_ACTIONS_JS}</script>
 <script>${MULTI_TASK_SCRIPT}</script>
 </body>
 </html>`;

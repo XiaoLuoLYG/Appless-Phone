@@ -67,13 +67,16 @@ export default function agentMessageTest() {
         AgentMessageType.ACTION_RUN,
         AgentMessageType.ACTION_PROGRESS,
         AgentMessageType.ACTION_RESULT,
+        AgentMessageType.SUGGESTED_ACTION_CANDIDATE,
+        AgentMessageType.SUGGESTED_ACTION_STATUS,
+        AgentMessageType.SUGGESTED_ACTION_RUN,
         AgentMessageType.TURN_CANCEL,
         AgentMessageType.ACTION_PLAN_REQUEST,
         AgentMessageType.TURN_RESULT
       ];
 
-      expect(Object.keys(AgentMessageType).length).assertEqual(15);
-      expect(types.join(',')).assertEqual('INPUT.USER,TASK.CREATE.UI,TASK.CREATE.DATA,TASK.RESULT.UI,TASK.RESULT.DATA,TASK.ERROR,ACTION.PLAN.DRAFT,ACTION.OFFERS.READY,ACTION.PLAN.READY,ACTION.RUN,ACTION.PROGRESS,ACTION.RESULT,TURN.CANCEL,ACTION.PLAN.REQUEST,TURN.RESULT');
+      expect(Object.keys(AgentMessageType).length).assertEqual(18);
+      expect(types.join(',')).assertEqual('INPUT.USER,TASK.CREATE.UI,TASK.CREATE.DATA,TASK.RESULT.UI,TASK.RESULT.DATA,TASK.ERROR,ACTION.PLAN.DRAFT,ACTION.OFFERS.READY,ACTION.PLAN.READY,ACTION.RUN,ACTION.PROGRESS,ACTION.RESULT,SUGGESTED_ACTION.CANDIDATE,SUGGESTED_ACTION.STATUS,SUGGESTED_ACTION.RUN,TURN.CANCEL,ACTION.PLAN.REQUEST,TURN.RESULT');
     });
 
     it('exposes the canonical planning offer and task contracts', 0, () => {

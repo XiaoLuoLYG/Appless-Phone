@@ -23,6 +23,9 @@ import {
   LinkedMessageBus,
   ObservationDigest,
   TaskErrorPayload,
+  SuggestedActionCandidatePayload,
+  SuggestedActionStatusPayload,
+  SuggestedActionRunPayload,
   TurnResultPayload,
   TurnResultStatus,
   UiAgent,
@@ -231,6 +234,23 @@ export class MultiAgentEvidenceFormatter {
         const payload = message.payload as TaskErrorPayload;
         return '[AIPhone][MultiAgentTaskError]' + identity + ' code=' +
           evidenceAllowed(payload.code, [], /^[A-Z][A-Z0-9_]*$/);
+      }
+      case AgentMessageType.SUGGESTED_ACTION_CANDIDATE: {
+        const payload = message.payload as SuggestedActionCandidatePayload;
+        return '[AIPhone][SuggestedActionCandidate]' + identity + ' suggested=' +
+          this.token('k', payload.suggestedActionId) + ' goalChars=' + payload.goal.length.toString();
+      }
+      case AgentMessageType.SUGGESTED_ACTION_STATUS: {
+        const payload = message.payload as SuggestedActionStatusPayload;
+        return '[AIPhone][SuggestedActionStatus]' + identity + ' suggested=' +
+          this.token('k', payload.suggestedActionId) + ' status=' +
+          evidenceAllowed(payload.status, ['preparing', 'ready', 'unsupported', 'failed']) +
+          ' labelChars=' + payload.label.length.toString();
+      }
+      case AgentMessageType.SUGGESTED_ACTION_RUN: {
+        const payload = message.payload as SuggestedActionRunPayload;
+        return '[AIPhone][SuggestedActionRun]' + identity + ' suggested=' +
+          this.token('k', payload.suggestedActionId);
       }
       case AgentMessageType.ACTION_PLAN_REQUEST: {
         const payload = message.payload as ActionPlanRequestPayload;
@@ -450,6 +470,10 @@ export class MultiAgentRuntime {
   private readonly surfaceTurnActivator: ((turnId: string, hostGeneration: number) => void) | null;
   private readonly turnGenerationObserver: ((turnId: string, hostGeneration: number) => void) | null;
   private readonly directActionAdmission: ((action: A2uiAction, context: ActionExecutionContext) => boolean) | null;
+  private readonly suggestedActionStatusObserver: ((
+    message: AgentMessage,
+    status: SuggestedActionStatusPayload
+  ) => void) | null;
   private readonly leader: LeaderAgent;
   private readonly planningContextProvider: ((prompt: string) => LeaderPlanningContext) | null;
   private readonly data: DataAgent;
@@ -480,6 +504,8 @@ export class MultiAgentRuntime {
       null : options.turnGenerationObserver;
     this.directActionAdmission = options.directActionAdmission === undefined ?
       null : options.directActionAdmission;
+    this.suggestedActionStatusObserver = options.suggestedActionStatusObserver === undefined ?
+      null : options.suggestedActionStatusObserver;
     this.leader = new LeaderAgent(
       this.bus,
       options.planner,
@@ -536,7 +562,8 @@ export class MultiAgentRuntime {
       actionOfferResolver,
       actionExecutor,
       options.actionCompiler,
-      options.virtualActionResolver
+      options.virtualActionResolver,
+      options.suggestedActionPreparer
     );
     // The observer is the fifth and final reader. All five exist before any
     // public method can publish INPUT.USER.
@@ -616,6 +643,26 @@ export class MultiAgentRuntime {
         payload
       });
     });
+  }
+
+  runSuggestedAction(suggestedActionId: string, hostGeneration: number): string {
+    const record = this.action.inspectPreparedAction(suggestedActionId);
+    if (!this.active || record === null || record.status !== 'ready' ||
+      record.suggestedActionId !== suggestedActionId ||
+      !Number.isSafeInteger(hostGeneration) || hostGeneration <= 0) {
+      return '';
+    }
+    const turnId: string = this.nextId('suggested-turn');
+    this.activateSurfaceTurn(turnId, hostGeneration);
+    const payload: SuggestedActionRunPayload = { suggestedActionId };
+    this.bus.publish({
+      type: AgentMessageType.SUGGESTED_ACTION_RUN,
+      conversationId: record.conversationId,
+      turnId,
+      taskId: suggestedActionId,
+      payload
+    });
+    return turnId;
   }
 
   runAction(
@@ -766,6 +813,13 @@ export class MultiAgentRuntime {
     }
     const action: PendingAction | undefined = this.pendingActions.get(message.taskId);
     emitEvidence(this.evidenceFormatter, message);
+    if (message.type === AgentMessageType.SUGGESTED_ACTION_STATUS) {
+      const observer = this.suggestedActionStatusObserver;
+      if (observer !== null) {
+        observer(message, message.payload as SuggestedActionStatusPayload);
+      }
+      return;
+    }
     if (message.type === AgentMessageType.ACTION_RESULT && action !== undefined) {
       this.observeActionResult(message, action);
       return;

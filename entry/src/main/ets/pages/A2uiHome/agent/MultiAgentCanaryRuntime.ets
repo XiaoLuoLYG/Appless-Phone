@@ -6,6 +6,7 @@ import {
   ActionOffer,
   ActionPlanRequestPayload,
   ActionValidationResult,
+  AgentMessage,
   A2uiAction,
   A2uiRuntimeDataModel,
   A2uiSurfaceStore,
@@ -33,6 +34,7 @@ import {
   MailDetailRequest,
   RegisteredActionExecutor,
   SurfaceActionAuthorizer,
+  SuggestedActionStatusPayload,
   ToolDefinition,
   ToolDefinitionLookup,
   UiLayoutPlanner,
@@ -53,6 +55,7 @@ import {
   appendMultiTaskSlot,
   mergeSurfaceIntoMultiTaskSurface,
   resolveMultiTaskSlotId,
+  wrapSurfaceWithMultiTaskAction,
   normalizedCalendarArgsForPrompt,
   parseA2uiJsonl,
   setJsonPointer,
@@ -68,6 +71,7 @@ import {
 import { personaPackForId } from '../../../model/PersonaStore';
 import { MultiAgentLeaderPlanner } from './MultiAgentLeaderPlanner';
 import { MultiAgentActionPlanCompiler } from './MultiAgentActionPlanCompiler';
+import { MultiAgentSuggestedActionPreparer } from './MultiAgentSuggestedActionPreparer';
 import {
   HotelLocalDateProvider,
   normalizeHotelSearchTaskInput
@@ -107,6 +111,12 @@ const MEMORY_ACTION_ID: string = 'memory.update';
 const TIME_TOOL_ID: string = 'time';
 const MEMORY_SUMMARY_LIMIT: number = 240;
 const TURN_HOST_GENERATION_LIMIT: number = 32;
+const SUGGESTED_ACTION_HOST_LIMIT: number = 32;
+
+interface SuggestedActionHostContext {
+  sourceSurface: A2uiSurfaceState;
+  hostGeneration: number;
+}
 
 interface CalendarReviewOutput {
   surfaceId: string;
@@ -174,6 +184,10 @@ export interface MultiAgentCanaryOptions {
   currentHostGeneration?: () => number;
   onSurface: (surface: A2uiSurfaceState, runtimeGeneration: number) => boolean;
   onMemoryUpdate: (update: PersonaMemoryUpdateRequest, runtimeGeneration: number) => void;
+  onSuggestedActionStatus?: (
+    status: SuggestedActionStatusPayload,
+    runtimeGeneration: number
+  ) => void;
   onMailDetail?: (
     event: MailDetailInPlaceEvent,
     runtimeGeneration: number,
@@ -886,6 +900,13 @@ class CanaryStructuredDataExecutor implements DataTaskExecutor {
       }
       prompt = query;
     }
+    if (task.toolId === 'food.search') {
+      const values = task.args as Record<string, Object | string | number | boolean | null | undefined>;
+      const query = values['query'];
+      if (typeof query === 'string' && query.trim().length > 0) {
+        prompt = query.trim();
+      }
+    }
     const result = await this.structuredToolCall(task.toolId, prompt, task.args);
     if (task.toolId !== 'calendar.events.search' || result.status === 'error') {
       return result;
@@ -1467,6 +1488,9 @@ export class MultiAgentCanaryRuntime {
   private readonly currentHostGeneration: () => number;
   private readonly turnHostGenerations: Map<string, number> = new Map<string, number>();
   private readonly turnHostGenerationOrder: string[] = [];
+  private readonly suggestedActionHosts: Map<string, SuggestedActionHostContext> =
+    new Map<string, SuggestedActionHostContext>();
+  private readonly suggestedActionHostOrder: string[] = [];
   private pageGeneration: number = 0;
   private pageFingerprint: string = '';
   private gmailDraftApplyCandidate: GmailDraftApplyCandidate | null = null;
@@ -1509,9 +1533,18 @@ export class MultiAgentCanaryRuntime {
       if (hostGeneration === undefined || hostGeneration <= 0) {
         return false;
       }
-      surface.runtimeOwner = 'multi_agent';
-      surface.runtimeGeneration = hostGeneration;
-      return options.onSurface(surface, hostGeneration);
+      const suggestedHost = this.suggestedActionHosts.get(turnId);
+      if (suggestedHost !== undefined && suggestedHost.hostGeneration !== hostGeneration) {
+        return false;
+      }
+      if (suggestedHost !== undefined && surface.status !== 'ready' && surface.status !== 'error') {
+        return true;
+      }
+      const nextSurface = suggestedHost === undefined ? surface :
+        this.mergeSuggestedActionSurface(suggestedHost, surface);
+      nextSurface.runtimeOwner = 'multi_agent';
+      nextSurface.runtimeGeneration = hostGeneration;
+      return options.onSurface(nextSurface, hostGeneration);
     };
     const lookup = new CanaryToolLookup();
     const catalog = new ActionCatalog(
@@ -1592,6 +1625,21 @@ export class MultiAgentCanaryRuntime {
       surfaceWriter: mailDetailBridge,
       actionCatalog: catalog,
       actionCompiler: new MultiAgentActionPlanCompiler(options.model),
+      suggestedActionPreparer: new MultiAgentSuggestedActionPreparer(
+        options.model,
+        allToolDefinitions(),
+        options.currentLocalDate
+      ),
+      suggestedActionStatusObserver: (
+        message: AgentMessage,
+        status: SuggestedActionStatusPayload
+      ): void => {
+        const hostGeneration = this.turnHostGenerations.get(message.turnId);
+        if (hostGeneration !== undefined && hostGeneration > 0 &&
+          options.onSuggestedActionStatus !== undefined) {
+          options.onSuggestedActionStatus(status, hostGeneration);
+        }
+      },
       actionExecutor: new CanaryRegisteredExecutor(
         aiphoneExecutor,
         (update: PersonaMemoryUpdateRequest, context: ActionExecutionContext): void => {
@@ -1698,6 +1746,23 @@ export class MultiAgentCanaryRuntime {
       });
   }
 
+  runSuggestedAction(suggestedActionId: string): boolean {
+    const sourceSurface = this.currentHostSurface();
+    const hostGeneration = this.currentHostGeneration();
+    if (sourceSurface === null || sourceSurface.surfaceId.trim().length === 0 ||
+      sourceSurface.runtimeOwner !== 'multi_agent' ||
+      sourceSurface.runtimeGeneration !== hostGeneration ||
+      !Number.isSafeInteger(hostGeneration) || hostGeneration <= 0) {
+      return false;
+    }
+    const turnId = this.runtime.runSuggestedAction(suggestedActionId, hostGeneration);
+    if (turnId.length === 0) {
+      return false;
+    }
+    this.rememberSuggestedActionHost(turnId, sourceSurface, hostGeneration);
+    return true;
+  }
+
   runPageAction(
     clicked: A2uiAction
   ): Promise<boolean> {
@@ -1786,6 +1851,8 @@ export class MultiAgentCanaryRuntime {
     this.surfaceGeneration = 0;
     this.turnHostGenerations.clear();
     this.turnHostGenerationOrder.splice(0, this.turnHostGenerationOrder.length);
+    this.suggestedActionHosts.clear();
+    this.suggestedActionHostOrder.splice(0, this.suggestedActionHostOrder.length);
   }
 
   private currentHotelDetailContext(context: MultiAgentCanaryActionContext): boolean {
@@ -1851,6 +1918,80 @@ export class MultiAgentCanaryRuntime {
       const removedTurnId = this.turnHostGenerationOrder[0];
       this.turnHostGenerationOrder.splice(0, 1);
       this.turnHostGenerations.delete(removedTurnId);
+    }
+  }
+
+  private rememberSuggestedActionHost(
+    turnId: string,
+    sourceSurface: A2uiSurfaceState,
+    hostGeneration: number
+  ): void {
+    if (!this.suggestedActionHosts.has(turnId)) {
+      this.suggestedActionHostOrder.push(turnId);
+    }
+    this.suggestedActionHosts.set(turnId, {
+      sourceSurface,
+      hostGeneration
+    });
+    while (this.suggestedActionHostOrder.length > SUGGESTED_ACTION_HOST_LIMIT) {
+      const removedTurnId = this.suggestedActionHostOrder[0];
+      this.suggestedActionHostOrder.splice(0, 1);
+      this.suggestedActionHosts.delete(removedTurnId);
+    }
+  }
+
+  private mergeSuggestedActionSurface(
+    context: SuggestedActionHostContext,
+    targetSurface: A2uiSurfaceState
+  ): A2uiSurfaceState {
+    const targetToolId = registeredPageSourceToolId(targetSurface);
+    if (targetToolId.length === 0) {
+      return targetSurface;
+    }
+    let composite = context.sourceSurface;
+    let slotId = '';
+    if (isMultiTaskSurface(composite)) {
+      const previousSlotIds = this.multiTaskSlotIds(composite);
+      composite = appendMultiTaskSlot(composite, targetToolId);
+      const currentSlotIds = this.multiTaskSlotIds(composite);
+      for (let index = 0; index < currentSlotIds.length; index++) {
+        if (previousSlotIds.indexOf(currentSlotIds[index]) < 0) {
+          slotId = currentSlotIds[index];
+          break;
+        }
+      }
+    } else {
+      const sourceToolId = registeredPageSourceToolId(composite);
+      if (sourceToolId.length === 0) {
+        return targetSurface;
+      }
+      composite = wrapSurfaceWithMultiTaskAction(composite, sourceToolId, targetToolId);
+      slotId = 'slot_1';
+    }
+    if (slotId.length === 0) {
+      slotId = resolveMultiTaskSlotId(composite, targetToolId);
+    }
+    return slotId.length === 0 ? targetSurface : mergeSurfaceIntoMultiTaskSurface(
+      composite,
+      slotId,
+      targetToolId,
+      targetSurface,
+      true
+    );
+  }
+
+  private multiTaskSlotIds(surface: A2uiSurfaceState): string[] {
+    try {
+      const model = JSON.parse(surface.dataModelJson) as
+        Record<string, Object | string | number | boolean | null | undefined>;
+      const sections = model['sections'];
+      if (sections === undefined || sections === null || typeof sections !== 'object' ||
+        Array.isArray(sections)) {
+        return [];
+      }
+      return Object.keys(sections);
+    } catch (_error) {
+      return [];
     }
   }
 

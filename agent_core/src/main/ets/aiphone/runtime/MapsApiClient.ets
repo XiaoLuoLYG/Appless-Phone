@@ -1,6 +1,6 @@
 import { http } from '@kit.NetworkKit';
 import util from '@ohos.util';
-import { A2uiFoodData, A2uiLabelValueData } from './A2uiTypes';
+import { A2uiAction, A2uiFoodData, A2uiLabelValueData } from './A2uiTypes';
 import { DynamicGenericToolResult } from './DynamicToolTypes';
 import { aiLogError, aiLogInfo } from './AiphoneLogger';
 
@@ -257,6 +257,9 @@ export function mapsRouteResult(value: Object | null): DynamicGenericToolResult 
       rawPreview: 'missing route endpoints'
     };
   }
+  const actions: A2uiAction[] = [
+    { id: 'maps.open.web', label: '查看路线', prompt: url, variant: 'primary', kind: 'client' }
+  ];
   return {
     sourceTag: 'Google Maps',
     toolName: 'maps.route.open',
@@ -270,7 +273,7 @@ export function mapsRouteResult(value: Object | null): DynamicGenericToolResult 
       { label: 'Maps URL', value: url }
     ],
     rawPreview: url,
-    actions: [{ id: 'maps.open.web', label: '查看路线', prompt: url, variant: 'primary', kind: 'client' }]
+    actions
   };
 }
 

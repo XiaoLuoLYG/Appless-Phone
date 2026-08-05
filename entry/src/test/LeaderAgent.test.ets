@@ -26,6 +26,7 @@ import {
   LocalModel,
   MAX_LEADER_DATA_TASKS_PER_ROUND,
   MAX_LEADER_DATA_TASKS_PER_TURN,
+  SuggestedActionCandidatePayload,
   TaskErrorPayload,
   TurnResultPayload,
   UiRenderResultPayload
@@ -838,6 +839,44 @@ export default function leaderAgentTest() {
       observer.close();
     });
 
+    it('generates a stable suggested-action id and publishes a dedicated candidate message', 0,
+      async () => {
+        const bus = new LinkedMessageBus();
+        const decision = semanticDecision([semanticDataTask('route-source')]);
+        decision.suggestedGoals = ['查询华为坂田基地附近的酒店'];
+        const leader = new LeaderAgent(
+          bus,
+          new RoundScriptedPlanner([decision]),
+          semanticPlanningContext()
+        );
+        const observer = bus.openReader();
+        leader.start();
+
+        bus.publish(inputMessage(
+          'conversation-hotel',
+          'turn-1',
+          'route-input',
+          '查询从深圳实验学校到华为坂田基地的路线'
+        ));
+        await receive(observer);
+        const candidateMessage = await receive(observer);
+        const candidate = candidateMessage.payload as SuggestedActionCandidatePayload;
+        const dataMessage = await receive(observer);
+
+        expect(candidateMessage.type).assertEqual(AgentMessageType.SUGGESTED_ACTION_CANDIDATE);
+        expect(candidateMessage.taskId).assertEqual('route-input:ui');
+        expect(candidate.suggestedActionId).assertEqual('route-input:ui:suggested-action:1');
+        expect(candidate.goal).assertEqual('查询华为坂田基地附近的酒店');
+        expect(Object.keys(candidate).sort().join(',')).assertEqual(
+          'goal,suggestedActionId'
+        );
+        expect(dataMessage.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+        expect((dataMessage.payload as CreateDataTaskPayload).toolId).assertEqual('hotel.search');
+
+        leader.stop();
+        observer.close();
+      });
+
     it('rejects a hybrid semantic and legacy result before publishing tasks', 0, async () => {
       const bus = new LinkedMessageBus();
       const planner = new MixedRoundPlanner([hybridLeaderResult()]);
@@ -1526,9 +1565,10 @@ export default function leaderAgentTest() {
       observer.close();
     });
 
-    it('publishes only a virtual Action request for a zero-Data semantic execute decision', 0, async () => {
+    it('correlates a suggested candidate with its zero-Data virtual Action request', 0, async () => {
       const bus = new LinkedMessageBus();
       const decision = withNormalizationDate(semanticDecision([]));
+      decision.suggestedGoals = ['查询附近的酒店'];
       decision.actionIntent = {
         goal: 'Remember the explicit user statement',
         allowedActionIds: ['memory.update']
@@ -1575,13 +1615,23 @@ export default function leaderAgentTest() {
       const requests = beforeMarker.filter(
         (message: AgentMessage): boolean => message.type === AgentMessageType.ACTION_PLAN_REQUEST
       );
+      const candidates = beforeMarker.filter(
+        (message: AgentMessage): boolean => message.type === AgentMessageType.SUGGESTED_ACTION_CANDIDATE
+      );
 
       expect(requests.length).assertEqual(1);
+      expect(candidates.length).assertEqual(1);
       expect(beforeMarker.filter(
         (message: AgentMessage): boolean => message.type === AgentMessageType.TASK_CREATE_DATA ||
           message.type === AgentMessageType.TASK_CREATE_UI
       ).length).assertEqual(0);
       const request = requests[0].payload as ActionPlanRequestPayload;
+      const candidate = candidates[0].payload as SuggestedActionCandidatePayload;
+      expect(candidates[0].taskId).assertEqual(requests[0].taskId);
+      expect(candidates[0].taskId).assertEqual(request.uiTaskId);
+      expect(candidate.suggestedActionId).assertEqual(
+        request.uiTaskId + ':suggested-action:1'
+      );
       expect(request.uiTaskId).assertEqual('input-1:round-1:virtual');
       expect(request.dataTaskIds.length).assertEqual(0);
       expect(request.goal).assertEqual('Remember the explicit user statement');

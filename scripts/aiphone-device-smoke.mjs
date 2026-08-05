@@ -1575,7 +1575,7 @@ function waitForProcessExit(child, timeoutMs) {
 
 function activeHilogProcesses() {
   const result = spawnSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' });
-  return result.stdout
+  return (result.stdout || '')
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.includes('hdc') && line.includes('hilog'));

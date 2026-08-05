@@ -11,6 +11,9 @@ export enum AgentMessageType {
   ACTION_RUN = 'ACTION.RUN',
   ACTION_PROGRESS = 'ACTION.PROGRESS',
   ACTION_RESULT = 'ACTION.RESULT',
+  SUGGESTED_ACTION_CANDIDATE = 'SUGGESTED_ACTION.CANDIDATE',
+  SUGGESTED_ACTION_STATUS = 'SUGGESTED_ACTION.STATUS',
+  SUGGESTED_ACTION_RUN = 'SUGGESTED_ACTION.RUN',
   TURN_CANCEL = 'TURN.CANCEL',
   ACTION_PLAN_REQUEST = 'ACTION.PLAN.REQUEST',
   TURN_RESULT = 'TURN.RESULT'
@@ -88,4 +91,23 @@ export interface TaskErrorPayload {
   code: string;
   message: string;
   retryable?: boolean;
+}
+
+export interface SuggestedActionCandidatePayload {
+  suggestedActionId: string;
+  goal: string;
+}
+
+export type SuggestedActionPreparationStatus = 'preparing' | 'ready' | 'unsupported' | 'failed';
+
+export interface SuggestedActionStatusPayload {
+  suggestedActionId: string;
+  goal: string;
+  status: SuggestedActionPreparationStatus;
+  reasonCode: string;
+  label: string;
+}
+
+export interface SuggestedActionRunPayload {
+  suggestedActionId: string;
 }
