@@ -3,7 +3,9 @@ import {
   AggregateSearchPost,
   AggregateSearchSourceStatus,
   AggregateSearchVideo,
+  WaterfallCandidate,
   aggregateSearchQueryFromArgs,
+  aggregateMediaCandidates,
   aggregateSearchResultFromParts,
   aggregateSearchSourcesFromArgs,
   aggregateXPostSearchPrompt,
@@ -13,7 +15,8 @@ import {
   unsupportedSourceStatus,
   xPostsFromComposioResult,
   zhihuPostsFromSearchPayload,
-  zhihuSearchUrl
+  zhihuSearchUrl,
+  rankWaterfallCandidates
 } from '@loop/agent-core';
 
 interface QueryArgsFixture {
@@ -55,6 +58,30 @@ function post(id: string, url: string): AggregateSearchPost {
     rows: []
   };
 }
+
+function waterfallCandidate(
+  id: string,
+  source: string,
+  title: string,
+  summary: string,
+  url: string,
+  publishedAt: string,
+  originalIndex: number
+): WaterfallCandidate {
+  return {
+    id: id,
+    source: source,
+    mediaType: 'post',
+    title: title,
+    summary: summary,
+    url: url,
+    coverUrl: '',
+    publishedAt: publishedAt,
+    originalIndex: originalIndex
+  };
+}
+
+const WATERFALL_NOW_MS: number = Date.parse('2026-08-06T12:00:00.000Z');
 
 export default function aggregateSearchClientTest() {
   describe('aggregateSearchClient', () => {
@@ -212,6 +239,123 @@ export default function aggregateSearchClientTest() {
       });
 
       expect(posts.length).assertEqual(0);
+    });
+
+    it('ranks exact and token query matches before weak matches', 0, () => {
+      const ranked = rankWaterfallCandidates({
+        query: 'openai codex',
+        candidates: [
+          waterfallCandidate('old-weak', 'x', 'Compiler notes', 'A general compiler note', 'https://x.test/weak', '2026-07-01T00:00:00.000Z', 3),
+          waterfallCandidate('reddit-token', 'reddit', 'Codex tools for agents', 'A partial topic match', 'https://reddit.test/token', '2026-08-05T00:00:00.000Z', 2),
+          waterfallCandidate('hn-exact', 'hackernews', 'Codex tools for OpenAI', 'All query terms in the title', 'https://news.test/exact', '2026-08-05T00:00:00.000Z', 1),
+          waterfallCandidate('yt-exact', 'youtube', 'OpenAI Codex release', 'The exact topic is in the title', 'https://youtube.test/exact', '2026-08-06T10:00:00.000Z', 0)
+        ],
+        enabledSources: ['youtube', 'hackernews', 'reddit', 'x'],
+        shownIds: [],
+        stableIds: [],
+        preferenceDescription: ''
+      }, WATERFALL_NOW_MS);
+
+      expect(ranked.map((item) => item.id).join(',')).assertEqual('yt-exact,hn-exact,reddit-token,old-weak');
+      expect(ranked[0].reason).assertEqual('标题命中查询 · 24 小时内发布');
+    });
+
+    it('uses freshness then original order without random output', 0, () => {
+      const candidates = [
+        waterfallCandidate('same-old', 'youtube', 'OpenAI Codex', 'Same title', 'https://youtube.test/old', '2026-07-10T00:00:00.000Z', 0),
+        waterfallCandidate('same-new', 'bilibili', 'OpenAI Codex', 'Same title', 'https://bilibili.test/new', '2026-08-06T11:00:00.000Z', 1),
+        waterfallCandidate('same-invalid-date', 'x', 'OpenAI Codex', 'Same title', 'https://x.test/invalid', 'not-a-date', 2)
+      ];
+      const first = rankWaterfallCandidates({
+        query: 'openai codex', candidates: candidates, enabledSources: ['youtube', 'bilibili', 'x'], shownIds: [], stableIds: [], preferenceDescription: ''
+      }, WATERFALL_NOW_MS);
+      const second = rankWaterfallCandidates({
+        query: 'openai codex', candidates: candidates, enabledSources: ['youtube', 'bilibili', 'x'], shownIds: [], stableIds: [], preferenceDescription: ''
+      }, WATERFALL_NOW_MS);
+
+      expect(first.map((item) => item.id).join(',')).assertEqual('same-new,same-old,same-invalid-date');
+      expect(second.map((item) => item.id).join(',')).assertEqual(first.map((item) => item.id).join(','));
+      expect(first[2].reason).assertEqual('标题命中查询');
+    });
+
+    it('balances sources inside the same relevance tier', 0, () => {
+      const ranked = rankWaterfallCandidates({
+        query: 'openai codex',
+        candidates: [
+          waterfallCandidate('youtube-0', 'youtube', 'Earlier OpenAI Codex', '', 'https://youtube.test/0', '2026-08-01T00:00:00.000Z', -1),
+          waterfallCandidate('youtube-1', 'youtube', 'OpenAI Codex', '', 'https://youtube.test/1', '2026-08-01T00:00:00.000Z', 0),
+          waterfallCandidate('youtube-2', 'youtube', 'OpenAI Codex', '', 'https://youtube.test/2', '2026-08-01T00:00:00.000Z', 1),
+          waterfallCandidate('x-1', 'x', 'OpenAI Codex', '', 'https://x.test/1', '2026-08-01T00:00:00.000Z', 2)
+        ],
+        enabledSources: ['youtube', 'x'],
+        shownIds: ['youtube-0'],
+        stableIds: [],
+        preferenceDescription: ''
+      }, WATERFALL_NOW_MS);
+
+      expect(ranked.map((item) => item.id).join(',')).assertEqual('x-1,youtube-1,youtube-2');
+    });
+
+    it('deduplicates normalized links across video and post', 0, () => {
+      const ranked = rankWaterfallCandidates({
+        query: 'openai codex',
+        candidates: [
+          waterfallCandidate('duplicate-post', 'x', 'OpenAI Codex', 'Older duplicate', 'https://EXAMPLE.test/watch?id=7#comments', '2026-07-01T00:00:00.000Z', 1),
+          waterfallCandidate('duplicate-video', 'youtube', 'OpenAI Codex', 'Newer duplicate', 'HTTPS://example.test/watch?id=7#top', '2026-08-06T10:00:00.000Z', 0),
+          waterfallCandidate('different-query', 'reddit', 'OpenAI Codex', '', 'https://example.test/watch?id=8#top', '2026-08-06T10:00:00.000Z', 2)
+        ],
+        enabledSources: ['youtube', 'x', 'reddit'],
+        shownIds: [],
+        stableIds: [],
+        preferenceDescription: ''
+      }, WATERFALL_NOW_MS);
+
+      expect(ranked.map((item) => item.id).join(',')).assertEqual('duplicate-video,different-query');
+      expect(ranked[0].normalizedUrl).assertEqual('https://example.test/watch?id=7');
+    });
+
+    it('keeps only enabled sources and truthful reason signals', 0, () => {
+      const ranked = rankWaterfallCandidates({
+        query: 'openai codex',
+        candidates: [
+          waterfallCandidate('valid', 'youtube', 'OpenAI Codex', '', 'https://youtube.test/valid', '', 0),
+          waterfallCandidate('disabled', 'x', 'OpenAI Codex', '', 'https://x.test/disabled', '2026-08-06T11:00:00.000Z', 1),
+          waterfallCandidate('relative', 'youtube', 'OpenAI Codex', '', '/relative', '2026-08-06T11:00:00.000Z', 2),
+          waterfallCandidate('empty-url', 'youtube', 'OpenAI Codex', '', '', '2026-08-06T11:00:00.000Z', 3)
+        ],
+        enabledSources: ['youtube'],
+        shownIds: [],
+        stableIds: [],
+        preferenceDescription: 'only show official'
+      }, WATERFALL_NOW_MS);
+
+      expect(ranked.map((item) => item.id).join(',')).assertEqual('valid');
+      expect(ranked[0].reason).assertEqual('标题命中查询');
+    });
+
+    it('maps video image-text and post fields without inventing data', 0, () => {
+      const videos: AggregateSearchVideo[] = [{
+        id: 'video-1', source: 'youtube', provider: 'YouTube', title: 'Video title', summary: 'Video summary',
+        url: 'https://youtube.test/video-1', thumbnail: 'https://img.test/video.jpg', publishedAt: '2026-08-06T10:00:00.000Z',
+        duration: '1:00', status: 'success', rows: []
+      }];
+      const posts: AggregateSearchPost[] = [{
+        id: 'post-1', source: 'x', provider: 'X', title: 'Post title', author: 'author', handle: '@author', text: 'Post body',
+        url: 'https://x.test/post-1', publishedAt: '2026-08-06T09:00:00.000Z', score: '1', commentCount: '2', status: 'success',
+        rows: [{ label: 'image', value: 'https://img.test/post.jpg' }]
+      }, {
+        id: 'post-2', source: 'x', provider: 'X', title: 'Post without image', author: '', handle: '', text: 'Body',
+        url: 'https://x.test/post-2', publishedAt: '', score: '', commentCount: '', status: 'success', rows: []
+      }];
+      const candidates = aggregateMediaCandidates(videos, posts, 0);
+
+      expect(candidates.length).assertEqual(3);
+      expect(candidates[0].mediaType).assertEqual('video');
+      expect(candidates[0].coverUrl).assertEqual('https://img.test/video.jpg');
+      expect(candidates[1].mediaType).assertEqual('image_text');
+      expect(candidates[1].summary).assertEqual('Post body');
+      expect(candidates[2].mediaType).assertEqual('post');
+      expect(candidates[2].coverUrl).assertEqual('');
     });
   });
 }

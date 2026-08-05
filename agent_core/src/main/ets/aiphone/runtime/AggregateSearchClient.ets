@@ -13,6 +13,7 @@ import {
   AggregateSearchVideo,
   aggregateSourceLabel
 } from './AggregateSearchTypes';
+import { WaterfallCandidate } from './WaterfallAnythingCore';
 
 type AggregateArgValue = Object | string | number | boolean | null | undefined;
 type AggregateArgRecord = Record<string, AggregateArgValue>;
@@ -32,6 +33,57 @@ interface AggregateComposioFixedRequest {
 interface AggregateXSearchArgs {
   query: string;
   pageSize: number;
+}
+
+function waterfallPostCoverUrl(post: AggregateSearchPost): string {
+  const labels: string[] = ['mediaurl', 'image', 'images', 'thumbnail', 'cover', 'pic', 'picture'];
+  for (let index = 0; index < post.rows.length; index++) {
+    const label = post.rows[index].label.trim().toLowerCase();
+    if (labels.indexOf(label) >= 0 && post.rows[index].value.trim().toLowerCase().startsWith('http')) {
+      return post.rows[index].value.trim();
+    }
+  }
+  return '';
+}
+
+function waterfallTitle(value: string): string {
+  return /^result\s+\d+$/i.test(value.trim()) ? '' : value;
+}
+
+export function aggregateMediaCandidates(
+  videos: AggregateSearchVideo[],
+  posts: AggregateSearchPost[],
+  batchIndex: number
+): WaterfallCandidate[] {
+  const candidates: WaterfallCandidate[] = [];
+  videos.forEach((video: AggregateSearchVideo, index: number) => {
+    candidates.push({
+      id: video.id,
+      source: video.source,
+      mediaType: 'video',
+      title: video.title,
+      summary: video.summary,
+      url: video.url,
+      coverUrl: video.thumbnail,
+      publishedAt: video.publishedAt,
+      originalIndex: batchIndex * 1000 + index
+    });
+  });
+  posts.forEach((post: AggregateSearchPost, index: number) => {
+    const coverUrl = waterfallPostCoverUrl(post);
+    candidates.push({
+      id: post.id,
+      source: post.source,
+      mediaType: coverUrl.length > 0 ? 'image_text' : 'post',
+      title: waterfallTitle(post.title),
+      summary: post.text,
+      url: post.url,
+      coverUrl: coverUrl,
+      publishedAt: post.publishedAt,
+      originalIndex: batchIndex * 1000 + videos.length + index
+    });
+  });
+  return candidates;
 }
 
 export interface AggregateZhihuConfig {
