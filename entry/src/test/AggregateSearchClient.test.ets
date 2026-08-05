@@ -4,6 +4,13 @@ import {
   AggregateSearchSourceStatus,
   AggregateSearchVideo,
   WaterfallCandidate,
+  WaterfallContinuation,
+  WaterfallFeedState,
+  WaterfallRankedCandidate,
+  WaterfallSourcePhase,
+  WaterfallSourceState,
+  advanceWaterfallFeed,
+  applyWaterfallSourceSelection,
   aggregateSearchQueryFromArgs,
   aggregateMediaCandidates,
   aggregateSearchResultFromParts,
@@ -16,6 +23,7 @@ import {
   xPostsFromComposioResult,
   zhihuPostsFromSearchPayload,
   zhihuSearchUrl,
+  mergeWaterfallBatch,
   rankWaterfallCandidates
 } from '@loop/agent-core';
 
@@ -82,6 +90,37 @@ function waterfallCandidate(
 }
 
 const WATERFALL_NOW_MS: number = Date.parse('2026-08-06T12:00:00.000Z');
+
+function rankedWaterfallCandidate(id: string, source: string, title: string, index: number): WaterfallRankedCandidate {
+  const candidate = waterfallCandidate(id, source, title, '', 'https://' + source + '.test/' + id, '2026-08-06T10:00:00.000Z', index);
+  return rankWaterfallCandidates({
+    query: 'openai codex', candidates: [candidate], enabledSources: [source], shownIds: [], stableIds: [], preferenceDescription: ''
+  }, WATERFALL_NOW_MS)[0];
+}
+
+function sourceState(source: string, continuation: WaterfallContinuation | null, phase: WaterfallSourcePhase = 'success', inFlight: boolean = false, reservedCount: number = 0): WaterfallSourceState {
+  return {
+    source: source,
+    phase: phase,
+    continuation: continuation,
+    inFlight: inFlight,
+    reservedCount: reservedCount,
+    message: ''
+  };
+}
+
+function feedState(current: WaterfallRankedCandidate | null, stable: WaterfallRankedCandidate[], tail: WaterfallRankedCandidate[], sources: WaterfallSourceState[]): WaterfallFeedState {
+  return {
+    query: 'openai codex',
+    enabledSources: sources.map((item) => item.source),
+    preferenceDescription: '',
+    shown: [],
+    current: current,
+    stable: stable,
+    tail: tail,
+    sources: sources
+  };
+}
 
 export default function aggregateSearchClientTest() {
   describe('aggregateSearchClient', () => {
@@ -356,6 +395,126 @@ export default function aggregateSearchClientTest() {
       expect(candidates[1].summary).assertEqual('Post body');
       expect(candidates[2].mediaType).assertEqual('post');
       expect(candidates[2].coverUrl).assertEqual('');
+    });
+
+    it('starts the feed from the first displayable source batch', 0, () => {
+      const source = sourceState('youtube', null);
+      const update = mergeWaterfallBatch(feedState(null, [], [], [source]), [
+        waterfallCandidate('first', 'youtube', 'OpenAI Codex first', '', 'https://youtube.test/first', '2026-08-06T10:00:00.000Z', 0),
+        waterfallCandidate('second', 'youtube', 'OpenAI Codex second', '', 'https://youtube.test/second', '2026-08-06T09:00:00.000Z', 1)
+      ], source, WATERFALL_NOW_MS);
+
+      expect(update.state.current?.id).assertEqual('first');
+      expect(update.state.stable.map((item) => item.id).join(',')).assertEqual('second');
+    });
+
+    it('does not rerank shown items or the next two items', 0, () => {
+      const current = rankedWaterfallCandidate('current-1', 'youtube', 'OpenAI Codex current', 1);
+      const nextOne = rankedWaterfallCandidate('next-1', 'youtube', 'OpenAI Codex next one', 2);
+      const nextTwo = rankedWaterfallCandidate('next-2', 'youtube', 'OpenAI Codex next two', 3);
+      const tailOld = rankedWaterfallCandidate('tail-old', 'youtube', 'OpenAI Codex old tail', 6);
+      const state = feedState(current, [nextOne, nextTwo], [tailOld], [sourceState('youtube', null)]);
+      state.shown = [rankedWaterfallCandidate('shown-1', 'youtube', 'Shown item', 0)];
+      const update = mergeWaterfallBatch(state, [
+        waterfallCandidate('late-exact', 'youtube', 'OpenAI Codex', 'Late exact', 'https://youtube.test/late-exact', '2026-08-06T11:59:00.000Z', 5)
+      ], sourceState('youtube', null), WATERFALL_NOW_MS);
+
+      expect(update.state.shown.map((item) => item.id).join(',')).assertEqual('shown-1');
+      expect(update.state.current?.id).assertEqual('current-1');
+      expect(update.state.stable.map((item) => item.id).join(',')).assertEqual('next-1,next-2');
+      expect(update.state.tail.map((item) => item.id).join(',')).assertEqual('late-exact,tail-old');
+    });
+
+    it('moves the two-item stable window after advancing', 0, () => {
+      const state = feedState(
+        rankedWaterfallCandidate('current-1', 'youtube', 'OpenAI Codex current', 1),
+        [rankedWaterfallCandidate('next-1', 'youtube', 'OpenAI Codex next one', 2), rankedWaterfallCandidate('next-2', 'youtube', 'OpenAI Codex next two', 3)],
+        [rankedWaterfallCandidate('tail-old', 'youtube', 'OpenAI Codex old tail', 4)],
+        [sourceState('youtube', null)]
+      );
+      const update = advanceWaterfallFeed(state, WATERFALL_NOW_MS);
+
+      expect(update.state.shown.map((item) => item.id).join(',')).assertEqual('current-1');
+      expect(update.state.current?.id).assertEqual('next-1');
+      expect(update.state.stable.map((item) => item.id).join(',')).assertEqual('next-2,tail-old');
+      expect(update.state.tail.length).assertEqual(0);
+    });
+
+    it('reorders all unshown items after an explicit source toggle', 0, () => {
+      const state = feedState(
+        rankedWaterfallCandidate('youtube-current', 'youtube', 'OpenAI Codex YouTube', 0),
+        [rankedWaterfallCandidate('x-next', 'x', 'OpenAI Codex X', 1)],
+        [rankedWaterfallCandidate('youtube-tail', 'youtube', 'OpenAI Codex YouTube tail', 2)],
+        [sourceState('youtube', null), sourceState('x', null)]
+      );
+      const update = applyWaterfallSourceSelection(state, ['x'], WATERFALL_NOW_MS);
+
+      expect(update.state.shown.map((item) => item.id).join(',')).assertEqual('youtube-current');
+      expect(update.state.current?.id).assertEqual('x-next');
+      expect(update.state.stable.length).assertEqual(0);
+      expect(update.state.tail.length).assertEqual(0);
+    });
+
+    it('requests at most five items when inventory reaches three', 0, () => {
+      const source = sourceState('youtube', { kind: 'cursor', value: 'next-cursor' });
+      const state = feedState(
+        rankedWaterfallCandidate('current', 'youtube', 'OpenAI Codex current', 0),
+        [rankedWaterfallCandidate('stable', 'youtube', 'OpenAI Codex stable', 1)],
+        [rankedWaterfallCandidate('tail-1', 'youtube', 'OpenAI Codex tail 1', 2), rankedWaterfallCandidate('tail-2', 'youtube', 'OpenAI Codex tail 2', 3)],
+        [source]
+      );
+      const update = mergeWaterfallBatch(state, [], source, WATERFALL_NOW_MS);
+
+      expect(update.loadRequests.length).assertEqual(1);
+      expect(update.loadRequests[0].limit).assertEqual(5);
+      expect(update.state.sources[0].inFlight).assertTrue();
+    });
+
+    it('counts in-flight reservations toward the target of eight', 0, () => {
+      const reserved = sourceState('youtube', { kind: 'cursor', value: 'reserved' }, 'success', true, 4);
+      const available = sourceState('x', { kind: 'page', value: 'page-2' });
+      const state = feedState(
+        rankedWaterfallCandidate('current', 'youtube', 'OpenAI Codex current', 0),
+        [rankedWaterfallCandidate('stable', 'youtube', 'OpenAI Codex stable', 1)],
+        [rankedWaterfallCandidate('tail', 'x', 'OpenAI Codex tail', 2), rankedWaterfallCandidate('tail-2', 'x', 'OpenAI Codex tail 2', 3)],
+        [reserved, available]
+      );
+      const update = mergeWaterfallBatch(state, [], available, WATERFALL_NOW_MS);
+
+      expect(update.loadRequests.length).assertEqual(1);
+      expect(update.loadRequests[0].source).assertEqual('x');
+      expect(update.loadRequests[0].limit).assertEqual(1);
+    });
+
+    it('allows only one in-flight request per source', 0, () => {
+      const source = sourceState('youtube', { kind: 'cursor', value: 'next-cursor' }, 'success', true, 5);
+      const state = feedState(
+        rankedWaterfallCandidate('current', 'youtube', 'OpenAI Codex current', 0),
+        [rankedWaterfallCandidate('stable', 'youtube', 'OpenAI Codex stable', 1)],
+        [],
+        [source]
+      );
+      const update = advanceWaterfallFeed(state, WATERFALL_NOW_MS);
+
+      expect(update.loadRequests.length).assertEqual(0);
+      expect(update.state.sources[0].inFlight).assertTrue();
+    });
+
+    it('marks a source exhausted when it has no continuation', 0, () => {
+      const source = sourceState('youtube', null, 'success');
+      const update = mergeWaterfallBatch(feedState(null, [], [], [source]), [], source, WATERFALL_NOW_MS);
+
+      expect(update.loadRequests.length).assertEqual(0);
+      expect(update.state.sources[0].phase).assertEqual('exhausted');
+    });
+
+    it('ends the round when every enabled source is exhausted', 0, () => {
+      const sources = [sourceState('youtube', null, 'exhausted'), sourceState('x', null, 'exhausted')];
+      const update = advanceWaterfallFeed(feedState(null, [], [], sources), WATERFALL_NOW_MS);
+
+      expect(update.loadRequests.length).assertEqual(0);
+      expect(update.state.current).assertEqual(null);
+      expect(update.state.sources.map((item) => item.phase).join(',')).assertEqual('exhausted,exhausted');
     });
   });
 }

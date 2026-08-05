@@ -34,6 +34,47 @@ export interface WaterfallOrderInput {
   preferenceDescription: string;
 }
 
+export type WaterfallContinuationKind = 'cursor' | 'page' | 'offset';
+
+export interface WaterfallContinuation {
+  kind: WaterfallContinuationKind;
+  value: string;
+}
+
+export type WaterfallSourcePhase =
+  'loading' | 'success' | 'empty' | 'needs_auth' | 'error' | 'exhausted';
+
+export interface WaterfallSourceState {
+  source: string;
+  phase: WaterfallSourcePhase;
+  continuation: WaterfallContinuation | null;
+  inFlight: boolean;
+  reservedCount: number;
+  message: string;
+}
+
+export interface WaterfallFeedState {
+  query: string;
+  enabledSources: string[];
+  preferenceDescription: string;
+  shown: WaterfallRankedCandidate[];
+  current: WaterfallRankedCandidate | null;
+  stable: WaterfallRankedCandidate[];
+  tail: WaterfallRankedCandidate[];
+  sources: WaterfallSourceState[];
+}
+
+export interface WaterfallLoadRequest {
+  source: string;
+  continuation: WaterfallContinuation;
+  limit: number;
+}
+
+export interface WaterfallFeedUpdate {
+  state: WaterfallFeedState;
+  loadRequests: WaterfallLoadRequest[];
+}
+
 interface RankedCandidateInternal {
   candidate: WaterfallCandidate;
   normalizedUrl: string;
@@ -289,4 +330,268 @@ export function rankWaterfallCandidates(
     appendSource(sourceCounts, best.candidate.source);
   }
   return ordered;
+}
+
+const WATERFALL_STABLE_LIMIT: number = 2;
+const WATERFALL_LOW_WATERMARK: number = 3;
+const WATERFALL_TARGET_INVENTORY: number = 8;
+const WATERFALL_MAX_REQUEST: number = 5;
+
+function copySourceState(source: WaterfallSourceState): WaterfallSourceState {
+  return {
+    source: source.source,
+    phase: source.phase,
+    continuation: source.continuation,
+    inFlight: source.inFlight,
+    reservedCount: source.reservedCount,
+    message: source.message
+  };
+}
+
+function copySources(sources: WaterfallSourceState[]): WaterfallSourceState[] {
+  return sources.map((source: WaterfallSourceState): WaterfallSourceState => copySourceState(source));
+}
+
+function copyState(state: WaterfallFeedState): WaterfallFeedState {
+  return {
+    query: state.query,
+    enabledSources: state.enabledSources.slice(),
+    preferenceDescription: state.preferenceDescription,
+    shown: state.shown.slice(),
+    current: state.current,
+    stable: state.stable.slice(),
+    tail: state.tail.slice(),
+    sources: copySources(state.sources)
+  };
+}
+
+function idsOf(items: WaterfallRankedCandidate[]): string[] {
+  return items.map((item: WaterfallRankedCandidate): string => item.id);
+}
+
+function addUniqueId(ids: string[], id: string): void {
+  if (ids.indexOf(id) < 0) {
+    ids.push(id);
+  }
+}
+
+function fixedDisplayIds(state: WaterfallFeedState): string[] {
+  const ids: string[] = state.shown.map((item: WaterfallRankedCandidate): string => item.id);
+  if (state.current !== null) {
+    addUniqueId(ids, state.current.id);
+  }
+  state.stable.forEach((item: WaterfallRankedCandidate): void => addUniqueId(ids, item.id));
+  return ids;
+}
+
+function fixedDisplayUrls(state: WaterfallFeedState): string[] {
+  const urls: string[] = state.shown.map((item: WaterfallRankedCandidate): string => item.normalizedUrl);
+  if (state.current !== null) {
+    urls.push(state.current.normalizedUrl);
+  }
+  state.stable.forEach((item: WaterfallRankedCandidate): void => {
+    urls.push(item.normalizedUrl);
+  });
+  return urls;
+}
+
+function filterEnabled(items: WaterfallRankedCandidate[], enabledSources: string[]): WaterfallRankedCandidate[] {
+  return items.filter((item: WaterfallRankedCandidate): boolean => enabledSources.indexOf(item.source) >= 0);
+}
+
+function sourceFor(sources: WaterfallSourceState[], source: string): WaterfallSourceState | null {
+  for (let index = 0; index < sources.length; index++) {
+    if (sources[index].source === source) {
+      return sources[index];
+    }
+  }
+  return null;
+}
+
+function replaceSource(sources: WaterfallSourceState[], next: WaterfallSourceState): void {
+  for (let index = 0; index < sources.length; index++) {
+    if (sources[index].source === next.source) {
+      sources[index] = next;
+      return;
+    }
+  }
+  sources.push(next);
+}
+
+function isTerminal(source: WaterfallSourceState): boolean {
+  return source.phase === 'empty' || source.phase === 'needs_auth' || source.phase === 'error' || source.phase === 'exhausted';
+}
+
+function refreshStableWindow(state: WaterfallFeedState): void {
+  while (state.stable.length < WATERFALL_STABLE_LIMIT && state.tail.length > 0) {
+    state.stable.push(state.tail.shift() as WaterfallRankedCandidate);
+  }
+  if (state.stable.length > WATERFALL_STABLE_LIMIT) {
+    state.tail = state.stable.splice(WATERFALL_STABLE_LIMIT);
+  }
+}
+
+function planWaterfallLoads(state: WaterfallFeedState): WaterfallLoadRequest[] {
+  const requests: WaterfallLoadRequest[] = [];
+  const inventory = state.stable.length + state.tail.length;
+  if (inventory > WATERFALL_LOW_WATERMARK) {
+    return requests;
+  }
+
+  let reserved = 0;
+  state.sources.forEach((source: WaterfallSourceState): void => {
+    if (state.enabledSources.indexOf(source.source) >= 0) {
+      reserved += source.reservedCount;
+    }
+  });
+  let remaining = WATERFALL_TARGET_INVENTORY - inventory - reserved;
+  if (remaining <= 0) {
+    return requests;
+  }
+
+  state.sources.forEach((source: WaterfallSourceState): void => {
+    if (remaining <= 0 || state.enabledSources.indexOf(source.source) < 0) {
+      return;
+    }
+    if (source.continuation === null) {
+      if (source.phase === 'success') {
+        source.phase = 'exhausted';
+      }
+      return;
+    }
+    if (source.inFlight || source.phase === 'loading' || isTerminal(source)) {
+      return;
+    }
+    const limit = Math.min(WATERFALL_MAX_REQUEST, remaining);
+    requests.push({ source: source.source, continuation: source.continuation, limit: limit });
+    source.inFlight = true;
+    source.reservedCount += limit;
+    remaining -= limit;
+  });
+  return requests;
+}
+
+function finalizeUpdate(state: WaterfallFeedState): WaterfallFeedUpdate {
+  return { state: state, loadRequests: planWaterfallLoads(state) };
+}
+
+function rankedToCandidates(items: WaterfallRankedCandidate[]): WaterfallCandidate[] {
+  return items.map((item: WaterfallRankedCandidate): WaterfallCandidate => ({
+    id: item.id,
+    source: item.source,
+    mediaType: item.mediaType,
+    title: item.title,
+    summary: item.summary,
+    url: item.url,
+    coverUrl: item.coverUrl,
+    publishedAt: item.publishedAt,
+    originalIndex: item.originalIndex
+  }));
+}
+
+function sortTail(state: WaterfallFeedState, incoming: WaterfallCandidate[], nowMs: number): WaterfallRankedCandidate[] {
+  const fixedIds = fixedDisplayIds(state);
+  const fixedUrls = fixedDisplayUrls(state);
+  const filteredIncoming: WaterfallCandidate[] = incoming.filter((candidate: WaterfallCandidate): boolean => {
+    if (fixedIds.indexOf(candidate.id) >= 0) {
+      return false;
+    }
+    return fixedUrls.indexOf(normalizedHttpUrl(candidate.url)) < 0;
+  });
+  const candidates: WaterfallCandidate[] = rankedToCandidates(state.tail).concat(filteredIncoming);
+  return rankWaterfallCandidates({
+    query: state.query,
+    candidates: candidates,
+    enabledSources: state.enabledSources,
+    shownIds: fixedIds,
+    stableIds: idsOf(state.stable),
+    preferenceDescription: state.preferenceDescription
+  }, nowMs);
+}
+
+function placeInitialBatch(state: WaterfallFeedState, incoming: WaterfallCandidate[], nowMs: number): void {
+  const ranked = rankWaterfallCandidates({
+    query: state.query,
+    candidates: incoming,
+    enabledSources: state.enabledSources,
+    shownIds: idsOf(state.shown),
+    stableIds: [],
+    preferenceDescription: state.preferenceDescription
+  }, nowMs);
+  if (ranked.length === 0) {
+    return;
+  }
+  state.current = ranked.shift() as WaterfallRankedCandidate;
+  state.stable = ranked.splice(0, WATERFALL_STABLE_LIMIT);
+  state.tail = ranked;
+}
+
+export function mergeWaterfallBatch(
+  state: WaterfallFeedState,
+  incoming: WaterfallCandidate[],
+  sourceState: WaterfallSourceState,
+  nowMs: number
+): WaterfallFeedUpdate {
+  const next = copyState(state);
+  const received = copySourceState(sourceState);
+  received.inFlight = false;
+  received.reservedCount = 0;
+  replaceSource(next.sources, received);
+  if (next.current === null) {
+    placeInitialBatch(next, incoming, nowMs);
+  } else {
+    // ponytail: small feed snapshots use a linear scan; add indexed URLs only if the pool grows materially.
+    next.tail = sortTail(next, incoming, nowMs);
+    refreshStableWindow(next);
+  }
+  return finalizeUpdate(next);
+}
+
+export function advanceWaterfallFeed(
+  state: WaterfallFeedState,
+  nowMs: number
+): WaterfallFeedUpdate {
+  const next = copyState(state);
+  if (next.current !== null) {
+    next.shown.push(next.current);
+  }
+  next.current = null;
+  if (next.stable.length > 0) {
+    next.current = next.stable.shift() as WaterfallRankedCandidate;
+  } else if (next.tail.length > 0) {
+    next.current = next.tail.shift() as WaterfallRankedCandidate;
+  }
+  refreshStableWindow(next);
+  return finalizeUpdate(next);
+}
+
+export function applyWaterfallSourceSelection(
+  state: WaterfallFeedState,
+  enabledSources: string[],
+  nowMs: number
+): WaterfallFeedUpdate {
+  const next = copyState(state);
+  next.enabledSources = enabledSources.slice();
+  if (next.current !== null && enabledSources.indexOf(next.current.source) < 0) {
+    next.shown.push(next.current);
+    next.current = null;
+  }
+  next.stable = filterEnabled(next.stable, enabledSources);
+  next.tail = filterEnabled(next.tail, enabledSources);
+  const unshown = rankedToCandidates(next.stable).concat(rankedToCandidates(next.tail));
+  const ranked = rankWaterfallCandidates({
+    query: next.query,
+    candidates: unshown,
+    enabledSources: enabledSources,
+    shownIds: idsOf(next.shown).concat(next.current === null ? [] : [next.current.id]),
+    stableIds: [],
+    preferenceDescription: next.preferenceDescription
+  }, nowMs);
+  next.stable = ranked.splice(0, WATERFALL_STABLE_LIMIT);
+  next.tail = ranked;
+  if (next.current === null && next.stable.length > 0) {
+    next.current = next.stable.shift() as WaterfallRankedCandidate;
+  }
+  refreshStableWindow(next);
+  return finalizeUpdate(next);
 }
