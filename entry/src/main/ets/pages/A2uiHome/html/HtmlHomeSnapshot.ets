@@ -207,6 +207,9 @@ export function createHtmlHomeDocument(params: CreateHtmlHomeDocumentParams): Ht
     generatedAt: new Date().toISOString()
   };
   const document: HtmlHomeDocument = withBusy(baseDocument, params.isBusy);
+  if (aggregate !== null && aggregate.waterfall !== undefined) {
+    document.waterfall = aggregate.waterfall;
+  }
 
   if (kind === 'multi-task') {
     appendMultiTaskBlocks(document, surface);
