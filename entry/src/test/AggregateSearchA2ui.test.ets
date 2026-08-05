@@ -1,7 +1,14 @@
 import { describe, it, expect } from '@ohos/hypium';
 import { A2uiSurfaceStore } from '@loop/agent-core';
 import { AggregateSearchResult } from '@loop/agent-core';
-import { aggregateSearchA2ui, aggregateStructuredDataResult, parseA2uiJsonl, resolveData } from '@loop/agent-core';
+import {
+  aggregateSearchA2ui,
+  aggregateSearchA2uiRenderState,
+  aggregateStructuredDataResult,
+  parseA2uiJsonl,
+  planA2uiPartialUpdate,
+  resolveData
+} from '@loop/agent-core';
 
 function sampleResult(): AggregateSearchResult {
   return {
@@ -97,6 +104,23 @@ export default function aggregateSearchA2uiTest() {
       expect(empty.status).assertEqual('empty');
       expect(empty.error === undefined).assertTrue();
       expect(JSON.stringify(empty.data).indexOf('updateComponents')).assertEqual(-1);
+    });
+
+    it('updates the existing aggregate surface without creating a second one', 0, () => {
+      const first = planA2uiPartialUpdate(null, aggregateSearchA2uiRenderState('surface-1', sampleResult(), 'streaming'));
+      const nextResult = sampleResult();
+      nextResult.summary = '2 videos, 1 discussion';
+      nextResult.videos.push({
+        id: 'bilibili-1', source: 'bilibili', provider: 'B 站', title: 'B 站 Codex', summary: '',
+        url: 'https://bilibili.com/video/BV1', thumbnail: '', publishedAt: '', duration: '', status: 'success', rows: []
+      });
+      const second = planA2uiPartialUpdate(first.cache, aggregateSearchA2uiRenderState('surface-1', nextResult, 'streaming'));
+
+      expect(first.jsonl.indexOf('createSurface')).assertLarger(-1);
+      expect(first.jsonl.indexOf('/aggregateSearch')).assertLarger(-1);
+      expect(second.jsonl.indexOf('createSurface')).assertEqual(-1);
+      expect(second.jsonl.indexOf('"path":"/aggregateSearch"')).assertLarger(-1);
+      expect(second.jsonl.indexOf('updateComponents')).assertEqual(-1);
     });
   });
 }

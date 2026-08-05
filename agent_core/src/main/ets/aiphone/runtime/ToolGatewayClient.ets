@@ -174,8 +174,8 @@ import {
   isComposioConfigured,
   refreshComposioConnections
 } from './ComposioDynamicBackend';
-import { aggregateSearchA2ui } from './AggregateSearchA2ui';
-import { callAggregateSearch } from './AggregateSearchClient';
+import { aggregateSearchA2ui, aggregateSearchA2uiRenderState } from './AggregateSearchA2ui';
+import { AggregateSearchPartialObserver, callAggregateSearch } from './AggregateSearchClient';
 import { AggregateSearchResult, AggregateSearchSourceStatus } from './AggregateSearchTypes';
 import { discoverDynamicToolForPrompt, DynamicToolDiscoveryResult } from './DynamicToolDiscovery';
 import { DynamicToolRegistry, isBuiltInToolId, isUnsafeMcpTool, selectBestRemoteTransport } from './DynamicToolRegistry';
@@ -13658,7 +13658,12 @@ async function callLocalYouTubeTool(toolId: string, prompt: string, surfaceId: s
   return genericToolResultsA2ui(surfaceId, toolId, (result.data as GenericStructuredData).results);
 }
 
-async function callStructuredMediaTool(toolId: string, prompt: string, args: Object | null): Promise<DataResult> {
+async function callStructuredMediaTool(
+  toolId: string,
+  prompt: string,
+  args: Object | null,
+  onPartial: AggregateSearchPartialObserver | null = null
+): Promise<DataResult> {
   if (toolId === 'media.video.search') {
     return genericStructuredDataResult(
       toolId,
@@ -13671,20 +13676,43 @@ async function callStructuredMediaTool(toolId: string, prompt: string, args: Obj
       prompt,
       args,
       localProviderConfig.youtubeApiKey,
-      { apiKey: localProviderConfig.zhihuApiKey }
+      { apiKey: localProviderConfig.zhihuApiKey },
+      onPartial
     ));
   }
   return errorDataResult(toolId, '', 'MEDIA_TOOL_UNSUPPORTED', 'Unsupported media tool: ' + toolId + '.');
 }
 
-async function callLocalMediaTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+async function callLocalMediaTool(
+  toolId: string,
+  prompt: string,
+  surfaceId: string,
+  args: Object | null = null,
+  emitJsonl: LocalA2uiEmitter | null = null
+): Promise<string> {
   if (toolId === 'media.video.search') {
     const result = await callStructuredMediaTool(toolId, prompt, args);
     return mediaVideoStructuredDataA2ui(surfaceId, toolId, result.data as GenericStructuredData);
   }
   if (toolId === 'media.aggregate.search') {
-    const result = await callStructuredMediaTool(toolId, prompt, args);
-    return aggregateSearchA2ui(surfaceId, result.data as AggregateSearchResult);
+    let partialCache: A2uiPartialUpdateCache | null = null;
+    const partialObserver: AggregateSearchPartialObserver | null = emitJsonl === null ? null : (partial: AggregateSearchResult): void => {
+      const planned = planA2uiPartialUpdate(
+        partialCache,
+        aggregateSearchA2uiRenderState(surfaceId, partial, 'streaming')
+      );
+      partialCache = planned.cache;
+      emitJsonl(planned.jsonl);
+    };
+    const result = await callStructuredMediaTool(toolId, prompt, args, partialObserver);
+    const aggregate = result.data as AggregateSearchResult;
+    if (emitJsonl === null) {
+      return aggregateSearchA2ui(surfaceId, aggregate);
+    }
+    return planA2uiPartialUpdate(
+      partialCache,
+      aggregateSearchA2uiRenderState(surfaceId, aggregate, 'ready')
+    ).jsonl;
   }
   return genericToolResultsA2ui(surfaceId, toolId, [{
     sourceTag: '媒体聚合',
@@ -15654,7 +15682,7 @@ async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: st
     return callLocalGmailTool(toolId, prompt, surfaceId, args);
   }
   if (isMediaToolId(toolId)) {
-    return callLocalMediaTool(toolId, prompt, surfaceId, args);
+    return callLocalMediaTool(toolId, prompt, surfaceId, args, emitJsonl);
   }
   if (isYouTubeToolId(toolId)) {
     return callLocalYouTubeTool(toolId, prompt, surfaceId, args);
