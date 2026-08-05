@@ -122,10 +122,14 @@ function splitEstimateLabel(label: string): RideEstimateLabelParts {
 }
 
 function actionForProduct(actions: A2uiAction[], productName: string): A2uiAction | null {
+  const expectedLabel = '确认叫' + productName;
+  const expectedPrompt = '确认下单：' + productName;
   for (let index = 0; index < actions.length; index++) {
     const action = actions[index];
     if (action.id === 'ride.order.confirm' &&
-      (action.label.indexOf(productName) >= 0 || action.prompt.indexOf(productName) >= 0)) {
+      (action.label.trim() === expectedLabel ||
+        action.prompt.trim() === expectedPrompt ||
+        action.prompt.trim().indexOf(expectedPrompt + ' ') === 0)) {
       return action;
     }
   }

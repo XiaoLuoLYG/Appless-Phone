@@ -497,6 +497,32 @@ function appendBlocksForComponent(document: HtmlHomeDocument, surface: A2uiSurfa
   appendGenericComponentBlock(document, surface, component);
 }
 
+function appendTrainBookingActions(block: HtmlHomeBlock, sourceComponentId: string, bookingUrl?: string): void {
+  if (bookingUrl === undefined || bookingUrl.trim().length === 0) {
+    return;
+  }
+  const bookingArgs: TrainBookingActionArgs = {
+    bookingUrl: bookingUrl.trim()
+  };
+  block.actions.push({
+    id: 'train.booking.open',
+    label: '去购票',
+    prompt: '',
+    variant: 'primary',
+    kind: 'client',
+    sourceComponentId: sourceComponentId,
+    args: bookingArgs
+  });
+  block.actions.push({
+    id: 'train.booking.alipay.open',
+    label: '支付宝购票',
+    prompt: 'alipays://platformapi/startapp?appId=20000135',
+    variant: 'secondary',
+    kind: 'client',
+    sourceComponentId: sourceComponentId
+  });
+}
+
 function appendTravelBlocks(document: HtmlHomeDocument, surface: A2uiSurfaceState, component: A2uiComponent): void {
   const options = travelOptions(surface, component);
   options.forEach((item: A2uiTravelOptionData, index: number) => {
@@ -514,6 +540,9 @@ function appendTravelBlocks(document: HtmlHomeDocument, surface: A2uiSurfaceStat
     appendMetric(block.metrics, 'price', item.price);
     appendMetric(block.metrics, 'availability', item.availability);
     appendMetric(block.rows, 'detail', item.detail);
+    if (item.source === 'train') {
+      appendTrainBookingActions(block, component.id, item.bookingUrl);
+    }
     block.actions.push(clientAction('html_pin_travel', '固定到桌面', JSON.stringify({
       index: index,
       id: textOf(item.id),
@@ -570,27 +599,8 @@ function appendTrainBlocks(document: HtmlHomeDocument, surface: A2uiSurfaceState
         sourceComponentId: component.id,
         args: scheduleArgs
       });
-    } else if (item.bookingUrl !== undefined && item.bookingUrl.trim().length > 0) {
-      const bookingArgs: TrainBookingActionArgs = {
-        bookingUrl: item.bookingUrl.trim()
-      };
-      block.actions.push({
-        id: 'train.booking.open',
-        label: '去购票',
-        prompt: '',
-        variant: 'primary',
-        kind: 'client',
-        sourceComponentId: component.id,
-        args: bookingArgs
-      });
-      block.actions.push({
-        id: 'train.booking.alipay.open',
-        label: '支付宝购票',
-        prompt: 'alipays://platformapi/startapp?appId=20000135',
-        variant: 'secondary',
-        kind: 'client',
-        sourceComponentId: component.id
-      });
+    } else {
+      appendTrainBookingActions(block, component.id, item.bookingUrl);
     }
     block.actions.push(clientAction('html_pin_train', '固定到桌面', JSON.stringify({
       index: index,
