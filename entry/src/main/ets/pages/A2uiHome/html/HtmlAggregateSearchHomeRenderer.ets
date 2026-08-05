@@ -1,4 +1,5 @@
-import { HtmlHomeBlock, HtmlHomeDocument, HtmlHomeMetric } from './HtmlHomeTypes';
+import { WaterfallRankedCandidate, WaterfallSourceState } from '@loop/agent-core';
+import { HtmlHomeBlock, HtmlHomeDocument, HtmlHomeMetric, WaterfallHomePayload } from './HtmlHomeTypes';
 import {
   APP_LOGO_BILIBILI,
   APP_LOGO_HACKERNEWS,
@@ -622,20 +623,180 @@ const AGGREGATE_JS: string = `
 })();
 `;
 
+const WATERFALL_CSS: string = `
+.waterfall-entry { display: flex; justify-content: flex-end; margin: 12px 0; }
+.waterfall-entry button, .waterfall-toolbar button, .waterfall-preferences button {
+  border: 1px solid var(--line-strong); border-radius: 999px; background: var(--panel-strong);
+  color: var(--ink); padding: 8px 13px; cursor: pointer;
+}
+.waterfall-overlay { position: fixed; inset: 0; z-index: 20; display: none; background: var(--paper); }
+.waterfall-overlay.active { display: block; }
+.waterfall-track { height: 100%; overflow-y: auto; scroll-snap-type: y mandatory; }
+.waterfall-card { min-height: 100dvh; scroll-snap-align: start; display: flex; flex-direction: column;
+  justify-content: center; gap: 14px; padding: 72px 22px 36px; }
+.waterfall-card img { display: block; width: 100%; max-height: 52vh; object-fit: cover; border-radius: 18px; }
+.waterfall-card h2 { font-size: 28px; line-height: 1.12; }
+.waterfall-card p { color: var(--ink-soft); line-height: 1.45; }
+.waterfall-meta { color: var(--muted); font-size: 13px; }
+.waterfall-reason { color: var(--accent); font-size: 13px; }
+.waterfall-toolbar { position: fixed; z-index: 2; top: 14px; left: 14px; right: 14px; display: flex; justify-content: space-between; }
+.waterfall-preferences { position: fixed; z-index: 3; inset: 0; display: none; padding: 84px 22px 30px; background: var(--paper); }
+.waterfall-preferences.active { display: block; }
+.waterfall-preferences label { display: block; padding: 12px 0; }
+.waterfall-empty { padding: 20px; color: var(--muted); text-align: center; }
+.waterfall-status { padding: 8px 0; color: var(--muted); text-align: center; }
+`;
+
+const WATERFALL_JS: string = `
+(function () {
+  var overlay = document.getElementById('waterfall-discovery');
+  var track = document.getElementById('waterfall-track');
+  var preferences = document.getElementById('waterfall-preferences');
+  var state = window.__aiphoneWaterfallInitial || null;
+  var mode = 'entry';
+  var enabledSources = state && state.enabledSources ? state.enabledSources.slice() : [];
+  var fixedIds = [];
+  function text(value) { return value === null || value === undefined ? '' : String(value); }
+  function escapeHtml(value) { return text(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+  function sourceLabel(source) {
+    var labels = { youtube: 'YouTube', bilibili: 'B 站', x: 'X', hackernews: 'HN', reddit: 'Reddit', zhihu: '知乎' };
+    return labels[source] || source;
+  }
+  function candidates(payload) {
+    if (!payload) return [];
+    var values = payload.candidates || [];
+    var seen = {};
+    return values.filter(function (item) {
+      var key = text(item.id) || text(item.normalizedUrl);
+      if (!key || seen[key]) return false;
+      seen[key] = true;
+      return true;
+    });
+  }
+  function mergePayload(payload) {
+    if (!payload) return;
+    var incoming = candidates(payload);
+    var old = candidates(state);
+    if (old.length > 0 && fixedIds.length === 0) fixedIds = old.slice(0, 3).map(function (item) { return item.id; });
+    var byId = {};
+    old.forEach(function (item) { byId[item.id] = item; });
+    incoming.forEach(function (item) { if (!byId[item.id]) byId[item.id] = item; });
+    var merged = [];
+    fixedIds.forEach(function (id) { if (byId[id]) merged.push(byId[id]); });
+    incoming.forEach(function (item) {
+      if (fixedIds.indexOf(item.id) < 0 && merged.every(function (known) { return known.id !== item.id; })) merged.push(item);
+    });
+    state = payload;
+    state.candidates = merged;
+    if (enabledSources.length === 0 && payload.enabledSources) enabledSources = payload.enabledSources.slice();
+  }
+  function renderCandidate(item) {
+    var cover = item.coverUrl ? '<img src="' + escapeHtml(item.coverUrl) + '" alt="' + escapeHtml(item.title) + '" loading="lazy" />' : '';
+    var link = item.url ? '<a href="' + escapeHtml(item.url) + '" target="_blank" rel="noopener noreferrer">打开原文</a>' : '';
+    return '<article class="waterfall-card"><div class="waterfall-meta">' + escapeHtml(sourceLabel(item.source)) + ' · ' + escapeHtml(item.mediaType) + '</div>' +
+      cover + '<h2>' + escapeHtml(item.title) + '</h2><p>' + escapeHtml(item.summary) + '</p>' +
+      '<div class="waterfall-reason">推荐理由：' + escapeHtml(item.reason) + '</div>' +
+      (item.publishedAt ? '<div class="waterfall-meta">' + escapeHtml(item.publishedAt) + '</div>' : '') + link + '</article>';
+  }
+  function renderPreferences() {
+    if (!preferences || !state) return;
+    var sources = state.sources || [];
+    preferences.innerHTML = '<div class="waterfall-toolbar"><button type="button" data-waterfall-close-preferences>返回</button><b>来源偏好</b><span></span></div>' +
+      '<div>' + sources.map(function (source) {
+        var checked = enabledSources.indexOf(source.source) >= 0 ? ' checked' : '';
+        return '<label><input type="checkbox" data-waterfall-source="' + escapeHtml(source.source) + '"' + checked + ' /> ' + escapeHtml(sourceLabel(source.source)) + '</label>';
+      }).join('') + '<button type="button" data-waterfall-close-preferences>完成</button></div>';
+    preferences.classList.add('active');
+    preferences.querySelectorAll('[data-waterfall-source]').forEach(function (input) {
+      input.addEventListener('change', function () {
+        enabledSources = Array.prototype.slice.call(preferences.querySelectorAll('[data-waterfall-source]:checked')).map(function (node) { return node.getAttribute('data-waterfall-source'); });
+        render();
+      });
+    });
+    preferences.querySelectorAll('[data-waterfall-close-preferences]').forEach(function (button) {
+      button.addEventListener('click', function () { preferences.classList.remove('active'); mode = 'discovering'; });
+    });
+    mode = 'source_preferences';
+  }
+  function render() {
+    if (!track || !state) return;
+    var items = candidates(state).filter(function (item) { return enabledSources.indexOf(item.source) >= 0; });
+    var empty = items.length === 0 ? '<div class="waterfall-empty">至少开启一个来源</div>' : '';
+    var status = state.replenishing ? '<div class="waterfall-status">\\u6b63\\u5728\\u8865\\u5145\\u5185\\u5bb9</div>' : (state.exhausted ? '<div class="waterfall-status">\\u672c\\u8f6e\\u5185\\u5bb9\\u5df2\\u7ed3\\u675f</div>' : '');
+    track.innerHTML = status + empty + items.map(renderCandidate).join('');
+  }
+  document.querySelectorAll('[data-waterfall-enter]').forEach(function (button) {
+    button.addEventListener('click', function () { mode = 'discovering'; overlay.classList.add('active'); render(); });
+  });
+  document.querySelectorAll('[data-waterfall-back]').forEach(function (button) {
+    button.addEventListener('click', function () { mode = 'entry'; overlay.classList.remove('active'); });
+  });
+  document.querySelectorAll('[data-waterfall-preferences]').forEach(function (button) {
+    button.addEventListener('click', renderPreferences);
+  });
+  document.querySelectorAll('[data-waterfall-reason]').forEach(function (button) {
+    button.addEventListener('click', function () { mode = 'reason_open'; track.classList.toggle('reason-open'); });
+  });
+  window.__aiphoneApplyWaterfallUpdate = function (payload) {
+    mergePayload(payload);
+    render();
+  };
+  if (state) mergePayload(state);
+})();
+`;
+
 export function shouldRenderAggregateSearchHomeDocument(document: HtmlHomeDocument): boolean {
   return document.kind === 'aggregate-search';
+}
+
+export function buildWaterfallHomePayload(document: HtmlHomeDocument, isBusy: boolean): WaterfallHomePayload | null {
+  if (document.waterfall === undefined) {
+    return null;
+  }
+  const state = document.waterfall;
+  const candidates: WaterfallRankedCandidate[] = [];
+  const seen: string[] = [];
+  const append = (candidate: WaterfallRankedCandidate | null): void => {
+    if (candidate === null || seen.indexOf(candidate.id) >= 0 || seen.indexOf(candidate.normalizedUrl) >= 0) {
+      return;
+    }
+    seen.push(candidate.id);
+    if (candidate.normalizedUrl.length > 0) {
+      seen.push(candidate.normalizedUrl);
+    }
+    candidates.push(candidate);
+  };
+  append(state.current);
+  state.stable.forEach(append);
+  state.tail.forEach(append);
+  const replenishing = isBusy || state.sources.some((source: WaterfallSourceState): boolean => source.inFlight || source.phase === 'loading');
+  const exhausted = state.sources.length > 0 && state.sources.every((source: WaterfallSourceState): boolean =>
+    source.phase === 'empty' || source.phase === 'needs_auth' || source.phase === 'error' || source.phase === 'exhausted' ||
+    (source.phase === 'success' && source.continuation === null));
+  return {
+    surfaceId: document.surfaceId ?? '',
+    query: state.query,
+    candidates: candidates,
+    sources: state.sources,
+    replenishing: replenishing,
+    exhausted: exhausted
+  };
 }
 
 export function renderAggregateSearchHomeDocument(document: HtmlHomeDocument, isBusy: boolean = false): string {
   const videos = document.blocks.filter((block: HtmlHomeBlock) => block.kind === 'aggregate-video');
   const posts = document.blocks.filter((block: HtmlHomeBlock) => block.kind === 'aggregate-post');
   const statuses = document.blocks.filter((block: HtmlHomeBlock) => block.kind === 'aggregate-source-status');
+  const waterfall = buildWaterfallHomePayload(document, isBusy);
+  const waterfallJson = waterfall === null ? 'null' : JSON.stringify(waterfall).replace(/</g, '\\u003c');
+  const waterfallStatus = waterfall !== null && waterfall.replenishing ? '<div class="waterfall-status">正在补充内容</div>' :
+    (waterfall !== null && waterfall.exhausted ? '<div class="waterfall-status">本轮内容已结束</div>' : '');
   return [
     '<!doctype html>',
     '<html lang="zh-CN"><head><meta charset="utf-8" />',
     '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />',
     '<title>', escapeHtml(document.title), '</title>',
-    '<style>', AGGREGATE_CSS, '</style></head><body>',
+    '<style>', AGGREGATE_CSS, WATERFALL_CSS, '</style></head><body>',
     '<main class="aggregate-shell">',
     '<header class="aggregate-hero">',
     '<div class="aggregate-kicker">多源搜索</div>',
@@ -644,6 +805,7 @@ export function renderAggregateSearchHomeDocument(document: HtmlHomeDocument, is
     '<p>视频和讨论一起看', isBusy ? ' · 正在更新' : '', '</p>',
     '</header>',
     statuses.length > 0 ? '<section class="aggregate-section aggregate-source-overview"><div class="aggregate-section-head"><h2>来源</h2><div class="aggregate-meta">状态摘要</div></div><div class="aggregate-status-list">' + statuses.map(renderAggregateBlock).join('') + '</div></section>' : '',
+    waterfall !== null && waterfall.candidates.length > 0 ? '<div class="waterfall-entry"><button type="button" data-waterfall-enter>进入发现流</button></div>' : '',
     renderFilterRail(),
     '<div id="aggregate-filter-empty" hidden>没有匹配结果</div>',
     '<div class="aggregate-grid">',
@@ -655,7 +817,8 @@ export function renderAggregateSearchHomeDocument(document: HtmlHomeDocument, is
     '<div class="aggregate-section-head"><h2>讨论</h2><div class="aggregate-meta">', escapeHtml(posts.length.toString()), ' 条</div></div>',
     '<div class="aggregate-post-list">', posts.map(renderAggregateBlock).join(''), '</div>',
     '</section>',
-    '</div></main><script>', AGGREGATE_JS, '</script></body></html>'
+    '</div></main>', waterfall !== null ? '<section id="waterfall-discovery" class="waterfall-overlay"><div class="waterfall-toolbar"><button type="button" data-waterfall-back>返回</button><button type="button" data-waterfall-preferences>来源偏好</button><button type="button" data-waterfall-reason>推荐理由</button></div><div id="waterfall-track" class="waterfall-track">' + waterfallStatus + '</div><div id="waterfall-preferences" class="waterfall-preferences"></div></section>' : '',
+    '<script>', AGGREGATE_JS, waterfall !== null ? 'window.__aiphoneWaterfallInitial=' + waterfallJson + ';' + WATERFALL_JS : '', '</script></body></html>'
   ].join('');
 }
 

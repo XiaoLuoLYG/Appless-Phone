@@ -1,4 +1,4 @@
-import { A2uiComponent } from '@loop/agent-core';
+import { A2uiComponent, WaterfallFeedState, WaterfallRankedCandidate, WaterfallSourceState } from '@loop/agent-core';
 
 export type HtmlHomeSource = 'welcome' | 'pending' | 'model' | 'tool';
 export type HtmlHomeKind = 'welcome' | 'thinking' | 'travel' | 'hotel' | 'food' | 'social' | 'dynamic-tools' | 'gmail' | 'media' | 'payment' | 'aggregate-search' | 'luckin' | 'multi-task' | 'generic';
@@ -86,6 +86,15 @@ export interface HtmlHomePersonaMemory {
   preferences: string[];
 }
 
+export interface WaterfallHomePayload {
+  surfaceId: string;
+  query: string;
+  candidates: WaterfallRankedCandidate[];
+  sources: WaterfallSourceState[];
+  replenishing: boolean;
+  exhausted: boolean;
+}
+
 export interface HtmlHomeDocument {
   version: number;
   surfaceId?: string;
@@ -102,6 +111,7 @@ export interface HtmlHomeDocument {
   persona: HtmlHomePersona;
   personaMemory: HtmlHomePersonaMemory;
   rawSurfaceRoot: A2uiComponent | null;
+  waterfall?: WaterfallFeedState;
   activeSectionId?: string;
   executionMode?: 'parallel' | 'serial';
   generatedAt: string;

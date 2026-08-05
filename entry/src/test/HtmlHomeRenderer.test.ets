@@ -8,6 +8,7 @@ import {
   parseHotelSearchRequest
 } from '@loop/agent-core';
 import { renderHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeRenderer';
+import { buildWaterfallHomePayload } from '../main/ets/pages/A2uiHome/html/HtmlAggregateSearchHomeRenderer';
 import { buildMultiTaskHomePayload } from '../main/ets/pages/A2uiHome/html/HtmlMultiTaskHomeRenderer';
 import { createFirecrawlPendingDocument } from '../main/ets/pages/A2uiHome/html/HtmlFirecrawlHomeRenderer';
 import { createHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeSnapshot';
@@ -19,6 +20,7 @@ import {
 } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
 import { parseHtmlHomeAction } from '../main/ets/pages/A2uiHome/components/HtmlHomeSurfaceView';
 import { renderRideDriverMapHtml } from '../main/ets/pages/A2uiHome/html/RideDriverMapHtmlRenderer';
+import { WaterfallFeedState, WaterfallRankedCandidate, WaterfallSourceState } from '@loop/agent-core';
 
 interface GooglePayCheckoutArgsFixture {
   provider: string;
@@ -487,6 +489,29 @@ function aggregateSearchDocumentFixture(): HtmlHomeDocument {
   }];
   doc.actions = [];
   doc.history = [];
+  return doc;
+}
+
+function waterfallRendererFixture(): HtmlHomeDocument {
+  const doc = aggregateSearchDocumentFixture();
+  const candidate = (id: string, mediaType: 'video' | 'image_text' | 'post', source: string, coverUrl: string): WaterfallRankedCandidate => ({
+    id: id, source: source, mediaType: mediaType, title: id + ' title', summary: id + ' summary',
+    url: 'https://example.com/' + id, coverUrl: coverUrl, publishedAt: id === 'post-3' ? '' : '2026-08-05T00:00:00.000Z',
+    originalIndex: 0, normalizedUrl: 'https://example.com/' + id,
+    signals: { relevanceTier: 3, titleHits: 1, summaryHits: 0, freshnessTier: id === 'post-3' ? 0 : 4 },
+    reason: id === 'post-3' ? '标题命中查询' : '标题命中查询 · 24 小时内发布'
+  });
+  const sources: WaterfallSourceState[] = [
+    { source: 'youtube', phase: 'success', continuation: null, inFlight: false, reservedCount: 0, message: 'ok' },
+    { source: 'hackernews', phase: 'exhausted', continuation: null, inFlight: false, reservedCount: 0, message: '本轮内容已结束' }
+  ];
+  const waterfall: WaterfallFeedState = {
+    query: 'codex', enabledSources: ['youtube', 'hackernews'], preferenceDescription: '', shown: [],
+    current: candidate('video-1', 'video', 'youtube', 'https://img.example/video.jpg'),
+    stable: [candidate('image-2', 'image_text', 'hackernews', 'https://img.example/image.jpg')],
+    tail: [candidate('post-3', 'post', 'hackernews', '')], sources: sources
+  };
+  doc.waterfall = waterfall;
   return doc;
 }
 
@@ -2471,6 +2496,46 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf("iframe.setAttribute('referrerpolicy', 'origin-when-cross-origin')")).assertLarger(-1);
       expect(html.indexOf('https://i.ytimg.com/vi/abc123/mqdefault.jpg')).assertLarger(-1);
       expect(html.indexOf('https://i1.hdslb.com/bfs/archive/cover.jpg')).assertLarger(-1);
+    });
+
+    it('renders the Waterfall discovery stream inside aggregate search', 0, () => {
+      const doc = waterfallRendererFixture();
+      const html = renderHtmlHomeDocument(doc);
+      const payload = buildWaterfallHomePayload(doc, false);
+
+      expect(payload === null).assertFalse();
+      expect(payload?.candidates[0].id).assertEqual('video-1');
+      expect(payload?.candidates[1].id).assertEqual('image-2');
+      expect(payload?.candidates[2].id).assertEqual('post-3');
+      expect(html.indexOf('进入发现流')).assertLarger(-1);
+      expect(html.indexOf('来源偏好')).assertLarger(-1);
+      expect(html.indexOf('推荐理由')).assertLarger(-1);
+      expect(html.indexOf('window.__aiphoneApplyWaterfallUpdate')).assertLarger(-1);
+      expect(html.indexOf('scroll-snap-type: y mandatory')).assertLarger(-1);
+      expect(html.indexOf('聚合搜索')).assertLarger(-1);
+      expect(html.indexOf('aggregate-filter')).assertLarger(-1);
+      expect(html.indexOf('Codex demo')).assertLarger(-1);
+      expect(html.indexOf('OpenAI Codex discussion')).assertLarger(-1);
+      expect(html.indexOf('https://www.youtube.com/watch?v=abc123')).assertLarger(-1);
+      expect(html.indexOf('正在补充内容')).assertEqual(-1);
+      expect(html.indexOf('本轮内容已结束')).assertLarger(-1);
+      expect(html.indexOf('result 3')).assertEqual(-1);
+
+      const replenishingHtml = renderHtmlHomeDocument(doc, true);
+      expect(replenishingHtml.indexOf('正在补充内容')).assertLarger(-1);
+    });
+
+    it('keeps the Waterfall entry hidden when no candidate is valid', 0, () => {
+      const doc = aggregateSearchDocumentFixture();
+      doc.waterfall = {
+        query: 'codex', enabledSources: ['youtube'], preferenceDescription: '', shown: [], current: null,
+        stable: [], tail: [], sources: [{ source: 'youtube', phase: 'empty', continuation: null,
+          inFlight: false, reservedCount: 0, message: '没有结果' }]
+      };
+      const html = renderHtmlHomeDocument(doc);
+
+      expect(html.indexOf('进入发现流')).assertEqual(-1);
+      expect(html.indexOf('至少开启一个来源')).assertLarger(-1);
     });
 
     it('normalizes generic dynamic media titles in the H5 document', 0, () => {

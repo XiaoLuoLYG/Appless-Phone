@@ -70,6 +70,8 @@ export struct HomePage {
   @Prop htmlHomeHtml: string = '';
   @Prop multiTaskPayloadJson: string = '';
   @Prop multiTaskPayloadTick: number = 0;
+  @Prop waterfallPayloadJson: string = '';
+  @Prop waterfallPayloadTick: number = 0;
   @Prop mailDetailEventJson: string = '';
   @Prop mailReplyEventJson: string = '';
   @Prop mailCalendarEventJson: string = '';
@@ -430,6 +432,8 @@ export struct HomePage {
           html: this.htmlHomeHtml,
           multiTaskPayloadJson: this.multiTaskPayloadJson,
           multiTaskPayloadTick: this.multiTaskPayloadTick,
+          waterfallPayloadJson: this.waterfallPayloadJson,
+          waterfallPayloadTick: this.waterfallPayloadTick,
           mailDetailEventJson: this.mailDetailEventJson,
           mailReplyEventJson: this.mailReplyEventJson,
           mailCalendarEventJson: this.mailCalendarEventJson,
