@@ -227,9 +227,8 @@ export const SUGGESTED_ACTIONS_JS: string = `
     if (!listHost) { return; }
     listHost.textContent = '';
     var items = state.payload ? list(state.payload.items) : [];
+    state.host.hidden = items.length === 0;
     if (items.length === 0) {
-      var pending = add(listHost, 'div', 'suggested-action-item', '正在准备 suggest…');
-      pending.setAttribute('data-status', 'preparing');
       return;
     }
     items.forEach(function (item) {

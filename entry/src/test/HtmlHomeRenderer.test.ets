@@ -2192,6 +2192,8 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('__aiphoneApplySuggestedActions')).assertLarger(-1);
       expect(html.indexOf('suggested-actions-panel')).assertLarger(-1);
       expect(html.indexOf("add(header, 'span', '', 'suggest')")).assertLarger(-1);
+      expect(html.indexOf('state.host.hidden = items.length === 0')).assertLarger(-1);
+      expect(html.indexOf('正在准备 suggest')).assertEqual(-1);
       expect(html.indexOf('在 App 内查看路线')).assertEqual(-1);
     });
 
