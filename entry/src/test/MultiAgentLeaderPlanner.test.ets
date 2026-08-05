@@ -864,6 +864,16 @@ function actionDecision(actionId: string): string {
     '"allowedActionIds":["' + actionId + '"]}}';
 }
 
+function routeDecisionWithNearbyHotelSuggestion(): string {
+  return '{"personaId":"travel_companion","skillId":"",' +
+    '"requestedCapabilityIds":["maps.route.open"],"roundAction":"execute",' +
+    '"continuationMode":"complete","dataTasks":[],' +
+    '"uiIntent":{"purpose":"open route","preferredDensity":"comfortable",' +
+    '"requiredSections":[]},"actionIntent":{"goal":"open the requested driving route",' +
+    '"allowedActionIds":["maps.route.open"]},' +
+    '"suggestedGoals":["帮用户查询华为坂田基地附近的酒店"]}';
+}
+
 function actionAsDataDecision(actionId: string): string {
   return '{"personaId":"travel_companion","skillId":"",' +
     '"requestedCapabilityIds":["' + actionId + '"],"roundAction":"execute","continuationMode":"complete",' +
@@ -3472,6 +3482,106 @@ export default function multiAgentLeaderPlannerTest() {
       expect(await fails(unregistered)).assertTrue();
       expect(await fails(incomplete)).assertTrue();
       expect(await fails(HOTEL_WITH_EXTRA_DECISION)).assertTrue();
+    });
+
+    it('strictly parses one first-round nearby-hotel suggested goal without adding it to current work', 0,
+      async () => {
+        const model = new QueueLocalModel([routeDecisionWithNearbyHotelSuggestion()]);
+        const decision = await new MultiAgentLeaderPlanner(model).plan(
+          inputMessage(),
+          { text: '查询从深圳实验学校到华为坂田基地的驾车路线' },
+          actionOwnerContext(),
+          1
+        );
+
+        expect(decision.suggestedGoals!.length).assertEqual(1);
+        expect(decision.suggestedGoals![0]).assertEqual('帮用户查询华为坂田基地附近的酒店');
+        expect(decision.requestedCapabilityIds.join(',')).assertEqual('maps.route.open');
+        expect(decision.actionIntent!.allowedActionIds.join(',')).assertEqual('maps.route.open');
+        expect(model.systemPrompts[0].indexOf('suggestedGoals') >= 0).assertTrue();
+        expect(model.systemPrompts[0].indexOf('Every first-round execute decision must include') >= 0).assertTrue();
+        expect(model.systemPrompts[0].indexOf('1 to 3 unique strings') >= 0).assertTrue();
+        expect(model.systemPrompts[0].indexOf('completing the current request would already provide') >= 0)
+          .assertTrue();
+        expect(model.systemPrompts[0].indexOf('帮用户查询北京天气') >= 0).assertTrue();
+        expect(model.systemPrompts[0].indexOf('公交路线') < 0).assertTrue();
+        expect(model.systemPrompts[0].indexOf('帮用户查询附近的美食') < 0).assertTrue();
+        expect(model.systemPrompts[0].indexOf('帮用户查询B附近的酒店') >= 0).assertTrue();
+        expect(model.systemPrompts[0].indexOf('帮用户查询B附近的美食') >= 0).assertTrue();
+        expect(model.prompts[0].indexOf('帮用户查询B附近的酒店') < 0).assertTrue();
+        expect(model.prompts[0].indexOf('帮用户查询B附近的美食') < 0).assertTrue();
+        expect(model.prompts[0].indexOf('suggestedGoals') >= 0).assertTrue();
+      });
+
+    it('does not inject a nearby-hotel goal when the route model omits suggestions', 0,
+      async () => {
+        const decision = await new MultiAgentLeaderPlanner(
+          new QueueLocalModel([actionDecision('maps.route.open')])
+        ).plan(
+          inputMessage(),
+          { text: '查询从深圳实验学校到华为坂田基地的驾车路线' },
+          actionOwnerContext(),
+          1
+        );
+
+        expect(decision.suggestedGoals === undefined).assertTrue();
+      });
+
+    it('does not inject a nearby-hotel goal after Data-to-Action ownership repair', 0,
+      async () => {
+        const model = new QueueLocalModel([
+          actionAsDataDecision('maps.route.open'),
+          actionDecision('maps.route.open')
+        ]);
+        const decision = await new MultiAgentLeaderPlanner(model).plan(
+          inputMessage(),
+          { text: '查询从深圳实验学校到华为坂田基地的驾车路线' },
+          actionOwnerContext(),
+          1,
+          (): boolean => true
+        );
+
+        expect(model.prompts.length).assertEqual(2);
+        expect(decision.suggestedGoals === undefined).assertTrue();
+      });
+
+    it('accepts up to three suggested goals and rejects malformed, duplicate, oversized, and later-round goals',
+      0, async () => {
+      const valid = routeDecisionWithNearbyHotelSuggestion();
+      const three = valid.replace(
+        '"suggestedGoals":["帮用户查询华为坂田基地附近的酒店"]',
+        '"suggestedGoals":["帮用户查询华为坂田基地附近的酒店",' +
+          '"帮用户查询华为坂田基地附近的美食",' +
+          '"帮用户查询从华为坂田基地返回深圳实验学校的路线"]'
+      );
+      const empty = valid.replace(
+        '"suggestedGoals":["帮用户查询华为坂田基地附近的酒店"]',
+        '"suggestedGoals":[]'
+      );
+      const wrongPerspective = valid.replace('帮用户查询华为坂田基地附近的酒店', '查询华为坂田基地附近的酒店');
+      const duplicate = valid.replace(
+        '"suggestedGoals":["帮用户查询华为坂田基地附近的酒店"]',
+        '"suggestedGoals":["帮用户查询华为坂田基地附近的酒店",' +
+          '"帮用户查询华为坂田基地附近的酒店"]'
+      );
+      const four = three.replace(
+        '"帮用户查询从华为坂田基地返回深圳实验学校的路线"]',
+        '"帮用户查询从华为坂田基地返回深圳实验学校的路线",' +
+          '"帮用户查询华为坂田基地附近的咖啡店"]'
+      );
+
+      const accepted = await new MultiAgentLeaderPlanner(new QueueLocalModel([three])).plan(
+        inputMessage(),
+        { text: '查询从深圳实验学校到华为坂田基地的驾车路线' },
+        actionOwnerContext(),
+        1
+      );
+      expect(accepted.suggestedGoals!.length).assertEqual(3);
+      expect(await fails(empty)).assertTrue();
+      expect(await fails(wrongPerspective)).assertTrue();
+      expect(await fails(duplicate)).assertTrue();
+      expect(await fails(four)).assertTrue();
+      expect(await failsAtRound(valid, 2)).assertTrue();
     });
   });
 }

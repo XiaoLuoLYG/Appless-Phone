@@ -10,6 +10,10 @@ import { renderPaymentHomeDocument, shouldRenderPaymentHomeDocument } from './Ht
 import { renderRideHailingHomeDocument, shouldRenderRideHailingHomeDocument } from './HtmlRideHailingHomeRenderer';
 import { renderTravelHomeDocument, shouldRenderTravelHomeDocument } from './HtmlTravelHomeRenderer';
 import { personaAvatarDataUri } from './PersonaAvatarDataUri';
+import {
+  SUGGESTED_ACTIONS_CSS,
+  SUGGESTED_ACTIONS_JS
+} from './HtmlSuggestedActionsModule';
 import { APP_LOGO_AMAP, APP_LOGO_ASANA, APP_LOGO_BAIDU_MAPS, APP_LOGO_BILIBILI, APP_LOGO_DISCORD, APP_LOGO_GITHUB, APP_LOGO_GMAIL, APP_LOGO_GOOGLE_DOCS, APP_LOGO_GOOGLE_DRIVE, APP_LOGO_GOOGLE_MAPS, APP_LOGO_HUBSPOT, APP_LOGO_INSTAGRAM, APP_LOGO_KFC, APP_LOGO_LINEAR, APP_LOGO_LINKEDIN, APP_LOGO_LUCKIN, APP_LOGO_MCDONALDS, APP_LOGO_MEITUAN, APP_LOGO_MICROSOFT_OUTLOOK, APP_LOGO_NOTION, APP_LOGO_QQMAIL, APP_LOGO_SALESFORCE, APP_LOGO_SLACK, APP_LOGO_SPOTIFY, APP_LOGO_TAOBAO, APP_LOGO_TENCENT_MAPS, APP_LOGO_TICKETMASTER, APP_LOGO_TIKTOK, APP_LOGO_TRELLO, APP_LOGO_WECOM, APP_LOGO_WHATSAPP, APP_LOGO_X, APP_LOGO_YOUTUBE } from './AppLogoDataUri';
 
 export { buildMultiTaskHomePayload } from './HtmlMultiTaskHomeRenderer';
@@ -3834,7 +3838,8 @@ const HTML_HOME_JS: string = `
   }
   function mapsRouteActions(block) {
     return list(block && block.actions).filter(function (action) {
-      return text(action && action.id) === 'maps.open.web';
+      var id = text(action && action.id);
+      return id === 'maps.open.web';
     }).slice(0, 1);
   }
   function validMapLocation(value) {
@@ -5047,6 +5052,12 @@ const HTML_HOME_JS: string = `
       });
     });
   }
+  function addSuggestedActions(parent) {
+    if (window.AIPhoneSuggestedActions &&
+      typeof window.AIPhoneSuggestedActions.mount === 'function') {
+      window.AIPhoneSuggestedActions.mount(parent, text(data.surfaceId));
+    }
+  }
   function paymentActionIconType(action) {
     var id = text(action && action.id);
     if (id === 'luckin.pay.open') { return 'wechat'; }
@@ -5263,6 +5274,7 @@ const HTML_HOME_JS: string = `
           addActions(detailHost, whatsAppSendActions(block));
         } else if (isGoogleMapsRouteBlock(block)) {
           addActions(detailHost, mapsRouteActions(block));
+          addSuggestedActions(detailHost);
         } else {
           addActions(detailHost, block.actions);
           addPairs(detailHost, block.metrics, 'metrics');
@@ -5463,6 +5475,7 @@ export function renderHtmlHomeDocument(document: HtmlHomeDocument, isBusy: boole
   }
   const renderDocument: HtmlHomeDocumentWithBusy = {
     version: document.version,
+    surfaceId: document.surfaceId,
     source: document.source,
     kind: document.kind,
     title: document.title,
@@ -5490,11 +5503,12 @@ export function renderHtmlHomeDocument(document: HtmlHomeDocument, isBusy: boole
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${title}</title>
-<style>${HTML_HOME_CSS}</style>
+<style>${HTML_HOME_CSS}\n${SUGGESTED_ACTIONS_CSS}</style>
 </head>
 <body${bodyScene}>
 <div id="app"></div>
 <script id="home-data" type="application/json">${json}</script>
+<script>${SUGGESTED_ACTIONS_JS}</script>
 <script>${HTML_HOME_JS}</script>
 </body>
 </html>`;

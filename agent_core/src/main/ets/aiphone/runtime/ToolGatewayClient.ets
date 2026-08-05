@@ -10391,12 +10391,20 @@ async function callStructuredFoodTool(
 ): Promise<DataResult> {
   const key = localProviderConfig.amapKey;
   const preferences = foodPreferenceArgs(args);
+  let effectivePrompt: string = prompt;
+  if (args !== null) {
+    const values = args as Record<string, Object | string | number | boolean | null | undefined>;
+    const structuredQuery = values['query'];
+    if (typeof structuredQuery === 'string' && structuredQuery.trim().length > 0) {
+      effectivePrompt = structuredQuery.trim();
+    }
+  }
 
-  const query = extractFoodQuery(prompt);
+  const query = extractFoodQuery(effectivePrompt);
   const preflightResults: FoodProviderResult[] = [];
   const provenanceResults: FoodProviderResult[] = [];
   let locationSource = 'none';
-  let location = parseCoordinatePair(prompt);
+  let location = parseCoordinatePair(effectivePrompt);
   if (location.length > 0) {
     locationSource = 'prompt_coords';
   } else if (query.place.length > 0 && key.length > 0) {
@@ -10418,7 +10426,7 @@ async function callStructuredFoodTool(
       locationSource = 'rawfile_default';
     }
   }
-  const keyword = extractFoodKeyword(prompt);
+  const keyword = extractFoodKeyword(effectivePrompt);
 
   const adapters: FoodProviderAdapter[] = [
     new AmapFoodProvider(),
@@ -10430,10 +10438,10 @@ async function callStructuredFoodTool(
   if (localProviderConfig.googleMapsApiKey.length > 0) {
     adapters.push(new GoogleMapsFoodProvider());
   }
-  if (shouldQueryMcDonalds(prompt, keyword)) {
+  if (shouldQueryMcDonalds(effectivePrompt, keyword)) {
     adapters.push(new McDonaldsMcpFoodProvider());
   }
-  if (shouldQueryLuckin(prompt, keyword)) {
+  if (shouldQueryLuckin(effectivePrompt, keyword)) {
     adapters.push(new LuckinMcpFoodProvider());
   }
   const providerNames: string[] = [];
@@ -10457,7 +10465,7 @@ async function callStructuredFoodTool(
   }
   const tasks: Promise<FoodProviderResult>[] = [];
   for (let index = 0; index < adapters.length; index++) {
-    tasks.push(safeFoodProviderSearch(adapters[index], prompt, query, keyword, location, locationSource));
+    tasks.push(safeFoodProviderSearch(adapters[index], effectivePrompt, query, keyword, location, locationSource));
   }
   const streamed = await streamFoodProviderResultsWithPartials(tasks, providerResults, (snapshot: FoodProviderPartialSnapshot) => {
     aiLogInfo('[AIPhone][LocalToolFoodPartial] provider=' + snapshot.provider +

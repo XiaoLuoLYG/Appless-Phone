@@ -27,8 +27,10 @@ import {
   LocalModel,
   LinkedMessageBus,
   ObservationDigest,
+  SuggestedActionCandidatePayload,
   TaskErrorPayload,
   TurnResultPayload,
+  MultiTaskBoardData,
   UiSurfaceWriteLease,
   UiSurfaceWriter,
   composioDynamicResultFromObservation,
@@ -36,6 +38,7 @@ import {
   gmailDraftPreviewA2ui,
   gmailThreadResultsA2ui,
   hotelSearchDataResult,
+  isMultiTaskSurface,
   parseA2uiJsonl,
   parseHotelSearchRequest,
   setJsonPointer
@@ -202,6 +205,21 @@ const MAPS_ACTION_DECISION: string = '{"personaId":"travel_companion","skillId":
   '"uiIntent":{"purpose":"maps.route.open","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"actionIntent":{"goal":"open the requested map route",' +
   '"allowedActionIds":["maps.route.open"]},"reasonCode":"maps_action"}';
+
+function suggestedHotelDraft(originQuery: string): string {
+  return '{"canImplement":true,"reasonCode":"","label":"查看附近酒店","steps":[{' +
+    '"stepId":"search-nearby-hotels","toolId":"hotel.search","args":{' +
+    '"originQuery":' + JSON.stringify(originQuery) + ',"place":"华为坂田基地",' +
+    '"placeType":"POI","countryCode":"CN","checkInDate":"2026-07-22",' +
+    '"stayNights":1,"adultCount":1,"childCount":0,"childAgeDetails":[],' +
+    '"roomCount":1,"currency":"","size":0}}]}';
+}
+
+function suggestedFoodDraft(query: string): string {
+  return '{"canImplement":true,"reasonCode":"","label":"查看附近美食","steps":[{' +
+    '"stepId":"search-nearby-food","toolId":"food.search","args":{' +
+    '"query":' + JSON.stringify(query) + '}}]}';
+}
 const CALENDAR_CREATE_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
   '"requestedCapabilityIds":["calendar.event.create"],"roundAction":"execute","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"calendar.event.create","preferredDensity":"comfortable",' +
@@ -700,6 +718,9 @@ function canaryStructuredResult(toolId: string, outputSchema: string): DataResul
     data = JSON.parse('{"title":"高铁方案","body":"真实结果","summary":"0 result","trains":[]}') as Object;
   } else if (toolId === 'flight.search') {
     data = JSON.parse('{"title":"航班方案","body":"真实结果","summary":"0 result","flights":[]}') as Object;
+  } else if (toolId === 'food.search') {
+    data = JSON.parse('{"title":"附近美食","body":"真实结果","summary":"0 result",' +
+      '"foods":[],"rows":[]}') as Object;
   } else {
     data = JSON.parse('{"results":[]}') as Object;
   }
@@ -1235,6 +1256,137 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(outcome.status).assertEqual('success');
       expect(outcome.message).assertEqual('你好');
       expect(surfaces.length).assertEqual(0);
+      runtime.dispose();
+    });
+
+    it('hosts repeated prepared-action results in one flat MultiTask surface', 0, async () => {
+      const goal = '查询华为坂田基地附近的酒店';
+      const suggestedActionId = 'demo.nearby-hotel';
+      const bus = new TrackingBus();
+      const executor = new CanaryHotelExecutor();
+      const rendered: A2uiSurfaceState[] = [];
+      const suggestedButton: A2uiAction = {
+        id: 'suggested-action.demo.run',
+        label: '查看附近酒店',
+        prompt: suggestedActionId,
+        variant: 'secondary',
+        kind: 'client',
+        args: JSON.parse('{"suggestedActionId":"demo.nearby-hotel"}') as Object
+      };
+      let currentHost = pageSurface('maps.route.open', suggestedButton, 17);
+      const options = canaryOptions(
+        new QueueModel([suggestedHotelDraft(goal)]),
+        executor,
+        new RecordingOpener(),
+        rendered,
+        [],
+        bus
+      );
+      options.onSurface = (surface: A2uiSurfaceState): boolean => {
+        rendered.push(surface);
+        currentHost = surface;
+        return true;
+      };
+      options.currentHostSurface = (): A2uiSurfaceState | null => currentHost;
+      options.currentHostGeneration = (): number => currentHost.runtimeGeneration === undefined ?
+        0 : currentHost.runtimeGeneration;
+      options.currentPageSnapshot = (): RegisteredPageSnapshot | null => pageSnapshot(currentHost, 17);
+      const runtime = new MultiAgentCanaryRuntime(options);
+      const candidate: SuggestedActionCandidatePayload = { suggestedActionId, goal };
+      bus.publish({
+        type: AgentMessageType.SUGGESTED_ACTION_CANDIDATE,
+        conversationId: 'canary-test',
+        turnId: 'route-turn',
+        taskId: 'route-ui',
+        payload: candidate
+      });
+      await flush();
+
+      expect(runtime.runSuggestedAction(suggestedActionId)).assertTrue();
+      await flush(24);
+      const first = rendered[rendered.length - 1];
+      const firstModel = JSON.parse(first.dataModelJson) as
+        Record<string, Object | string | number | boolean | null | undefined>;
+      const firstBoard = firstModel['multiTask'] as MultiTaskBoardData;
+      expect(isMultiTaskSurface(first)).assertTrue();
+      expect(firstBoard.sections.length).assertEqual(2);
+      expect(firstBoard.sections[0].toolId).assertEqual('maps.route.open');
+      expect(firstBoard.sections[1].toolId).assertEqual('hotel.search');
+      expect(firstBoard.activeSectionId).assertEqual('slot_1');
+
+      expect(runtime.runSuggestedAction(suggestedActionId)).assertTrue();
+      await flush(24);
+      const second = rendered[rendered.length - 1];
+      const secondModel = JSON.parse(second.dataModelJson) as
+        Record<string, Object | string | number | boolean | null | undefined>;
+      const secondBoard = secondModel['multiTask'] as MultiTaskBoardData;
+      expect(isMultiTaskSurface(second)).assertTrue();
+      expect(secondBoard.sections.length).assertEqual(3);
+      expect(secondBoard.sections[0].toolId).assertEqual('maps.route.open');
+      expect(secondBoard.sections[1].toolId).assertEqual('hotel.search');
+      expect(secondBoard.sections[2].toolId).assertEqual('hotel.search');
+      expect(secondBoard.activeSectionId).assertEqual('slot_2');
+      expect(executor.calls.join(',')).assertEqual('hotel.search,hotel.search');
+      runtime.dispose();
+    });
+
+    it('hosts a prepared nearby-food result beside the route in MultiTask', 0, async () => {
+      const goal = '查询华为坂田基地附近的美食';
+      const suggestedActionId = 'demo.nearby-food';
+      const bus = new TrackingBus();
+      const executor = new RecordingGenericExecutor();
+      const rendered: A2uiSurfaceState[] = [];
+      const suggestedButton: A2uiAction = {
+        id: 'suggested-action.demo.run',
+        label: '查看附近美食',
+        prompt: suggestedActionId,
+        variant: 'secondary',
+        kind: 'client',
+        args: JSON.parse('{"suggestedActionId":"demo.nearby-food"}') as Object
+      };
+      let currentHost = pageSurface('maps.route.open', suggestedButton, 18);
+      const options = canaryOptions(
+        new QueueModel([suggestedFoodDraft(goal)]),
+        executor,
+        new RecordingOpener(),
+        rendered,
+        [],
+        bus
+      );
+      options.onSurface = (surface: A2uiSurfaceState): boolean => {
+        rendered.push(surface);
+        currentHost = surface;
+        return true;
+      };
+      options.currentHostSurface = (): A2uiSurfaceState | null => currentHost;
+      options.currentHostGeneration = (): number => currentHost.runtimeGeneration === undefined ?
+        0 : currentHost.runtimeGeneration;
+      options.currentPageSnapshot = (): RegisteredPageSnapshot | null => pageSnapshot(currentHost, 18);
+      const runtime = new MultiAgentCanaryRuntime(options);
+      const candidate: SuggestedActionCandidatePayload = { suggestedActionId, goal };
+      bus.publish({
+        type: AgentMessageType.SUGGESTED_ACTION_CANDIDATE,
+        conversationId: 'canary-test',
+        turnId: 'route-turn',
+        taskId: 'route-ui',
+        payload: candidate
+      });
+      await flush();
+
+      expect(runtime.runSuggestedAction(suggestedActionId)).assertTrue();
+      await flush(24);
+      const result = rendered[rendered.length - 1];
+      const model = JSON.parse(result.dataModelJson) as
+        Record<string, Object | string | number | boolean | null | undefined>;
+      const board = model['multiTask'] as MultiTaskBoardData;
+      expect(isMultiTaskSurface(result)).assertTrue();
+      expect(board.sections.length).assertEqual(2);
+      expect(board.sections[0].toolId).assertEqual('maps.route.open');
+      expect(board.sections[1].toolId).assertEqual('food.search');
+      expect(board.activeSectionId).assertEqual('slot_1');
+      expect(executor.tasks.length).assertEqual(1);
+      expect(executor.tasks[0].toolId).assertEqual('food.search');
+      expect(executor.tasks[0].outputSchema).assertEqual('foodChoices');
       runtime.dispose();
     });
 

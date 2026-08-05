@@ -23,15 +23,21 @@ import {
   AgentMessage,
   AgentMessageReader,
   AgentMessageType,
+  allToolDefinitions,
   ClientActionAuthorizer,
+  ConversationContext,
   CreateDataTaskPayload,
   CreateUiTaskPayload,
   DataResult,
   JsonValue,
   LinkedMessageBus,
+  LocalModel,
   PausedActionRun,
+  PreparedActionRecord,
   RegisteredActionExecutor,
   SurfaceActionAuthorizer,
+  SuggestedActionCandidatePayload,
+  SuggestedActionRunPayload,
   ToolDefinition,
   ToolDefinitionLookup,
   ToolRiskLevel,
@@ -40,6 +46,8 @@ import {
   VirtualActionIntentResolver,
   WorkflowRunArgs
 } from '@loop/agent-core';
+import { MultiAgentSuggestedActionPreparer } from
+  '../main/ets/pages/A2uiHome/agent/MultiAgentSuggestedActionPreparer';
 
 type JsonRecord = Record<string, JsonValue | undefined>;
 
@@ -58,7 +66,18 @@ class ActionLookup implements ToolDefinitionLookup {
       return null;
     }
     if (toolId === 'hotel.search') {
-      return definition(toolId, 'read', ['hotel.detail', 'hotel.navigate']);
+      const hotel = definition(toolId, 'read', ['hotel.detail', 'hotel.navigate']);
+      hotel.inputSchema = 'hotelSearchRequest';
+      hotel.outputSchema = 'hotelSearchResults';
+      return hotel;
+    }
+    if (toolId === 'food.search') {
+      const food = definition(toolId, 'read', []);
+      food.domain = 'food';
+      food.inputSchema = 'foodSearchQuery';
+      food.outputSchema = 'foodChoices';
+      food.a2uiComponent = 'FoodChoices';
+      return food;
     }
     if (toolId === 'hotel.detail') {
       return definition(toolId, 'read', ['hotel.booking.open']);
@@ -317,6 +336,58 @@ class ScriptedActionPlanCompiler implements ActionPlanCompiler {
     }
     return this.draft;
   }
+}
+
+class ScriptedSuggestedActionModel implements LocalModel {
+  readonly prompts: string[] = [];
+  readonly systemPrompts: string[] = [];
+  private readonly output: string;
+
+  constructor(output: string) {
+    this.output = output;
+  }
+
+  async complete(
+    prompt: string,
+    _conversation?: ConversationContext,
+    systemPrompt?: string
+  ): Promise<string> {
+    this.prompts.push(prompt);
+    this.systemPrompts.push(systemPrompt ?? '');
+    return this.output;
+  }
+}
+
+function suggestedActionTools(): ToolDefinition[] {
+  return allToolDefinitions();
+}
+
+function suggestedHotelDraft(originQuery: string): string {
+  return '{"canImplement":true,"reasonCode":"","label":"查看附近酒店","steps":[{' +
+    '"stepId":"search-nearby-hotels","toolId":"hotel.search","args":{' +
+    '"originQuery":' + JSON.stringify(originQuery) + ',"place":"华为坂田基地",' +
+    '"placeType":"POI","countryCode":"CN","checkInDate":"2026-08-04",' +
+    '"stayNights":1,"adultCount":1,"childCount":0,"childAgeDetails":[],' +
+    '"roomCount":1,"currency":"","size":0}}]}';
+}
+
+function suggestedFoodDraft(query: string): string {
+  return '{"canImplement":true,"reasonCode":"","label":"查看附近美食","steps":[{' +
+    '"stepId":"search-nearby-food","toolId":"food.search","args":{' +
+    '"query":' + JSON.stringify(query) + '}}]}';
+}
+
+function suggestedHotelMissingPlaceDraft(originQuery: string): string {
+  return '{"canImplement":true,"reasonCode":"","label":"nearby hotels","steps":[{' +
+    '"stepId":"search-nearby-hotels","toolId":"hotel.search","args":{' +
+    '"originQuery":' + JSON.stringify(originQuery) + ',"placeType":"POI","countryCode":"CN",' +
+    '"checkInDate":"2026-08-04","stayNights":1,"adultCount":1,"childCount":0,' +
+    '"childAgeDetails":[],"roomCount":1,"currency":"","size":0}}]}';
+}
+
+function unsupportedSuggestedDraft(reasonCode: string): string {
+  return '{"canImplement":false,"reasonCode":' + JSON.stringify(reasonCode) +
+    ',"label":"","steps":[]}';
 }
 
 class MemoryVirtualIntentResolver implements VirtualActionIntentResolver {
@@ -700,6 +771,317 @@ function messagesOfType(
 
 export default function actionAgentTest() {
   describe('actionAgent', () => {
+    it('prepares and registers a strict nearby-hotel action from only the suggested goal', 0,
+      async () => {
+        const goal = '查询华为坂田基地附近的酒店';
+        const model = new ScriptedSuggestedActionModel(suggestedHotelDraft(goal));
+        const preparer = new MultiAgentSuggestedActionPreparer(
+          model,
+          suggestedActionTools(),
+          (): string => '2026-08-03'
+        );
+        const bus = new LinkedMessageBus();
+        const agent = new ActionAgent(
+          bus,
+          catalog(new ActionLookup()),
+          noOffers,
+          new RecordingRegisteredExecutor(),
+          undefined,
+          undefined,
+          preparer
+        );
+        const candidate: SuggestedActionCandidatePayload = {
+          suggestedActionId: 'route-input:round-1:virtual:suggested-action:1',
+          goal
+        };
+        agent.start();
+
+        bus.publish(message(
+          AgentMessageType.SUGGESTED_ACTION_CANDIDATE,
+          candidate,
+          'turn-1',
+          'route-input:round-1:virtual'
+        ));
+        await settle();
+        const prepared = agent.inspectPreparedAction(candidate.suggestedActionId) as
+          PreparedActionRecord;
+
+        expect(prepared.status).assertEqual('ready');
+        expect(prepared.schemaVersion).assertEqual(2);
+        expect(prepared.reasonCode).assertEqual('');
+        expect(prepared.goal).assertEqual(goal);
+        expect(prepared.taskId).assertEqual('route-input:round-1:virtual');
+        expect(prepared.sources.length).assertEqual(0);
+        expect(prepared.steps.length).assertEqual(1);
+        expect(prepared.steps[0].toolId).assertEqual('hotel.search');
+        expect(prepared.steps[0].bindings.length).assertEqual(0);
+        expect(JSON.stringify(prepared.steps[0].args)).assertEqual(
+          '{"originQuery":"查询华为坂田基地附近的酒店","place":"华为坂田基地",' +
+            '"placeType":"POI","countryCode":"CN","checkInDate":"2026-08-04",' +
+            '"stayNights":1,"adultCount":1,"childCount":0,"childAgeDetails":[],' +
+            '"roomCount":1,"currency":"","size":0}'
+        );
+        expect(model.prompts[0].indexOf('maps.place.search') >= 0).assertTrue();
+        expect(model.prompts[0].indexOf('hotel.search') >= 0).assertTrue();
+        expect(model.prompts[0].indexOf(goal) >= 0).assertTrue();
+        expect(model.systemPrompts[0].indexOf('inputJsonSchema') >= 0).assertTrue();
+        expect(model.prompts[0].indexOf('"required":["originQuery","place"') >= 0).assertTrue();
+
+        (prepared.steps[0].args as Record<string, string>)['place'] = 'mutated';
+        const reread = agent.inspectPreparedAction(candidate.suggestedActionId) as
+          PreparedActionRecord;
+        expect((reread.steps[0].args as Record<string, string>)['place']).assertEqual(
+          '华为坂田基地'
+        );
+        agent.stop();
+      });
+
+    it('marks a suggested action unsupported when args do not satisfy the real input schema', 0,
+      async () => {
+        const goal = '查询华为坂田基地附近的酒店';
+        const model = new ScriptedSuggestedActionModel(suggestedHotelMissingPlaceDraft(goal));
+        const preparer = new MultiAgentSuggestedActionPreparer(
+          model,
+          suggestedActionTools(),
+          (): string => '2026-08-03'
+        );
+        const bus = new LinkedMessageBus();
+        const agent = new ActionAgent(
+          bus,
+          catalog(new ActionLookup()),
+          noOffers,
+          new RecordingRegisteredExecutor(),
+          undefined,
+          undefined,
+          preparer
+        );
+        const candidate: SuggestedActionCandidatePayload = {
+          suggestedActionId: 'route-input:round-1:virtual:suggested-action:invalid',
+          goal
+        };
+        agent.start();
+
+        bus.publish(message(
+          AgentMessageType.SUGGESTED_ACTION_CANDIDATE,
+          candidate,
+          'turn-1',
+          'route-input:round-1:virtual'
+        ));
+        await settle();
+        const prepared = agent.inspectPreparedAction(candidate.suggestedActionId) as
+          PreparedActionRecord;
+
+        expect(prepared.status).assertEqual('unsupported');
+        expect(prepared.reasonCode).assertEqual('UNSUPPORTED_CONSTRAINT');
+        expect(prepared.steps.length).assertEqual(0);
+        agent.stop();
+      });
+
+    it('records an explicit unsupported suggested goal without treating it as a model failure', 0,
+      async () => {
+        const goal = '查询华为坂田基地附近200米内的酒店';
+        const model = new ScriptedSuggestedActionModel(
+          unsupportedSuggestedDraft('UNSUPPORTED_CONSTRAINT')
+        );
+        const preparer = new MultiAgentSuggestedActionPreparer(
+          model,
+          suggestedActionTools(),
+          (): string => '2026-08-03'
+        );
+        const bus = new LinkedMessageBus();
+        const agent = new ActionAgent(
+          bus,
+          catalog(new ActionLookup()),
+          noOffers,
+          new RecordingRegisteredExecutor(),
+          undefined,
+          undefined,
+          preparer
+        );
+        const candidate: SuggestedActionCandidatePayload = {
+          suggestedActionId: 'route-input:round-1:virtual:suggested-action:unsupported',
+          goal
+        };
+        agent.start();
+
+        bus.publish(message(
+          AgentMessageType.SUGGESTED_ACTION_CANDIDATE,
+          candidate,
+          'turn-1',
+          'route-input:round-1:virtual'
+        ));
+        await settle();
+        const prepared = agent.inspectPreparedAction(candidate.suggestedActionId) as
+          PreparedActionRecord;
+
+        expect(prepared.status).assertEqual('unsupported');
+        expect(prepared.reasonCode).assertEqual('UNSUPPORTED_CONSTRAINT');
+        expect(prepared.label).assertEqual('');
+        expect(prepared.steps.length).assertEqual(0);
+        agent.stop();
+      });
+
+    it('prepares and registers nearby food from only the suggested goal', 0, async () => {
+      const goal = '查询华为坂田基地附近的美食';
+      const model = new ScriptedSuggestedActionModel(suggestedFoodDraft(goal));
+      const preparer = new MultiAgentSuggestedActionPreparer(
+        model,
+        suggestedActionTools(),
+        (): string => '2026-08-03'
+      );
+      const bus = new LinkedMessageBus();
+      const agent = new ActionAgent(
+        bus,
+        catalog(new ActionLookup()),
+        noOffers,
+        new RecordingRegisteredExecutor(),
+        undefined,
+        undefined,
+        preparer
+      );
+      const candidate: SuggestedActionCandidatePayload = {
+        suggestedActionId: 'route-input:round-1:virtual:suggested-action:food',
+        goal
+      };
+      agent.start();
+
+      bus.publish(message(
+        AgentMessageType.SUGGESTED_ACTION_CANDIDATE,
+        candidate,
+        'turn-1',
+        'route-input:round-1:virtual'
+      ));
+      await settle();
+      const prepared = agent.inspectPreparedAction(candidate.suggestedActionId) as
+        PreparedActionRecord;
+
+      expect(prepared.status).assertEqual('ready');
+      expect(prepared.reasonCode).assertEqual('');
+      expect(prepared.label).assertEqual('查看附近美食');
+      expect(prepared.steps.length).assertEqual(1);
+      expect(prepared.steps[0].toolId).assertEqual('food.search');
+      expect(JSON.stringify(prepared.steps[0].args)).assertEqual(
+        '{"query":"查询华为坂田基地附近的美食"}'
+      );
+      expect(model.prompts[0].indexOf('"supportedPreparedToolIds":["hotel.search","food.search"]')).assertLarger(-1);
+      expect(model.systemPrompts[0].indexOf('canImplement')).assertLarger(-1);
+      agent.stop();
+    });
+
+    it('runs a prepared nearby-hotel suggestion through existing UI and Data tasks', 0,
+      async () => {
+        const goal = '查询华为坂田基地附近的酒店';
+        const model = new ScriptedSuggestedActionModel(suggestedHotelDraft(goal));
+        const preparer = new MultiAgentSuggestedActionPreparer(
+          model,
+          suggestedActionTools(),
+          (): string => '2026-08-03'
+        );
+        const bus = new LinkedMessageBus();
+        const agent = new ActionAgent(
+          bus,
+          catalog(new ActionLookup()),
+          noOffers,
+          new RecordingRegisteredExecutor(),
+          undefined,
+          undefined,
+          preparer
+        );
+        const observer = bus.openReader();
+        const suggestedActionId = 'demo.nearby-hotel';
+        const candidate: SuggestedActionCandidatePayload = { suggestedActionId, goal };
+        agent.start();
+
+        bus.publish(message(
+          AgentMessageType.SUGGESTED_ACTION_CANDIDATE,
+          candidate,
+          'route-turn',
+          'route-task'
+        ));
+        await settle();
+        const run: SuggestedActionRunPayload = { suggestedActionId };
+        bus.publish(message(
+          AgentMessageType.SUGGESTED_ACTION_RUN,
+          run,
+          'suggested-turn',
+          suggestedActionId
+        ));
+
+        const uiMessage = await receiveType(observer, AgentMessageType.TASK_CREATE_UI);
+        const dataMessage = await receiveType(observer, AgentMessageType.TASK_CREATE_DATA);
+        const ui = uiMessage.payload as CreateUiTaskPayload;
+        const data = dataMessage.payload as CreateDataTaskPayload;
+
+        expect(uiMessage.conversationId).assertEqual('conversation-1');
+        expect(uiMessage.turnId).assertEqual('suggested-turn');
+        expect(ui.taskId).assertEqual(suggestedActionId + ':ui');
+        expect(ui.dataTaskIds.join(',')).assertEqual(suggestedActionId + ':data');
+        expect(ui.intent).assertEqual('查看附近酒店');
+        expect(ui.expectedOutputSchema).assertEqual('hotelSearchResults');
+        expect(dataMessage.turnId).assertEqual('suggested-turn');
+        expect(data.taskId).assertEqual(suggestedActionId + ':data');
+        expect(data.roundId).assertEqual('suggested-turn');
+        expect(data.goal).assertEqual(goal);
+        expect(data.allowedToolIds.join(',')).assertEqual('hotel.search');
+        expect(data.toolId).assertEqual('hotel.search');
+        expect(data.outputSchema).assertEqual('hotelSearchResults');
+        expect((data.args as Record<string, string>)['place']).assertEqual('华为坂田基地');
+        agent.stop();
+      });
+
+    it('runs a prepared nearby-food suggestion through existing UI and Data tasks', 0,
+      async () => {
+        const goal = '查询华为坂田基地附近的美食';
+        const model = new ScriptedSuggestedActionModel(suggestedFoodDraft(goal));
+        const preparer = new MultiAgentSuggestedActionPreparer(
+          model,
+          suggestedActionTools(),
+          (): string => '2026-08-03'
+        );
+        const bus = new LinkedMessageBus();
+        const agent = new ActionAgent(
+          bus,
+          catalog(new ActionLookup()),
+          noOffers,
+          new RecordingRegisteredExecutor(),
+          undefined,
+          undefined,
+          preparer
+        );
+        const observer = bus.openReader();
+        const suggestedActionId = 'demo.nearby-food';
+        const candidate: SuggestedActionCandidatePayload = { suggestedActionId, goal };
+        agent.start();
+
+        bus.publish(message(
+          AgentMessageType.SUGGESTED_ACTION_CANDIDATE,
+          candidate,
+          'route-turn',
+          'route-task'
+        ));
+        await settle();
+        const run: SuggestedActionRunPayload = { suggestedActionId };
+        bus.publish(message(
+          AgentMessageType.SUGGESTED_ACTION_RUN,
+          run,
+          'suggested-turn',
+          suggestedActionId
+        ));
+
+        const uiMessage = await receiveType(observer, AgentMessageType.TASK_CREATE_UI);
+        const dataMessage = await receiveType(observer, AgentMessageType.TASK_CREATE_DATA);
+        const ui = uiMessage.payload as CreateUiTaskPayload;
+        const data = dataMessage.payload as CreateDataTaskPayload;
+
+        expect(ui.intent).assertEqual('查看附近美食');
+        expect(ui.expectedOutputSchema).assertEqual('foodChoices');
+        expect(data.allowedToolIds.join(',')).assertEqual('food.search');
+        expect(data.toolId).assertEqual('food.search');
+        expect(data.outputSchema).assertEqual('foodChoices');
+        expect((data.args as Record<string, string>)['query']).assertEqual(goal);
+        agent.stop();
+      });
+
     it('auto-runs one exact zero-Data virtual Action without compiler or UI', 0, async () => {
       const bus = new LinkedMessageBus();
       const compiler = new ScriptedActionPlanCompiler(compiledPlan());

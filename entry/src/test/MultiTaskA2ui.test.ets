@@ -710,6 +710,7 @@ export default function multiTaskA2uiTest() {
     document.activeSectionId = 'slot_1';
     const payload = multiTaskHomePayloadJson(document, true);
     expect(payload.indexOf('"activeSectionId":"slot_1"')).assertLarger(-1);
+    expect(payload.indexOf('"allowActiveSectionUpdate":true')).assertLarger(-1);
     expect(payload.indexOf('"isBusy":true')).assertLarger(-1);
     expect(payload.indexOf('slot_1')).assertLarger(-1);
   });

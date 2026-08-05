@@ -3,6 +3,7 @@ import {
   A2uiAction,
   A2uiSurfaceStore,
   HotelSearchResult,
+  SuggestedActionStatusPayload,
   hotelSearchA2ui,
   parseA2uiJsonl,
   parseHotelSearchRequest
@@ -19,6 +20,10 @@ import {
 } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
 import { parseHtmlHomeAction } from '../main/ets/pages/A2uiHome/components/HtmlHomeSurfaceView';
 import { renderRideDriverMapHtml } from '../main/ets/pages/A2uiHome/html/RideDriverMapHtmlRenderer';
+import {
+  suggestedActionsPanelAllowsAction,
+  suggestedActionsPanelPayload
+} from '../main/ets/pages/A2uiHome/html/HtmlSuggestedActionsModule';
 
 interface GooglePayCheckoutArgsFixture {
   provider: string;
@@ -676,6 +681,9 @@ function googleMapsDocumentFixture(): HtmlHomeDocument {
 
 function googleMapsRouteDocumentFixture(): HtmlHomeDocument {
   const doc = documentFixture();
+  const routeActions: HtmlHomeAction[] = [
+    { id: 'maps.open.web', label: '查看路线', prompt: 'https://www.google.com/maps/dir/?api=1&origin=a&destination=b', variant: 'primary', kind: 'client' }
+  ];
   doc.kind = 'generic';
   doc.title = 'Google Maps 路线';
   doc.subtitle = '深圳北站到深圳湾口岸';
@@ -695,9 +703,7 @@ function googleMapsRouteDocumentFixture(): HtmlHomeDocument {
       { label: 'Destination', value: '深圳湾口岸' },
       { label: 'Maps URL', value: 'https://www.google.com/maps/dir/?api=1&origin=a&destination=b' }
     ],
-    actions: [
-      { id: 'maps.open.web', label: '查看路线', prompt: 'https://www.google.com/maps/dir/?api=1&origin=a&destination=b', variant: 'primary', kind: 'client' }
-    ]
+    actions: routeActions
   }];
   doc.actions = [];
   return doc;
@@ -2182,7 +2188,49 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf("function isGoogleMapsRouteBlock(block)")).assertLarger(-1);
       expect(html.indexOf("if (!isGoogleMapsBlock(block) || isGoogleMapsRouteBlock(block)) { return; }")).assertLarger(-1);
       expect(html.indexOf("addActions(detailHost, mapsRouteActions(block))")).assertLarger(-1);
+      expect(html.indexOf("addSuggestedActions(detailHost)")).assertLarger(-1);
+      expect(html.indexOf('__aiphoneApplySuggestedActions')).assertLarger(-1);
+      expect(html.indexOf('suggested-actions-panel')).assertLarger(-1);
+      expect(html.indexOf("add(header, 'span', '', 'suggest')")).assertLarger(-1);
       expect(html.indexOf('在 App 内查看路线')).assertEqual(-1);
+    });
+
+    it('builds one suggest payload for ready unsupported and failed statuses', 0, () => {
+      const statuses: SuggestedActionStatusPayload[] = [
+        {
+          suggestedActionId: 'suggest-1',
+          goal: '查询附近酒店',
+          status: 'ready',
+          reasonCode: '',
+          label: '查看附近酒店'
+        },
+        {
+          suggestedActionId: 'suggest-2',
+          goal: '查询附近充电站',
+          status: 'unsupported',
+          reasonCode: 'NO_TOOL',
+          label: ''
+        },
+        {
+          suggestedActionId: 'suggest-3',
+          goal: '查询附近餐厅',
+          status: 'failed',
+          reasonCode: '',
+          label: ''
+        }
+      ];
+      const payload = suggestedActionsPanelPayload('route-surface', 4, statuses);
+      expect(payload.items.length).assertEqual(3);
+      expect(payload.items[0].action?.label).assertEqual('查看附近酒店');
+      expect(payload.items[1].action === undefined).assertTrue();
+      expect(payload.items[2].action === undefined).assertTrue();
+      const action = payload.items[0].action as A2uiAction;
+      expect(suggestedActionsPanelAllowsAction(
+        JSON.stringify(payload), action, 'route-surface'
+      )).assertTrue();
+      expect(suggestedActionsPanelAllowsAction(
+        JSON.stringify(payload), action, 'other-surface'
+      )).assertFalse();
     });
 
     it('uses the requested Google Calendar search window for empty results', 0, () => {

@@ -5,6 +5,36 @@ import {
   ToolBackendType,
   ToolDefinition
 } from './ToolDefinitionTypes';
+import { ToolInputJsonSchema } from './ToolInputJsonSchema';
+
+const HOTEL_SEARCH_INPUT_JSON_SCHEMA: ToolInputJsonSchema = JSON.parse(
+  '{"type":"object","description":"Search hotels near a named place. When stay details are omitted, use ' +
+    'tomorrow relative to currentLocalDate, one night, one adult, zero children, one room, empty currency, and ' +
+    'size 0.","properties":{"originQuery":{"type":"string","minLength":1,"description":"The complete ' +
+    'natural-language goal."},"place":{"type":"string","minLength":1,"description":"The explicit place ' +
+    'near which to search."},"placeType":{"type":"string","enum":["POI"],"description":"Use POI for a ' +
+    'named destination."},"countryCode":{"type":"string","enum":["CN"],"description":"ISO country code ' +
+    'for this demo."},"checkInDate":{"type":"string","minLength":10,"description":"Absolute check-in date ' +
+    'in YYYY-MM-DD format."},"stayNights":{"type":"integer","minimum":1,"description":"Number of nights."},' +
+    '"adultCount":{"type":"integer","minimum":1,"description":"Number of adults."},"childCount":{' +
+    '"type":"integer","minimum":0,"description":"Number of children."},"childAgeDetails":{"type":"array",' +
+    '"items":{"type":"integer","minimum":0},"description":"One non-negative age for every child; empty when ' +
+    'childCount is zero."},"roomCount":{"type":"integer","minimum":1,"description":"Number of rooms."},' +
+    '"currency":{"type":"string","description":"Currency code, or empty to use the provider default."},' +
+    '"size":{"type":"integer","minimum":0,"description":"Result limit, or 0 to use the provider default."}},' +
+    '"required":["originQuery","place","placeType","countryCode","checkInDate","stayNights","adultCount",' +
+    '"childCount","childAgeDetails","roomCount","currency","size"],"additionalProperties":false}'
+) as ToolInputJsonSchema;
+
+const FOOD_SEARCH_INPUT_JSON_SCHEMA: ToolInputJsonSchema = JSON.parse(
+  '{"type":"object","description":"Search food, restaurants, cafes, coffee, milk tea, drinks, menus, or ' +
+    'delivery near a named place.","properties":{"query":{"type":"string","minLength":1,"description":' +
+    '"A self-contained search query preserving the requested place and food category."},"brandPreference":{' +
+    '"type":"string","minLength":1,"description":"Optional preferred food or drink brand."},"brandStrict":{' +
+    '"type":"boolean","description":"Whether to show only the preferred brand."},"sweetness":{"type":"string",' +
+    '"minLength":1,"description":"Optional drink sweetness preference."}},"required":["query"],' +
+    '"additionalProperties":false}'
+) as ToolInputJsonSchema;
 
 const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
@@ -63,6 +93,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     backendPriority: ['local_adapter'],
     authModes: ['provider_key'],
     inputSchema: 'hotelSearchRequest',
+    inputJsonSchema: HOTEL_SEARCH_INPUT_JSON_SCHEMA,
     outputSchema: 'hotelSearchResults',
     a2uiComponent: 'GenericToolResults',
     actions: ['hotel.detail', 'hotel.navigate']
@@ -111,6 +142,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     backendPriority: ['local_adapter'],
     authModes: ['provider_key'],
     inputSchema: 'foodSearchQuery',
+    inputJsonSchema: FOOD_SEARCH_INPUT_JSON_SCHEMA,
     outputSchema: 'foodChoices',
     a2uiComponent: 'FoodChoices',
     actions: []

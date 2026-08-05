@@ -1,6 +1,12 @@
 import { MessageDrivenAgent } from '../MessageDrivenAgent';
 import { CreateDataTaskPayload } from '../data/DataAgentTypes';
-import { AgentMessage, AgentMessageType } from '../message/AgentMessage';
+import {
+  AgentMessage,
+  AgentMessageType,
+  SuggestedActionCandidatePayload,
+  SuggestedActionStatusPayload,
+  SuggestedActionRunPayload
+} from '../message/AgentMessage';
 import { DataResult } from '../message/DataResult';
 import { LinkedMessageBus } from '../message/LinkedMessageBus';
 import { CreateUiTaskPayload, UiRenderResultPayload } from '../ui/UiAgentTypes';
@@ -45,6 +51,13 @@ import {
   JsonValue
 } from './ActionPlanTypes';
 import { cloneJsonValue } from './JsonPointer';
+import { aiLogInfo } from '../../aiphone/runtime/AiphoneLogger';
+import {
+  PreparedActionDraft,
+  PreparedActionRecord,
+  PreparedActionRegistry,
+  SuggestedActionPreparer
+} from './PreparedActionRegistry';
 
 const WORKFLOW_RUN_ACTION_ID: string = 'workflow.run';
 const LIVE_RUN_LIMIT: number = 128;
@@ -281,6 +294,8 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
   private readonly registeredExecutor: RegisteredActionExecutor;
   private readonly compiler: ActionPlanCompiler | null;
   private readonly virtualResolver: VirtualActionIntentResolver | null;
+  private readonly suggestedActionPreparer: SuggestedActionPreparer | null;
+  private readonly preparedActions: PreparedActionRegistry = new PreparedActionRegistry();
   private readonly runner: ActionPlanRunner;
   private readonly readyRuns: Map<string, StoredActionRun> =
     new Map<string, StoredActionRun>();
@@ -315,7 +330,8 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     offerResolver: ActionOfferResolver,
     executor: RegisteredActionExecutor,
     compiler?: ActionPlanCompiler,
-    virtualResolver?: VirtualActionIntentResolver
+    virtualResolver?: VirtualActionIntentResolver,
+    suggestedActionPreparer?: SuggestedActionPreparer
   ) {
     super(bus);
     this.bus = bus;
@@ -324,6 +340,8 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     this.registeredExecutor = executor;
     this.compiler = compiler === undefined ? null : compiler;
     this.virtualResolver = virtualResolver === undefined ? null : virtualResolver;
+    this.suggestedActionPreparer = suggestedActionPreparer === undefined ?
+      null : suggestedActionPreparer;
     this.runner = new ActionPlanRunner(catalog, this);
   }
 
@@ -353,6 +371,11 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     this.terminalPlanRequestOrder.splice(0, this.terminalPlanRequestOrder.length);
     this.uiSurfaces.clear();
     this.directSurfaceAuthorizations.clear();
+    this.preparedActions.clear();
+  }
+
+  inspectPreparedAction(suggestedActionId: string): PreparedActionRecord | null {
+    return this.preparedActions.inspect(suggestedActionId);
   }
 
   authorizeDirectSurfaceRun(message: AgentMessage, pageActionId: string = ''): boolean {
@@ -443,6 +466,8 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
 
   protected accepts(message: AgentMessage): boolean {
     return message.type === AgentMessageType.ACTION_PLAN_REQUEST ||
+      message.type === AgentMessageType.SUGGESTED_ACTION_CANDIDATE ||
+      message.type === AgentMessageType.SUGGESTED_ACTION_RUN ||
       message.type === AgentMessageType.ACTION_PLAN_DRAFT ||
       message.type === AgentMessageType.TASK_CREATE_DATA ||
       message.type === AgentMessageType.TASK_RESULT_UI ||
@@ -463,6 +488,14 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       }
       if (message.type === AgentMessageType.TASK_CREATE_DATA) {
         this.observeDataTask(message);
+        return;
+      }
+      if (message.type === AgentMessageType.SUGGESTED_ACTION_CANDIDATE) {
+        this.startSuggestedActionPreparation(message);
+        return;
+      }
+      if (message.type === AgentMessageType.SUGGESTED_ACTION_RUN) {
+        this.runSuggestedAction(message);
         return;
       }
       if (message.type === AgentMessageType.ACTION_PLAN_REQUEST) {
@@ -1809,6 +1842,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
 
   private cancelTurn(message: AgentMessage): void {
     this.rememberCanceledTurn(message.conversationId, message.turnId);
+    this.preparedActions.removeTurn(message.conversationId, message.turnId);
     this.observedDataTasks.forEach((task: ObservedDataTask, key: string) => {
       if (task.conversationId === message.conversationId && task.turnId === message.turnId) {
         this.observedDataTasks.delete(key);
@@ -1879,6 +1913,162 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
         }
       }
     });
+  }
+
+  private startSuggestedActionPreparation(message: AgentMessage): void {
+    const candidate: SuggestedActionCandidatePayload | null =
+      this.suggestedActionCandidate(message);
+    const preparer: SuggestedActionPreparer | null = this.suggestedActionPreparer;
+    if (candidate === null || preparer === null ||
+      !this.preparedActions.begin(message.conversationId, message.turnId, message.taskId, candidate)) {
+      return;
+    }
+    const generation: number = this.generation;
+    const startedAt: number = Date.now();
+    this.publishSuggestedActionStatus(candidate.suggestedActionId);
+    aiLogInfo('[AIPhone][SuggestedAction] status=preparing id=' +
+      candidate.suggestedActionId + ' goalChars=' + candidate.goal.length.toString());
+    try {
+      preparer.prepare(candidate.goal)
+        .then((draft: PreparedActionDraft) => {
+          if (!this.active || this.generation !== generation ||
+            this.canceledTurns.has(this.turnKey(message.conversationId, message.turnId))) {
+            return;
+          }
+          if (!this.preparedActions.complete(candidate.suggestedActionId, draft)) {
+            this.preparedActions.fail(candidate.suggestedActionId);
+            this.publishSuggestedActionStatus(candidate.suggestedActionId);
+            aiLogInfo('[AIPhone][SuggestedAction] status=failed id=' + candidate.suggestedActionId +
+              ' elapsedMs=' + (Date.now() - startedAt).toString());
+          } else {
+            const prepared: PreparedActionRecord | null =
+              this.preparedActions.inspect(candidate.suggestedActionId);
+            this.publishSuggestedActionStatus(candidate.suggestedActionId);
+            if (prepared !== null && prepared.status === 'ready' && prepared.steps.length === 1) {
+              aiLogInfo('[AIPhone][SuggestedAction] status=ready id=' + candidate.suggestedActionId +
+                ' tool=' + prepared.steps[0].toolId +
+                ' elapsedMs=' + (Date.now() - startedAt).toString());
+            } else if (prepared !== null && prepared.status === 'unsupported') {
+              aiLogInfo('[AIPhone][SuggestedAction] status=unsupported id=' + candidate.suggestedActionId +
+                ' reason=' + prepared.reasonCode +
+                ' elapsedMs=' + (Date.now() - startedAt).toString());
+            }
+          }
+        })
+        .catch((_error: Object) => {
+          if (this.active && this.generation === generation) {
+            this.preparedActions.fail(candidate.suggestedActionId);
+            this.publishSuggestedActionStatus(candidate.suggestedActionId);
+            aiLogInfo('[AIPhone][SuggestedAction] status=failed id=' + candidate.suggestedActionId +
+              ' elapsedMs=' + (Date.now() - startedAt).toString());
+          }
+        });
+    } catch (_error) {
+      this.preparedActions.fail(candidate.suggestedActionId);
+      this.publishSuggestedActionStatus(candidate.suggestedActionId);
+      aiLogInfo('[AIPhone][SuggestedAction] status=failed id=' + candidate.suggestedActionId +
+        ' elapsedMs=' + (Date.now() - startedAt).toString());
+    }
+  }
+
+  private publishSuggestedActionStatus(suggestedActionId: string): void {
+    const record: PreparedActionRecord | null = this.preparedActions.inspect(suggestedActionId);
+    if (record === null) {
+      return;
+    }
+    const payload: SuggestedActionStatusPayload = {
+      suggestedActionId: record.suggestedActionId,
+      goal: record.goal,
+      status: record.status,
+      reasonCode: record.reasonCode,
+      label: record.label
+    };
+    this.bus.publish({
+      type: AgentMessageType.SUGGESTED_ACTION_STATUS,
+      conversationId: record.conversationId,
+      turnId: record.turnId,
+      taskId: record.taskId,
+      payload
+    });
+  }
+
+  private runSuggestedAction(message: AgentMessage): void {
+    const payload: Object = message.payload;
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload) ||
+      Object.keys(payload).sort().join(',') !== 'suggestedActionId') {
+      return;
+    }
+    const run: SuggestedActionRunPayload = payload as SuggestedActionRunPayload;
+    if (!nonempty(run.suggestedActionId) || run.suggestedActionId !== message.taskId) {
+      return;
+    }
+    const record: PreparedActionRecord | null =
+      this.preparedActions.inspect(run.suggestedActionId);
+    if (record === null || record.status !== 'ready' ||
+      record.suggestedActionId !== run.suggestedActionId ||
+      record.conversationId !== message.conversationId || record.steps.length !== 1) {
+      return;
+    }
+    const step = record.steps[0];
+    const registered = this.catalog.validateRegisteredAction(step.toolId);
+    const definition = registered.definition;
+    if (!registered.ok || definition === null || definition.riskLevel !== 'read' ||
+      definition.backendPriority.indexOf('system_intent') >= 0 ||
+      definition.outputSchema.trim().length === 0) {
+      return;
+    }
+    const dataTaskId: string = message.taskId + ':data';
+    const uiTaskId: string = message.taskId + ':ui';
+    const ui: CreateUiTaskPayload = {
+      taskId: uiTaskId,
+      dataTaskIds: [dataTaskId],
+      skillId: '',
+      intent: record.label,
+      expectedOutputSchema: definition.outputSchema
+    };
+    const data: CreateDataTaskPayload = {
+      taskId: dataTaskId,
+      roundId: message.turnId,
+      skillId: '',
+      goal: record.goal,
+      allowedToolIds: [step.toolId],
+      toolId: step.toolId,
+      outputSchema: definition.outputSchema,
+      args: step.args,
+      required: true
+    };
+    aiLogInfo('[AIPhone][SuggestedAction] status=running id=' +
+      run.suggestedActionId + ' tool=' + step.toolId);
+    this.bus.publish({
+      type: AgentMessageType.TASK_CREATE_UI,
+      conversationId: message.conversationId,
+      turnId: message.turnId,
+      taskId: uiTaskId,
+      payload: ui
+    });
+    this.bus.publish({
+      type: AgentMessageType.TASK_CREATE_DATA,
+      conversationId: message.conversationId,
+      turnId: message.turnId,
+      taskId: dataTaskId,
+      payload: data
+    });
+  }
+
+  private suggestedActionCandidate(message: AgentMessage): SuggestedActionCandidatePayload | null {
+    const payload: Object = message.payload;
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload) ||
+      Object.keys(payload).sort().join(',') !== 'goal,suggestedActionId') {
+      return null;
+    }
+    const candidate: SuggestedActionCandidatePayload = payload as SuggestedActionCandidatePayload;
+    if (!nonempty(message.taskId) || message.taskId.length > 240 ||
+      candidate.suggestedActionId === message.taskId ||
+      !nonempty(candidate.suggestedActionId) || candidate.suggestedActionId.length > 240 ||
+      !nonempty(candidate.goal) || candidate.goal.length > 240 || candidate.goal !== candidate.goal.trim()) {
+      return null;
+    }
+    return candidate;
   }
 
   private publishCanceled(

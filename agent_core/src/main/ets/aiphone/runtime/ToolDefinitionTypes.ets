@@ -1,3 +1,5 @@
+import { ToolInputJsonSchema, cloneToolInputJsonSchema } from './ToolInputJsonSchema';
+
 export type ToolRiskLevel = 'read' | 'draft' | 'confirm_required' | 'blocked';
 export type ToolBackendType = 'local_adapter' | 'oauth_api' | 'imap' | 'workspace_mcp' | 'web_session' | 'system_intent' | 'mcp_remote';
 export type ToolAuthMode = 'none' | 'provider_key' | 'oauth' | 'imap_auth' | 'web_session' | 'mcp_auth' | 'system';
@@ -10,6 +12,7 @@ export interface ToolDefinition {
   backendPriority: ToolBackendType[];
   authModes: ToolAuthMode[];
   inputSchema: string;
+  inputJsonSchema?: ToolInputJsonSchema;
   outputSchema: string;
   a2uiComponent: string;
   actions: string[];
@@ -31,7 +34,7 @@ export interface BackendResolution {
 }
 
 export function cloneToolDefinition(definition: ToolDefinition): ToolDefinition {
-  return {
+  const cloned: ToolDefinition = {
     toolId: definition.toolId,
     domain: definition.domain,
     intent: definition.intent,
@@ -43,4 +46,8 @@ export function cloneToolDefinition(definition: ToolDefinition): ToolDefinition 
     a2uiComponent: definition.a2uiComponent,
     actions: definition.actions.slice()
   };
+  if (definition.inputJsonSchema !== undefined) {
+    cloned.inputJsonSchema = cloneToolInputJsonSchema(definition.inputJsonSchema);
+  }
+  return cloned;
 }

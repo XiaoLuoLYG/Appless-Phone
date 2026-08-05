@@ -9,6 +9,7 @@ import {
   OpenAiCompatibleModel,
   PaymentAccount,
   RuntimeOwner,
+  SuggestedActionStatusPayload,
   StripeReceivingAccountCardData,
   UserInputPayload,
   defaultLocalModelSettings
@@ -191,6 +192,10 @@ import { buildMultiTaskHomePayload, renderHtmlHomeDocument } from './html/HtmlHo
 import { createFirecrawlPendingDocument, isFirecrawlToolId } from './html/HtmlFirecrawlHomeRenderer';
 import { isHtmlHomeActionAllowed } from './html/HtmlHomeActionPolicy';
 import { HtmlHomeAction, HtmlHomeBlock, HtmlHomeDocument } from './html/HtmlHomeTypes';
+import {
+  suggestedActionsPanelAllowsAction,
+  suggestedActionsPanelPayload
+} from './html/HtmlSuggestedActionsModule';
 import {
   ensureReminderNotificationEnabled,
   SystemOneShotScheduler
@@ -700,6 +705,11 @@ struct Index {
   @State multiTaskPayloadJson: string = '';
   @State multiTaskShellHtml: string = '';
   @State multiTaskPayloadTick: number = 0;
+  @State suggestedActionsPayloadJson: string = '';
+  @State suggestedActionsPayloadTick: number = 0;
+  private suggestedActionsRevision: number = 0;
+  private readonly suggestedActionStatuses: Map<string, SuggestedActionStatusPayload> =
+    new Map<string, SuggestedActionStatusPayload>();
   private multiTaskActiveSectionId: string = '';
   private multiTaskUserPinnedSection: boolean = false;
   private multiTaskLastMergedRawBySlot: Record<string, string> = {};
@@ -1129,7 +1139,11 @@ struct Index {
       this.multiTaskPayloadJson = '';
       return;
     }
-    const payload = buildMultiTaskHomePayload(document, this.isBusy);
+    const payload = buildMultiTaskHomePayload(
+      document,
+      this.isBusy,
+      !this.multiTaskUserPinnedSection
+    );
     this.multiTaskPayloadJson = JSON.stringify(payload);
     this.multiTaskPayloadTick = this.multiTaskPayloadTick + 1;
   }
@@ -1839,6 +1853,12 @@ struct Index {
         }
         return accepted;
       },
+      onSuggestedActionStatus: (
+        status: SuggestedActionStatusPayload,
+        generation: number
+      ): void => {
+        this.applySuggestedActionStatus(status, generation);
+      },
       onMemoryUpdate: (update: PersonaMemoryUpdateRequest, generation: number): void => {
         if (runtimeCallbackIsCurrent(
           this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', generation
@@ -1990,7 +2010,46 @@ struct Index {
     this.mailDetailSuggestionGuard.invalidate();
     this.runtimeGeneration++;
     this.activeRuntimeOwner = owner;
+    this.suggestedActionStatuses.clear();
+    this.suggestedActionsPayloadJson = '';
+    this.suggestedActionsPayloadTick++;
     return this.runtimeGeneration;
+  }
+
+  private syncSuggestedActionsPayload(surfaceId: string): void {
+    const statuses: SuggestedActionStatusPayload[] = [];
+    this.suggestedActionStatuses.forEach((status: SuggestedActionStatusPayload): void => {
+      statuses.push(status);
+    });
+    this.suggestedActionsRevision++;
+    this.suggestedActionsPayloadJson = JSON.stringify(suggestedActionsPanelPayload(
+      surfaceId,
+      this.suggestedActionsRevision,
+      statuses
+    ));
+    this.suggestedActionsPayloadTick++;
+    aiLogInfo('[AIPhone][SuggestedActionsPanel] surface=' +
+      (surfaceId.length > 0 ? surfaceId : 'pending') +
+      ' revision=' + this.suggestedActionsRevision.toString() +
+      ' items=' + statuses.length.toString());
+  }
+
+  private applySuggestedActionStatus(
+    status: SuggestedActionStatusPayload,
+    generation: number
+  ): void {
+    if (!runtimeCallbackIsCurrent(
+      this.activeRuntimeOwner,
+      this.runtimeGeneration,
+      'multi_agent',
+      generation
+    )) {
+      return;
+    }
+    this.suggestedActionStatuses.set(status.suggestedActionId, status);
+    const surfaceId = this.currentSurface.runtimeOwner === 'multi_agent' &&
+      this.currentSurface.runtimeGeneration === generation ? this.currentSurface.surfaceId : '';
+    this.syncSuggestedActionsPayload(surfaceId);
   }
 
   private ownedSurface(
@@ -2188,6 +2247,11 @@ struct Index {
     }
     this.currentSurface = next;
     this.surfaceRenderTick = this.surfaceRenderTick + 1;
+    if (next.runtimeOwner === 'multi_agent' &&
+      next.runtimeGeneration === this.runtimeGeneration &&
+      this.suggestedActionStatuses.size > 0) {
+      this.syncSuggestedActionsPayload(next.surfaceId);
+    }
     this.clearLuckinInlinePatchState();
     this.syncHtmlHomeStableHtml();
     if (surface.intent === 'multi-task') {
@@ -4574,6 +4638,21 @@ struct Index {
 
   private async handleClientAction(action: A2uiAction): Promise<void> {
     aiLogInfo('[AIPhone][A2uiHomeClientAction] id=' + action.id);
+    if (action.id === 'suggested-action.run' || action.id === 'suggested-action.demo.run') {
+      const values = action.args as Record<string, Object | string | number | boolean | null | undefined>;
+      const suggestedActionId = values === undefined ? undefined : values['suggestedActionId'];
+      const published = typeof suggestedActionId === 'string' && this.multiAgentRuntime !== null &&
+        this.multiAgentRuntime.runSuggestedAction(suggestedActionId);
+      if (published) {
+        // A suggest click is an explicit foreground navigation request, so its result may replace
+        // a MultiTask section that the user previously selected while waiting.
+        this.multiTaskUserPinnedSection = false;
+      }
+      aiLogInfo('[AIPhone][SuggestedActionButton] id=' +
+        (typeof suggestedActionId === 'string' ? suggestedActionId : 'invalid') + ' published=' +
+        (published ? 'true' : 'false') + ' foreground=' + (published ? 'true' : 'false'));
+      return;
+    }
     if (action.id === 'html_mail_calendar_add') {
       await this.addSuggestedMailCalendarEvent(action);
       return;
@@ -4998,6 +5077,14 @@ struct Index {
       return;
     }
     if (this.isPersonaEditorAction(action)) {
+      await this.handleClientAction(action);
+      return;
+    }
+    if (suggestedActionsPanelAllowsAction(
+      this.suggestedActionsPayloadJson,
+      action,
+      this.currentSurface.surfaceId
+    )) {
       await this.handleClientAction(action);
       return;
     }
@@ -5756,6 +5843,8 @@ struct Index {
         htmlHomeHtml: this.htmlHomeHtmlForView(),
         multiTaskPayloadJson: this.multiTaskPayloadJson,
         multiTaskPayloadTick: this.multiTaskPayloadTick,
+        suggestedActionsPayloadJson: this.suggestedActionsPayloadJson,
+        suggestedActionsPayloadTick: this.suggestedActionsPayloadTick,
         mailDetailEventJson: this.mailDetailEventJson,
         mailReplyEventJson: this.mailReplyEventJson,
         mailCalendarEventJson: this.mailCalendarEventJson,
