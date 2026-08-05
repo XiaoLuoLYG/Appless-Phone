@@ -2507,6 +2507,7 @@ export default function htmlHomeRendererTest() {
       expect(payload?.candidates[0].id).assertEqual('video-1');
       expect(payload?.candidates[1].id).assertEqual('image-2');
       expect(payload?.candidates[2].id).assertEqual('post-3');
+      expect(html.indexOf('"enabledSources":["youtube","hackernews"]')).assertLarger(-1);
       expect(html.indexOf('进入发现流')).assertLarger(-1);
       expect(html.indexOf('来源偏好')).assertLarger(-1);
       expect(html.indexOf('推荐理由')).assertLarger(-1);

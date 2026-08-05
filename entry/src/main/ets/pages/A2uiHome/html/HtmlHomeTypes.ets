@@ -90,6 +90,7 @@ export interface WaterfallHomePayload {
   surfaceId: string;
   query: string;
   candidates: WaterfallRankedCandidate[];
+  enabledSources: string[];
   sources: WaterfallSourceState[];
   replenishing: boolean;
   exhausted: boolean;
