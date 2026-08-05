@@ -777,6 +777,7 @@ export function buildWaterfallHomePayload(document: HtmlHomeDocument, isBusy: bo
     surfaceId: document.surfaceId ?? '',
     query: state.query,
     candidates: candidates,
+    enabledSources: state.enabledSources.slice(),
     sources: state.sources,
     replenishing: replenishing,
     exhausted: exhausted
