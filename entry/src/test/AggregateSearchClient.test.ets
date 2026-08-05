@@ -1,6 +1,10 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
   AggregateSearchPost,
+  AggregateSearchResult,
+  AggregateSearchSourceBatch,
+  AggregateSearchStatus,
+  AggregateSearchSource,
   AggregateSearchSourceStatus,
   AggregateSearchVideo,
   WaterfallCandidate,
@@ -13,6 +17,7 @@ import {
   applyWaterfallSourceSelection,
   aggregateSearchQueryFromArgs,
   aggregateMediaCandidates,
+  streamAggregateSearchSourceBatches,
   aggregateSearchResultFromParts,
   aggregateSearchSourcesFromArgs,
   aggregateXPostSearchPrompt,
@@ -119,6 +124,35 @@ function feedState(current: WaterfallRankedCandidate | null, stable: WaterfallRa
     stable: stable,
     tail: tail,
     sources: sources
+  };
+}
+
+function aggregateBatch(source: AggregateSearchSource, id: string, status: AggregateSearchStatus = 'success'): AggregateSearchSourceBatch {
+  const videos: AggregateSearchVideo[] = status === 'success' ? [{
+    id: id,
+    source: source,
+    provider: source,
+    title: 'OpenAI Codex ' + id,
+    summary: 'batch ' + id,
+    url: 'https://' + source + '.test/' + id,
+    thumbnail: '',
+    publishedAt: '2026-08-06T10:00:00.000Z',
+    duration: '',
+    status: 'success',
+    rows: []
+  }] : [];
+  return {
+    source: source,
+    videos: videos,
+    posts: [],
+    status: {
+      source: source,
+      label: source,
+      status: status,
+      message: status === 'success' ? '返回 1 条。' : 'source ' + status,
+      count: videos.length
+    },
+    continuation: null
   };
 }
 
@@ -515,6 +549,54 @@ export default function aggregateSearchClientTest() {
       expect(update.loadRequests.length).assertEqual(0);
       expect(update.state.current).assertEqual(null);
       expect(update.state.sources.map((item) => item.phase).join(',')).assertEqual('exhausted,exhausted');
+    });
+
+    it('emits a partial aggregate snapshot as soon as one source resolves', 0, async () => {
+      let resolveYoutube: (batch: AggregateSearchSourceBatch) => void = (_batch: AggregateSearchSourceBatch): void => {};
+      const youtube = new Promise<AggregateSearchSourceBatch>((resolve: (batch: AggregateSearchSourceBatch) => void): void => {
+        resolveYoutube = resolve;
+      });
+      const snapshots: AggregateSearchResult[] = [];
+      let completed = false;
+      const bilibiliBatch = aggregateBatch('bilibili', 'bilibili-first');
+      bilibiliBatch.videos.push({
+        id: 'bilibili-second', source: 'bilibili', provider: 'bilibili', title: 'OpenAI Codex bilibili-second', summary: 'batch bilibili-second',
+        url: 'https://bilibili.test/bilibili-second', thumbnail: '', publishedAt: '2026-08-06T09:00:00.000Z', duration: '', status: 'success', rows: []
+      });
+      bilibiliBatch.videos.push({
+        id: 'bilibili-third', source: 'bilibili', provider: 'bilibili', title: 'OpenAI Codex bilibili-third', summary: 'batch bilibili-third',
+        url: 'https://bilibili.test/bilibili-third', thumbnail: '', publishedAt: '2026-08-06T08:00:00.000Z', duration: '', status: 'success', rows: []
+      });
+      const finalPromise = streamAggregateSearchSourceBatches(
+        'openai codex',
+        ['youtube', 'bilibili', 'x'],
+        [youtube, Promise.resolve(bilibiliBatch), Promise.resolve(aggregateBatch('x', 'x-auth', 'needs_auth'))],
+        (result: AggregateSearchResult): void => {
+          snapshots.push(result);
+        },
+        WATERFALL_NOW_MS
+      ).then((result: AggregateSearchResult): AggregateSearchResult => {
+        completed = true;
+        return result;
+      });
+
+      await new Promise<void>((resolve: () => void): void => {
+        setTimeout(resolve, 0);
+      });
+      expect(snapshots.length).assertLarger(0);
+      expect(snapshots[0].videos[0].source).assertEqual('bilibili');
+      expect(snapshots[0].waterfall?.sources[0].phase).assertEqual('loading');
+      expect(completed).assertFalse();
+
+      resolveYoutube(aggregateBatch('youtube', 'youtube-second'));
+      const result = await finalPromise;
+      expect(snapshots.length).assertEqual(3);
+      expect(result.videos.length).assertEqual(4);
+      expect(result.waterfall?.stable.map((item) => item.id).join(',')).assertEqual(
+        snapshots[0].waterfall?.stable.map((item) => item.id).join(',')
+      );
+      expect(result.sourceStatuses[2].status).assertEqual('needs_auth');
+      expect(result.waterfall?.sources.every((item) => item.continuation === null)).assertTrue();
     });
   });
 }

@@ -1,3 +1,5 @@
+import { WaterfallContinuation, WaterfallFeedState } from './WaterfallAnythingCore';
+
 export type AggregateSearchSource = 'youtube' | 'bilibili' | 'x' | 'hackernews' | 'reddit' | 'zhihu';
 export type AggregateSearchStatus = 'success' | 'empty' | 'needs_auth' | 'unsupported' | 'error';
 
@@ -50,6 +52,15 @@ export interface AggregateSearchResult {
   posts: AggregateSearchPost[];
   sourceStatuses: AggregateSearchSourceStatus[];
   summary: string;
+  waterfall?: WaterfallFeedState;
+}
+
+export interface AggregateSearchSourceBatch {
+  source: AggregateSearchSource;
+  videos: AggregateSearchVideo[];
+  posts: AggregateSearchPost[];
+  status: AggregateSearchSourceStatus;
+  continuation: WaterfallContinuation | null;
 }
 
 export function emptyAggregateSearchResult(): AggregateSearchResult {
