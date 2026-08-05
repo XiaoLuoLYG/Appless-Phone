@@ -1438,6 +1438,43 @@ export default function toolGatewayClientTest() {
       expect(trainStructuredDataResult(emptyTrain, sources, ['暂无车次']).status).assertEqual('empty');
     });
 
+    it('preserves the real 12306 booking URL in combined travel options', 0, () => {
+      const sources: DataSource[] = [{
+        provider: 'fixture',
+        backend: 'local_adapter',
+        operation: 'search',
+        fetchedAt: '2026-07-22T00:00:00.000Z'
+      }];
+      const bookingUrl = 'https://kyfw.12306.cn/otn/leftTicket/init?real=1';
+      const trainData: TrainStructuredData = {
+        title: '12306 余票查询',
+        body: '实时结果',
+        summary: '1 趟车次',
+        trains: [{
+          trainCode: 'G5612', from: '深圳北', to: '香港西九龙', depart: '18:05', arrive: '18:23',
+          duration: '18分', seats: '二等座有票', status: '可预订', business: '--', first: '--',
+          second: '有', noSeat: '--', hardSeat: '--', sleeperSoft: '--', price: '¥75',
+          bookingUrl: bookingUrl
+        }]
+      };
+      const flightData: FlightStructuredData = {
+        title: '飞常准航班查询',
+        body: '实时结果',
+        summary: '0 个航班',
+        flights: []
+      };
+      const result = combineTravelStructuredResults(
+        '深圳到香港',
+        trainStructuredDataResult(trainData, sources),
+        flightStructuredDataResult(flightData, sources)
+      );
+      const data = result.data as TravelStructuredData;
+
+      expect(data.options.length).assertEqual(1);
+      expect(data.options[0].source).assertEqual('train');
+      expect(JSON.stringify(data.options[0]).indexOf('"bookingUrl":"' + bookingUrl + '"')).assertLarger(-1);
+    });
+
     it('derives aggregate travel retryability only from child error flags', 0, () => {
       const trainSource: DataSource = {
         provider: '12306', backend: 'local_adapter', operation: 'leftTicket',

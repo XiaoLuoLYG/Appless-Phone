@@ -6093,7 +6093,8 @@ function trainToTravelOption(item: A2uiTrainData, index: number): A2uiTravelOpti
     price: item.price === undefined ? '' : item.price,
     availability: item.seats,
     status: item.status.length > 0 ? item.status : '可查',
-    detail: ''
+    detail: '',
+    bookingUrl: item.bookingUrl
   };
 }
 

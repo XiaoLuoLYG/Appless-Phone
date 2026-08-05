@@ -98,6 +98,7 @@ export interface A2uiTravelOptionData {
   availability: string;
   status: string;
   detail: string;
+  bookingUrl?: string;
 }
 
 export interface A2uiFoodData {
