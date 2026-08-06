@@ -2527,6 +2527,8 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('prefers-reduced-motion: reduce')).assertLarger(-1);
       expect(html.indexOf('data-waterfall-enter')).assertLarger(-1);
       expect(html.indexOf('data-waterfall-preferences')).assertLarger(-1);
+      expect(html.indexOf('data-waterfall-empty-sources')).assertLarger(-1);
+      expect(html.indexOf('打开来源偏好')).assertLarger(-1);
       expect(html.indexOf('data-waterfall-reason')).assertLarger(-1);
       expect(html.indexOf('聚合搜索')).assertLarger(-1);
       expect(html.indexOf('aggregate-filter')).assertLarger(-1);

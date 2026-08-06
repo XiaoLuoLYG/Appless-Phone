@@ -112,3 +112,18 @@ track.scrollTop = 600;
 track.emit('scroll');
 await new Promise((resolve) => setTimeout(resolve, 120));
 assert.equal(actions.at(-1)?.id, 'waterfall.feed.advance');
+
+window.__aiphoneApplyWaterfallUpdate({
+  surfaceId: 'surface-1',
+  enabledSources: [],
+  aggregateHtml: '',
+  candidates: [candidate('current'), candidate('next')],
+  sources: []
+});
+assert.match(track.innerHTML, /data-waterfall-empty-sources/);
+track.emit('click', {
+  target: {
+    closest: (selector) => selector === '[data-waterfall-empty-sources]' ? {} : null
+  }
+});
+assert.equal(preferences.classList.contains('active'), true);

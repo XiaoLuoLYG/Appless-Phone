@@ -685,7 +685,8 @@ const WATERFALL_CSS: string = `
   transform: scale(0.98); opacity: 0.9;
 }
 .waterfall-toolbar button:focus-visible, .waterfall-entry button:focus-visible,
-.waterfall-preferences button:focus-visible, .waterfall-preferences input:focus-visible {
+.waterfall-preferences button:focus-visible, .waterfall-preferences input:focus-visible,
+.waterfall-empty button:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 3px;
 }
 .waterfall-reason-panel {
@@ -719,13 +720,19 @@ const WATERFALL_CSS: string = `
   color: var(--paper);
 }
 .waterfall-empty {
-  min-height: calc(100dvh - 150px); display: grid; place-items: center; align-content: center;
+  min-height: calc(100dvh - 150px); display: grid; place-items: center; align-content: center; gap: 14px;
   color: var(--muted); font-size: 16px; line-height: 1.5; padding: 20px; text-align: center;
 }
+.waterfall-empty button {
+  min-height: 48px; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--panel);
+  color: var(--ink); padding: 0 16px; font-size: 14px; font-weight: 720; cursor: pointer;
+  transition: transform 140ms ease-out, opacity 140ms ease-out;
+}
+.waterfall-empty button:active { transform: scale(0.98); opacity: 0.9; }
 .waterfall-status { color: var(--muted); font-size: 14px; line-height: 1.5; padding: 18px 20px 0; text-align: center; }
 @media (prefers-reduced-motion: reduce) {
   .waterfall-entry button, .waterfall-toolbar button, .waterfall-preferences button,
-  .waterfall-preferences, .waterfall-reason-panel { transition: none; }
+  .waterfall-preferences, .waterfall-reason-panel, .waterfall-empty button { transition: none; }
 }
 `;
 
@@ -823,7 +830,7 @@ const WATERFALL_JS: string = `
   function render() {
     if (!track || !state) return;
     var items = candidates(state).filter(function (item) { return enabledSources.indexOf(item.source) >= 0; });
-    var empty = items.length === 0 ? '<div class="waterfall-empty">至少开启一个来源</div>' : '';
+    var empty = items.length === 0 ? '<div class="waterfall-empty"><span>至少开启一个来源</span><button type="button" data-waterfall-empty-sources>打开来源偏好</button></div>' : '';
     var status = state.replenishing ? '<div class="waterfall-status">\\u6b63\\u5728\\u8865\\u5145\\u5185\\u5bb9</div>' : (state.exhausted ? '<div class="waterfall-status">\\u672c\\u8f6e\\u5185\\u5bb9\\u5df2\\u7ed3\\u675f</div>' : '');
     track.innerHTML = status + empty + items.map(renderCandidate).join('');
     track.scrollTop = 0;
@@ -838,6 +845,11 @@ const WATERFALL_JS: string = `
   track.addEventListener('scroll', function () {
     clearTimeout(scrollTimer);
     scrollTimer = setTimeout(postAdvanceIfNeeded, 80);
+  });
+  track.addEventListener('click', function (event) {
+    var target = event.target;
+    if (!target || typeof target.closest !== 'function') return;
+    if (target.closest('[data-waterfall-empty-sources]')) renderPreferences();
   });
   document.addEventListener('click', function (event) {
     var target = event.target;
