@@ -88,10 +88,10 @@ struct MovieDemo {
           .height(38)
           .width(68)
           .fontSize(13)
-          .fontColor('#F3F0EA')
-          .backgroundColor('#242321')
+          .fontColor('#211F1B')
+          .backgroundColor('#EEE9DF')
           .borderRadius(18)
-          .border({ width: 1, color: '#403E3A' })
+          .border({ width: 1, color: '#D6CFC3' })
           .onClick(() => {
             router.back();
           })
@@ -99,32 +99,32 @@ struct MovieDemo {
         Text('电影')
           .fontSize(18)
           .fontWeight(FontWeight.Bold)
-          .fontColor('#F3F0EA')
+          .fontColor('#211F1B')
           .margin({ left: 12 })
           .layoutWeight(1)
 
         Text('NOW')
           .fontSize(11)
           .fontWeight(FontWeight.Bold)
-          .fontColor('#FF765F')
+          .fontColor('#E85F49')
           .letterSpacing(1.2)
       }
       .width('100%')
       .height(54)
       .alignItems(VerticalAlign.Center)
       .padding({ left: 14, right: 18 })
-      .backgroundColor('#151513')
+      .backgroundColor('#F6F3EC')
 
       if (this.errorText.length > 0) {
         Text(this.errorText)
           .fontSize(12)
-          .fontColor('#FF9582')
+          .fontColor('#A83F30')
           .padding({ left: 14, right: 14, top: 8, bottom: 8 })
-          .backgroundColor('#2B1E1B')
+          .backgroundColor('#FFE7E1')
       }
 
       Web({
-        src: 'data:text/html;charset=utf-8,<body style="margin:0;background:%23151513"></body>',
+        src: 'data:text/html;charset=utf-8,<body style="margin:0;background:%23f6f3ec"></body>',
         controller: this.controller
       })
         .javaScriptAccess(true)
@@ -137,13 +137,13 @@ struct MovieDemo {
         })
         .width('100%')
         .layoutWeight(1)
-        .backgroundColor('#151513')
+        .backgroundColor('#F6F3EC')
         .onPageEnd(() => {
           this.loadMovieHtml();
         })
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#151513')
+    .backgroundColor('#F6F3EC')
   }
 }
