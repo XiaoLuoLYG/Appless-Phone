@@ -15349,7 +15349,8 @@ async function callStructuredFirecrawlTool(
 export async function callStructuredTool(
   toolId: string,
   prompt: string,
-  args: Object | null
+  args: Object | null,
+  onPartial?: (result: DataResult) => void
 ): Promise<DataResult> {
   if (toolId === 'dynamic.search') {
     return callStructuredDynamicTool(prompt, args);
@@ -15385,7 +15386,16 @@ export async function callStructuredTool(
     return callStructuredMapsTool(toolId, prompt, mapsArgs(args));
   }
   if (toolId === 'media.video.search' || toolId === 'media.aggregate.search') {
-    return callStructuredMediaTool(toolId, prompt, args);
+    const partialPublisher = onPartial;
+    const aggregateObserver: AggregateSearchPartialObserver | null =
+      partialPublisher === undefined ? null : (partial: AggregateSearchResult): void => {
+        const result = aggregateStructuredDataResult(partial);
+        if (result.status === 'success') {
+          result.status = 'partial';
+        }
+        partialPublisher(result);
+      };
+    return callStructuredMediaTool(toolId, prompt, args, aggregateObserver);
   }
   if (toolId === 'youtube.video.search') {
     return callStructuredYouTubeVideoTool(prompt, args);

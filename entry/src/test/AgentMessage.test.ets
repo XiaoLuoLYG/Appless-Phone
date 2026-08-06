@@ -72,7 +72,8 @@ export default function agentMessageTest() {
         AgentMessageType.TURN_RESULT
       ];
 
-      expect(Object.keys(AgentMessageType).length).assertEqual(15);
+      expect(types.length).assertEqual(15);
+      expect(types.indexOf(AgentMessageType.TASK_RESULT_DATA_PARTIAL)).assertEqual(-1);
       expect(types.join(',')).assertEqual('INPUT.USER,TASK.CREATE.UI,TASK.CREATE.DATA,TASK.RESULT.UI,TASK.RESULT.DATA,TASK.ERROR,ACTION.PLAN.DRAFT,ACTION.OFFERS.READY,ACTION.PLAN.READY,ACTION.RUN,ACTION.PROGRESS,ACTION.RESULT,TURN.CANCEL,ACTION.PLAN.REQUEST,TURN.RESULT');
     });
 

@@ -351,6 +351,20 @@ const C06_GMAIL_DONE: string = '{"personaId":"work_companion","skillId":"",' +
   '"requestedCapabilityIds":["gmail.mail.search"],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"gmail.mail.search","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"answer":"已返回真实 Gmail 邮件。","reasonCode":"gmail_search_ready"}';
+const WATERFALL_MEDIA_QUERY: string = '帮我找 OpenAI Codex 的视频和讨论';
+const WATERFALL_MEDIA_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["media.aggregate.search"],"roundAction":"execute",' +
+  '"continuationMode":"complete","dataTasks":[{"localId":"media-aggregate",' +
+  '"goal":"search OpenAI Codex media","allowedToolIds":["media.aggregate.search"],' +
+  '"toolId":"media.aggregate.search","input":{"query":"' + WATERFALL_MEDIA_QUERY + '"},' +
+  '"required":true}],"uiIntent":{"purpose":"media.aggregate.search",' +
+  '"preferredDensity":"comfortable","requiredSections":["media"]},' +
+  '"reasonCode":"waterfall_media_search"}';
+const WATERFALL_MEDIA_DONE: string = '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["media.aggregate.search"],"roundAction":"answer",' +
+  '"continuationMode":"complete","dataTasks":[],"uiIntent":{"purpose":"media.aggregate.search",' +
+  '"preferredDensity":"comfortable","requiredSections":[]},' +
+  '"answer":"媒体结果已就绪","reasonCode":"waterfall_media_ready"}';
 const C09_SOCIAL_DONE: string = '{"personaId":"work_companion","skillId":"",' +
   '"requestedCapabilityIds":["social.feed.search"],"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
   '"uiIntent":{"purpose":"social.feed.search","preferredDensity":"comfortable",' +
@@ -750,6 +764,63 @@ function c09SocialFeedResult(): DataResult {
       '"accountId":"x-real","message":"connected"},{"platform":"slack","status":"connected",' +
       '"displayName":"Slack","accountId":"slack-real","message":"connected"}]}') as Object,
     warnings: []
+  };
+}
+
+function waterfallMediaResult(
+  status: 'partial' | 'success' | 'error',
+  title: string,
+  additionalTitle: string = '',
+  includeNeedsAuth: boolean = false
+): DataResult {
+  const additionalVideo: string = additionalTitle.length === 0 ? '' :
+    ',{"id":"' + additionalTitle + '","source":"youtube","provider":"YouTube Data API",' +
+    '"title":"' + additionalTitle + '","summary":"OpenAI Codex discussion",' +
+    '"url":"https://example.com/' + additionalTitle + '","thumbnail":"",' +
+    '"publishedAt":"2026-08-06T00:00:00Z","duration":"2:00","status":"success","rows":[]}';
+  const data = JSON.parse(
+    '{"query":"' + WATERFALL_MEDIA_QUERY + '","videos":[{"id":"' + title + '",' +
+    '"source":"youtube","provider":"YouTube Data API","title":"' + title + '",' +
+    '"summary":"OpenAI Codex discussion","url":"https://example.com/' + title + '",' +
+    '"thumbnail":"","publishedAt":"2026-08-06T00:00:00Z","duration":"2:00",' +
+    '"status":"success","rows":[]}' + additionalVideo + '],"posts":[],"sourceStatuses":[{' +
+    '"source":"youtube","label":"YouTube","status":"success","message":"' +
+    (additionalTitle.length === 0 ? '1 video' : '2 videos') + '",' +
+    '"count":' + (additionalTitle.length === 0 ? '1' : '2') + '}' +
+    (includeNeedsAuth ? ',{"source":"x","label":"X","status":"needs_auth",' +
+      '"message":"X authorization required","count":0}' : '') + '],"summary":"' +
+    (additionalTitle.length === 0 ? '1 video' : '2 videos') + ', 0 discussions"}'
+  ) as Object;
+  return {
+    toolId: 'media.aggregate.search',
+    outputSchema: 'aggregateSearch',
+    status,
+    sources: [{
+      provider: 'YouTube Data API',
+      backend: 'local_adapter',
+      operation: 'search',
+      fetchedAt: '2026-08-06T00:00:00Z'
+    }],
+    data,
+    warnings: status === 'error' ? ['YouTube unavailable'] : []
+  };
+}
+
+function waterfallMediaErrorResult(): DataResult {
+  return {
+    toolId: 'media.aggregate.search',
+    outputSchema: 'aggregateSearch',
+    status: 'error',
+    sources: [{
+      provider: 'YouTube Data API',
+      backend: 'local_adapter',
+      operation: 'search',
+      fetchedAt: '2026-08-06T00:00:00Z'
+    }],
+    data: JSON.parse('{"query":"' + WATERFALL_MEDIA_QUERY + '","videos":[],"posts":[],' +
+      '"sourceStatuses":[{"source":"youtube","label":"YouTube","status":"error",' +
+      '"message":"provider unavailable","count":0}],"summary":"0 videos, 0 discussions"}') as Object,
+    warnings: ['YouTube unavailable']
   };
 }
 
@@ -1964,8 +2035,10 @@ export default function multiAgentCanaryRuntimeTest() {
       options.structuredToolCall = async (
         toolId: string,
         prompt: string,
-        args: Object
+        args: Object,
+        onPartial?: (result: DataResult) => void
       ): Promise<DataResult> => {
+        expect(onPartial === undefined).assertTrue();
         calls.push({ toolId, prompt, args });
         return c09SocialFeedResult();
       };
@@ -2255,6 +2328,80 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(calls[0].toolId).assertEqual('gmail.mail.search');
       expect((calls[0].args as Record<string, Object | string | number | boolean>)['query'])
         .assertEqual(C06_QUERY);
+      runtime.dispose();
+    });
+
+    it('streams media partials through the structured executor before final DataResult', 0, async () => {
+      const bus = new TrackingBus();
+      const surfaces: A2uiSurfaceState[] = [];
+      const finalGate = new TestGate();
+      const providerStatuses: string[] = [];
+      const options = canaryOptions(
+        new QueueModel([WATERFALL_MEDIA_DECISION, WATERFALL_MEDIA_DONE]),
+        new CanaryHotelExecutor(),
+        new RecordingOpener(),
+        surfaces,
+        [],
+        bus
+      );
+      options.dataExecutor = undefined;
+      options.structuredToolCall = async (
+        toolId: string,
+        prompt: string,
+        args: Object,
+        onPartial?: (result: DataResult) => void
+      ): Promise<DataResult> => {
+        expect(toolId).assertEqual('media.aggregate.search');
+        expect(prompt).assertEqual('search OpenAI Codex media');
+        expect((args as Record<string, Object | string>)['query']).assertEqual(WATERFALL_MEDIA_QUERY);
+        if (onPartial !== undefined) {
+          const publish = (result: DataResult): void => {
+            providerStatuses.push(result.status);
+            onPartial(result);
+          };
+          publish(waterfallMediaErrorResult());
+          publish(waterfallMediaResult('partial', 'first-source'));
+          await Promise.resolve();
+          publish(waterfallMediaResult('partial', 'late-source', 'first-source', true));
+        }
+        await finalGate.promise;
+        return waterfallMediaResult('success', 'final-result');
+      };
+      const runtime = new MultiAgentCanaryRuntime(options);
+
+      const pending = runtime.submit(WATERFALL_MEDIA_QUERY, { text: '' });
+      await flush();
+
+      try {
+        const partialMessages = bus.messages.filter((message: AgentMessage): boolean =>
+          message.type === AgentMessageType.TASK_RESULT_DATA_PARTIAL &&
+            (message.payload as DataResult).status === 'partial'
+        );
+        expect(providerStatuses.join(',')).assertEqual('error,partial,partial');
+        expect(partialMessages.length).assertEqual(2);
+        expect(surfaces.length).assertLarger(1);
+        expect(surfaces[1].surfaceId).assertEqual(surfaces[0].surfaceId);
+        expect(surfaces[surfaces.length - 1].surfaceId).assertEqual(surfaces[0].surfaceId);
+        expect(surfaces[surfaces.length - 1].dataModelJson.indexOf('first-source')).assertLarger(-1);
+        expect(surfaces[surfaces.length - 1].dataModelJson.indexOf('late-source')).assertLarger(-1);
+        expect(surfaces[surfaces.length - 1].dataModelJson.indexOf('needs_auth')).assertLarger(-1);
+      } finally {
+        finalGate.open();
+      }
+      const outcome = await pending as MultiAgentSettledOutcome;
+      expect(outcome.status).assertEqual('success');
+      let firstPartialIndex: number = -1;
+      let finalResultIndex: number = -1;
+      bus.messages.forEach((message: AgentMessage, index: number): void => {
+        if (firstPartialIndex < 0 && message.type === AgentMessageType.TASK_RESULT_DATA_PARTIAL) {
+          firstPartialIndex = index;
+        }
+        if (finalResultIndex < 0 && message.type === AgentMessageType.TASK_RESULT_DATA) {
+          finalResultIndex = index;
+        }
+      });
+      expect(firstPartialIndex).assertLarger(-1);
+      expect(finalResultIndex).assertLarger(firstPartialIndex);
       runtime.dispose();
     });
 
