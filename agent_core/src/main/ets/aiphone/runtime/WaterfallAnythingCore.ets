@@ -532,6 +532,15 @@ export function mergeWaterfallBatch(
   sourceState: WaterfallSourceState,
   nowMs: number
 ): WaterfallFeedUpdate {
+  return finalizeUpdate(mergeWaterfallBatchState(state, incoming, sourceState, nowMs));
+}
+
+function mergeWaterfallBatchState(
+  state: WaterfallFeedState,
+  incoming: WaterfallCandidate[],
+  sourceState: WaterfallSourceState,
+  nowMs: number
+): WaterfallFeedState {
   const next = copyState(state);
   const received = copySourceState(sourceState);
   received.inFlight = false;
@@ -544,6 +553,26 @@ export function mergeWaterfallBatch(
     next.tail = sortTail(next, incoming, nowMs);
     refreshStableWindow(next);
   }
+  return next;
+}
+
+export function mergeWaterfallFeedSnapshot(
+  state: WaterfallFeedState,
+  incoming: WaterfallFeedState,
+  nowMs: number
+): WaterfallFeedUpdate {
+  let next = copyState(state);
+  const candidates = rankedToCandidates(
+    (incoming.current === null ? [] : [incoming.current]).concat(incoming.stable, incoming.tail)
+  );
+  incoming.sources.forEach((source: WaterfallSourceState): void => {
+    next = mergeWaterfallBatchState(
+      next,
+      candidates.filter((candidate: WaterfallCandidate): boolean => candidate.source === source.source),
+      source,
+      nowMs
+    );
+  });
   return finalizeUpdate(next);
 }
 

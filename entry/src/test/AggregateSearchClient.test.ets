@@ -29,6 +29,7 @@ import {
   zhihuPostsFromSearchPayload,
   zhihuSearchUrl,
   mergeWaterfallBatch,
+  mergeWaterfallFeedSnapshot,
   rankWaterfallCandidates
 } from '@loop/agent-core';
 
@@ -487,6 +488,37 @@ export default function aggregateSearchClientTest() {
       expect(update.state.current?.id).assertEqual('x-next');
       expect(update.state.stable.length).assertEqual(0);
       expect(update.state.tail.length).assertEqual(0);
+    });
+
+    it('keeps an explicit empty source selection across a late snapshot', 0, () => {
+      const incoming = feedState(
+        rankedWaterfallCandidate('youtube-current', 'youtube', 'OpenAI Codex YouTube', 0),
+        [rankedWaterfallCandidate('youtube-next', 'youtube', 'OpenAI Codex YouTube next', 1)],
+        [],
+        [sourceState('youtube', null)]
+      );
+      const disabled = applyWaterfallSourceSelection(incoming, [], WATERFALL_NOW_MS).state;
+      const late = mergeWaterfallFeedSnapshot(disabled, incoming, WATERFALL_NOW_MS);
+
+      expect(late.state.enabledSources.length).assertEqual(0);
+      expect(late.state.current).assertEqual(null);
+      expect(late.state.stable.length).assertEqual(0);
+      expect(late.state.tail.length).assertEqual(0);
+    });
+
+    it('restores unseen candidates only after the user reopens a source', 0, () => {
+      const incoming = feedState(
+        rankedWaterfallCandidate('youtube-current', 'youtube', 'OpenAI Codex YouTube', 0),
+        [rankedWaterfallCandidate('youtube-next', 'youtube', 'OpenAI Codex YouTube next', 1)],
+        [],
+        [sourceState('youtube', null)]
+      );
+      const disabled = applyWaterfallSourceSelection(incoming, [], WATERFALL_NOW_MS).state;
+      const reopened = applyWaterfallSourceSelection(disabled, ['youtube'], WATERFALL_NOW_MS).state;
+      const restored = mergeWaterfallFeedSnapshot(reopened, incoming, WATERFALL_NOW_MS);
+
+      expect(restored.state.enabledSources.join(',')).assertEqual('youtube');
+      expect(restored.state.current?.id).assertEqual('youtube-next');
     });
 
     it('requests at most five items when inventory reaches three', 0, () => {
