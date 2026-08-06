@@ -2522,6 +2522,12 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('推荐理由')).assertLarger(-1);
       expect(html.indexOf('window.__aiphoneApplyWaterfallUpdate')).assertLarger(-1);
       expect(html.indexOf('scroll-snap-type: y mandatory')).assertLarger(-1);
+      expect(html.indexOf('min-height: 44px')).assertLarger(-1);
+      expect(html.indexOf('100dvh')).assertLarger(-1);
+      expect(html.indexOf('prefers-reduced-motion: reduce')).assertLarger(-1);
+      expect(html.indexOf('data-waterfall-enter')).assertLarger(-1);
+      expect(html.indexOf('data-waterfall-preferences')).assertLarger(-1);
+      expect(html.indexOf('data-waterfall-reason')).assertLarger(-1);
       expect(html.indexOf('聚合搜索')).assertLarger(-1);
       expect(html.indexOf('aggregate-filter')).assertLarger(-1);
       expect(html.indexOf('Codex demo')).assertLarger(-1);
