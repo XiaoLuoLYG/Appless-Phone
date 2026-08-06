@@ -2417,6 +2417,52 @@ export default function multiAgentCanaryRuntimeTest() {
       runtime.dispose();
     });
 
+    it('settles a direct media task error after its streamed partial', 0, async () => {
+      const bus = new TrackingBus();
+      const surfaces: A2uiSurfaceState[] = [];
+      const options = canaryOptions(
+        new QueueModel([WATERFALL_MEDIA_DECISION, WATERFALL_MEDIA_DONE]),
+        new CanaryHotelExecutor(),
+        new RecordingOpener(),
+        surfaces,
+        [],
+        bus
+      );
+      options.dataPlanner = undefined;
+      options.dataExecutor = undefined;
+      options.structuredToolCall = async (
+        _toolId: string,
+        _prompt: string,
+        _args: Object,
+        onPartial?: (result: DataResult) => void
+      ): Promise<DataResult> => {
+        expect(onPartial === undefined).assertFalse();
+        if (onPartial !== undefined) {
+          onPartial(waterfallMediaResult('partial', 'first-source'));
+        }
+        throw new Error('provider failed after partial');
+      };
+      const runtime = new MultiAgentCanaryRuntime(options);
+
+      const outcome = await runtime.submit(
+        WATERFALL_MEDIA_QUERY,
+        { text: '' }
+      ) as MultiAgentSettledOutcome;
+      const uiErrors = bus.messages.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TASK_RESULT_UI &&
+          (message.payload as UiRenderResultPayload).state === 'error'
+      );
+
+      expect(bus.count(AgentMessageType.TASK_RESULT_DATA_PARTIAL)).assertEqual(1);
+      expect(bus.count(AgentMessageType.TASK_ERROR)).assertEqual(1);
+      expect(uiErrors.length).assertEqual(1);
+      expect(bus.count(AgentMessageType.TURN_CANCEL)).assertEqual(0);
+      expect(outcome.status).assertEqual('error');
+      expect(outcome.message).assertEqual('Multi-agent UI rendering failed.');
+      expect(outcome.surfaceId.length).assertLarger(0);
+      runtime.dispose();
+    });
+
     it('rejects malformed hotel destination date year guests and origin before task publication', 0, async () => {
       const mutations: string[] = [
         SEARCH_INPUT.replace('"place":"深圳"', '"place":""'),

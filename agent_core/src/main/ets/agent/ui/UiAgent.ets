@@ -744,7 +744,7 @@ export class UiAgent extends MessageDrivenAgent {
   private rememberPendingError(context: UiTurnContext, taskId: string, message: string): void {
     const current = context.pendingDataByTaskId.get(taskId);
     if (current !== undefined &&
-      (current.data !== undefined || current.errorMessage !== undefined)) {
+      (current.terminalDataReceived || current.errorMessage !== undefined)) {
       return;
     }
     this.rememberPendingEntry(context, taskId, {
