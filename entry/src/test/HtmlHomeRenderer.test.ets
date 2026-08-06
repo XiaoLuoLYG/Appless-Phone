@@ -2540,8 +2540,9 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('<div id="waterfall-track" class="waterfall-track"></div>')).assertLarger(-1);
       expect(html.indexOf('result 3')).assertEqual(-1);
 
-      const replenishingHtml = renderHtmlHomeDocument(doc, true);
-      expect(replenishingHtml.indexOf('正在补充内容')).assertLarger(-1);
+      const busyHtml = renderHtmlHomeDocument(doc, true);
+      expect(busyHtml.indexOf('正在更新')).assertLarger(-1);
+      expect(busyHtml.indexOf('正在补充内容')).assertEqual(-1);
     });
 
     it('does not exhaust an explicit empty source selection', 0, () => {
@@ -2568,7 +2569,7 @@ export default function htmlHomeRendererTest() {
             inFlight: true, reservedCount: 0, message: '正在搜索' }
         ]
       };
-      const payload = buildWaterfallHomePayload(doc, false);
+      const payload = buildWaterfallHomePayload(doc, true);
 
       expect(payload?.candidates[0].id).assertEqual('post-3');
       expect(payload?.replenishing).assertFalse();

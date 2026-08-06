@@ -974,7 +974,7 @@ export function buildWaterfallHomePayload(
     state.enabledSources.indexOf(candidate.source) >= 0);
   const relevantSources = state.sources.filter((source: WaterfallSourceState): boolean =>
     state.enabledSources.indexOf(source.source) >= 0);
-  const replenishing = isBusy || relevantSources.some((source: WaterfallSourceState): boolean =>
+  const replenishing = relevantSources.some((source: WaterfallSourceState): boolean =>
     source.inFlight || source.phase === 'loading');
   const exhausted = activeCandidates.length === 0 && state.enabledSources.length > 0 &&
     relevantSources.length === state.enabledSources.length && relevantSources.every((source: WaterfallSourceState): boolean =>
