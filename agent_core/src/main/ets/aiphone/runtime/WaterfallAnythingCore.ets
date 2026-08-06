@@ -405,6 +405,40 @@ function filterEnabled(items: WaterfallRankedCandidate[], enabledSources: string
   return items.filter((item: WaterfallRankedCandidate): boolean => enabledSources.indexOf(item.source) >= 0);
 }
 
+function rankUnshownCandidates(
+  state: WaterfallFeedState,
+  candidates: WaterfallCandidate[],
+  shownIds: string[],
+  stableIds: string[],
+  nowMs: number
+): WaterfallRankedCandidate[] {
+  const enabled = rankWaterfallCandidates({
+    query: state.query,
+    candidates: candidates,
+    enabledSources: state.enabledSources,
+    shownIds: shownIds,
+    stableIds: stableIds,
+    preferenceDescription: state.preferenceDescription
+  }, nowMs);
+  const disabledSources: string[] = [];
+  candidates.forEach((candidate: WaterfallCandidate): void => {
+    if (state.enabledSources.indexOf(candidate.source) < 0 && disabledSources.indexOf(candidate.source) < 0) {
+      disabledSources.push(candidate.source);
+    }
+  });
+  if (disabledSources.length === 0) {
+    return enabled;
+  }
+  return enabled.concat(rankWaterfallCandidates({
+    query: state.query,
+    candidates: candidates,
+    enabledSources: disabledSources,
+    shownIds: shownIds,
+    stableIds: stableIds,
+    preferenceDescription: state.preferenceDescription
+  }, nowMs));
+}
+
 function sourceFor(sources: WaterfallSourceState[], source: string): WaterfallSourceState | null {
   for (let index = 0; index < sources.length; index++) {
     if (sources[index].source === source) {
@@ -430,16 +464,34 @@ function isTerminal(source: WaterfallSourceState): boolean {
 
 function refreshStableWindow(state: WaterfallFeedState): void {
   while (state.stable.length < WATERFALL_STABLE_LIMIT && state.tail.length > 0) {
-    state.stable.push(state.tail.shift() as WaterfallRankedCandidate);
+    let nextIndex = -1;
+    for (let index = 0; index < state.tail.length; index++) {
+      if (state.enabledSources.indexOf(state.tail[index].source) >= 0) {
+        nextIndex = index;
+        break;
+      }
+    }
+    if (nextIndex < 0) {
+      break;
+    }
+    state.stable.push(state.tail.splice(nextIndex, 1)[0]);
   }
   if (state.stable.length > WATERFALL_STABLE_LIMIT) {
-    state.tail = state.stable.splice(WATERFALL_STABLE_LIMIT);
+    state.tail = state.stable.splice(WATERFALL_STABLE_LIMIT).concat(state.tail);
   }
+}
+
+function refreshCurrentAndStable(state: WaterfallFeedState): void {
+  refreshStableWindow(state);
+  if (state.current === null && state.stable.length > 0) {
+    state.current = state.stable.shift() as WaterfallRankedCandidate;
+  }
+  refreshStableWindow(state);
 }
 
 function planWaterfallLoads(state: WaterfallFeedState): WaterfallLoadRequest[] {
   const requests: WaterfallLoadRequest[] = [];
-  const inventory = state.stable.length + state.tail.length;
+  const inventory = filterEnabled(state.stable.concat(state.tail), state.enabledSources).length;
   if (inventory > WATERFALL_LOW_WATERMARK) {
     return requests;
   }
@@ -514,31 +566,14 @@ function sortTail(state: WaterfallFeedState, incoming: WaterfallCandidate[], now
   const candidates: WaterfallCandidate[] = rankedToCandidates(occupied)
     .concat(rankedToCandidates(state.tail))
     .concat(filteredIncoming);
-  return rankWaterfallCandidates({
-    query: state.query,
-    candidates: candidates,
-    enabledSources: state.enabledSources,
-    shownIds: fixedIds,
-    stableIds: idsOf(state.stable),
-    preferenceDescription: state.preferenceDescription
-  }, nowMs);
+  return rankUnshownCandidates(state, candidates, fixedIds, idsOf(state.stable), nowMs);
 }
 
 function placeInitialBatch(state: WaterfallFeedState, incoming: WaterfallCandidate[], nowMs: number): void {
-  const ranked = rankWaterfallCandidates({
-    query: state.query,
-    candidates: incoming,
-    enabledSources: state.enabledSources,
-    shownIds: idsOf(state.shown),
-    stableIds: [],
-    preferenceDescription: state.preferenceDescription
-  }, nowMs);
-  if (ranked.length === 0) {
-    return;
-  }
-  state.current = ranked.shift() as WaterfallRankedCandidate;
-  state.stable = ranked.splice(0, WATERFALL_STABLE_LIMIT);
-  state.tail = ranked;
+  const candidates = rankedToCandidates(state.stable).concat(rankedToCandidates(state.tail)).concat(incoming);
+  state.stable = [];
+  state.tail = rankUnshownCandidates(state, candidates, idsOf(state.shown), [], nowMs);
+  refreshCurrentAndStable(state);
 }
 
 export function mergeWaterfallBatch(
@@ -600,12 +635,7 @@ export function advanceWaterfallFeed(
     next.shown.push(next.current);
   }
   next.current = null;
-  if (next.stable.length > 0) {
-    next.current = next.stable.shift() as WaterfallRankedCandidate;
-  } else if (next.tail.length > 0) {
-    next.current = next.tail.shift() as WaterfallRankedCandidate;
-  }
-  refreshStableWindow(next);
+  refreshCurrentAndStable(next);
   return finalizeUpdate(next);
 }
 
@@ -620,22 +650,15 @@ export function applyWaterfallSourceSelection(
     next.shown.push(next.current);
     next.current = null;
   }
-  next.stable = filterEnabled(next.stable, enabledSources);
-  next.tail = filterEnabled(next.tail, enabledSources);
   const unshown = rankedToCandidates(next.stable).concat(rankedToCandidates(next.tail));
-  const ranked = rankWaterfallCandidates({
-    query: next.query,
-    candidates: unshown,
-    enabledSources: enabledSources,
-    shownIds: idsOf(next.shown).concat(next.current === null ? [] : [next.current.id]),
-    stableIds: [],
-    preferenceDescription: next.preferenceDescription
-  }, nowMs);
-  next.stable = ranked.splice(0, WATERFALL_STABLE_LIMIT);
-  next.tail = ranked;
-  if (next.current === null && next.stable.length > 0) {
-    next.current = next.stable.shift() as WaterfallRankedCandidate;
-  }
-  refreshStableWindow(next);
+  next.stable = [];
+  next.tail = rankUnshownCandidates(
+    next,
+    unshown,
+    idsOf(next.shown).concat(next.current === null ? [] : [next.current.id]),
+    [],
+    nowMs
+  );
+  refreshCurrentAndStable(next);
   return finalizeUpdate(next);
 }
