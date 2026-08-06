@@ -2065,6 +2065,9 @@ function requiredScrolledMarkersForQuery(query, expectedToolId) {
   if (expectedToolId === 'media.aggregate.search') {
     return ['聚合搜索', '视频', '讨论', 'YouTube', 'B 站', 'X', 'HN', 'Reddit'];
   }
+  if (expectedToolId === 'movie.open') {
+    return ['电影 Anything OS', '明星正在发生'];
+  }
   return [];
 }
 

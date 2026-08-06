@@ -49,12 +49,12 @@
       inset: 0;
       height: 100%;
       object-fit: cover;
-      object-position: center top;
-      opacity: .88;
+      object-position: center 16%;
+      opacity: .92;
     }
     .hero-shade {
       position: absolute;
-      inset: 42% 0 0;
+      inset: 54% 0 0;
       background: rgba(21, 21, 19, .94);
     }
     .hero-copy {
@@ -140,6 +140,23 @@
     }
     .video-frame { position: relative; aspect-ratio: 16 / 9; background: #0e0e0d; }
     .video-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+    .video-poster { position: absolute; inset: 0; width: 100%; padding: 0; border: 0; background: #0e0e0d; }
+    .video-poster img { height: 100%; object-fit: cover; opacity: .82; }
+    .play {
+      position: absolute;
+      inset: 50% auto auto 50%;
+      width: 62px;
+      height: 62px;
+      display: grid;
+      place-items: center;
+      transform: translate(-50%, -50%);
+      border-radius: 50%;
+      background: var(--accent);
+      color: #1b1513;
+      font-size: 24px;
+      font-weight: 900;
+      box-shadow: 0 12px 28px rgba(0, 0, 0, .35);
+    }
     .video-info { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px; }
     .video-info strong { display: block; font-size: 14px; }
     .video-info span { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
@@ -275,7 +292,7 @@
 <body>
   <main class="shell">
     <header class="hero" id="today">
-      <img class="hero-image" src="https://spidermanbrandnewday.movie/images/share.jpg" alt="Spider-Man Brand New Day 官方主视觉">
+      <img class="hero-image" src="https://p0.pipi.cn/mediaplus/friday_image_fe/e42958b7f8777e82bfd7e46fd331949d6e371.jpeg?imageView2/1/w/768/h/1080=" alt="Spider-Man Brand New Day 院线海报">
       <div class="hero-shade"></div>
       <div class="hero-copy">
         <div class="eyebrow">Now showing in China</div>
@@ -307,11 +324,11 @@
         <p class="section-note">来自电影官方与 Sony Pictures 频道</p>
       </div>
       <div class="video-shell">
-        <div class="video-frame">
-          <iframe id="video-player" title="Spider-Man Brand New Day 官方预告"
-            src="https://www.youtube.com/embed/8TZMtslA3UY?playsinline=1&amp;rel=0"
-            allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture"
-            allowfullscreen></iframe>
+        <div class="video-frame" id="video-player">
+          <button class="video-poster" data-video-id="8TZMtslA3UY" data-video-title="Official Trailer" data-video-channel="Spider-Man 官方频道 · 长视频" aria-label="播放 Spider-Man 官方预告">
+            <img src="https://spidermanbrandnewday.movie/images/share.jpg" alt="Spider-Man Brand New Day 官方预告主视觉">
+            <span class="play">▶</span>
+          </button>
         </div>
         <div class="video-info">
           <div><strong id="video-title">Official Trailer</strong><span id="video-source">Spider-Man 官方频道 · 长视频</span></div>
@@ -321,15 +338,15 @@
       </div>
       <div class="shorts" aria-label="官方短视频">
         <button class="short-card" data-video-id="wMs315uHMTQ" data-video-title="Official Trailer Short" data-video-channel="Sony Pictures Releasing UK · 短视频">
-          <img src="https://i.ytimg.com/vi/wMs315uHMTQ/maxresdefault.jpg" alt="Spider-Man 官方短预告">
+          <img src="https://spidermanbrandnewday.movie/images/share.jpg" alt="Spider-Man 官方短预告主视觉">
           <span class="short-copy"><b>60 秒看正式预告</b><span>Sony Pictures UK</span></span>
         </button>
         <button class="short-card" data-video-id="Vsn7sVxCq1M" data-video-title="Tom Holland New Suit Reveal" data-video-channel="Sony Pictures Entertainment · 短视频">
-          <img src="https://i.ytimg.com/vi/Vsn7sVxCq1M/maxresdefault.jpg" alt="Tom Holland 新战衣公开视频">
+          <img src="https://p0.pipi.cn/mediaplus/friday_image_fe/e42958b7f8777e82bfd7e46fd331949d6e371.jpeg?imageView2/1/w/512/h/720=" alt="Tom Holland 新战衣公开视频关联海报">
           <span class="short-copy"><b>新战衣首次公开</b><span>Sony Pictures</span></span>
         </button>
         <button class="short-card" data-video-id="3gAlCLVpePk" data-video-title="New Trailer 4K" data-video-channel="Spider-Man 官方频道 · 长视频">
-          <img src="https://i.ytimg.com/vi/3gAlCLVpePk/maxresdefault.jpg" alt="Spider-Man New Trailer 4K">
+          <img src="https://spidermanbrandnewday.movie/images/share.jpg" alt="Spider-Man New Trailer 4K 主视觉">
           <span class="short-copy"><b>New Trailer 4K</b><span>Spider-Man</span></span>
         </button>
       </div>
@@ -494,7 +511,8 @@
         }
         var videoId = target.getAttribute('data-video-id');
         if (videoId) {
-          player.src = 'https://www.youtube.com/embed/' + videoId + '?playsinline=1&rel=0';
+          player.innerHTML = '<iframe title="官方电影视频" src="https://www.youtube.com/embed/' + videoId +
+            '?playsinline=1&rel=0&autoplay=1" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>';
           title.textContent = target.getAttribute('data-video-title') || 'Official Video';
           source.textContent = target.getAttribute('data-video-channel') || '官方频道';
           sourceLink.setAttribute('data-open-url', 'https://www.youtube.com/watch?v=' + videoId);
