@@ -161,7 +161,13 @@ h1, h2, h3, p { margin: 0; }
   background: var(--notice);
   box-shadow: 0 0 0 3px rgba(141, 61, 61, 0.14);
 }
-.aggregate-status-card p {
+.aggregate-status-card .aggregate-status-message {
+
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  max-height: 3.7em;
+  overflow: hidden;
   margin-top: 6px;
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.72);
@@ -551,7 +557,7 @@ h1, h2, h3, p { margin: 0; }
 }
 .aggregate-shell {
   width: min(100%, 840px);
-  padding: 14px 14px 40px;
+  padding: 14px 14px calc(96px + env(safe-area-inset-bottom));
 }
 .aggregate-hero {
   min-height: 180px;
@@ -567,7 +573,7 @@ h1, h2, h3, p { margin: 0; }
 .aggregate-filter,
 .aggregate-post-card summary,
 .aggregate-link-preview {
-  transition: transform 140ms ease, background-color 140ms ease, border-color 140ms ease;
+  transition: transform 150ms cubic-bezier(0.23, 1, 0.32, 1), opacity 150ms ease-out;
 }
 .aggregate-filter:active,
 .aggregate-post-card summary:active,
@@ -635,12 +641,19 @@ const AGGREGATE_JS: string = `
 `;
 
 const WATERFALL_CSS: string = `
-.waterfall-entry { display: flex; margin: 18px 0 10px; }
+.waterfall-entry,
+.waterfall-entry-floating {
+  position: fixed; z-index: 8; left: 50%; bottom: calc(14px + env(safe-area-inset-bottom));
+  display: flex; width: min(calc(100% - 28px), 420px); margin: 0;
+  pointer-events: none; transform: translateX(-50%);
+}
 .waterfall-entry button {
-  display: flex; width: 100%; min-height: 52px; align-items: center; justify-content: space-between;
-  border: 1px solid var(--line-strong); border-radius: 16px; background: var(--panel);
-  color: var(--ink); padding: 0 16px; font-size: 15px; font-weight: 760; cursor: pointer;
-  transition: transform 140ms ease-out, opacity 140ms ease-out;
+  display: inline-flex; width: 100%; min-height: 48px; align-items: center; justify-content: center;
+  border: 1px solid rgba(33, 27, 23, 0.2); border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92); box-shadow: 0 12px 30px rgba(44, 34, 26, 0.16);
+  color: var(--ink); padding: 0 18px; font-size: 14px; font-weight: 780; cursor: pointer;
+  pointer-events: auto; backdrop-filter: blur(16px);
+  transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), opacity 160ms ease-out;
 }
 .waterfall-overlay { position: fixed; inset: 0; z-index: 20; display: none; overflow: hidden; background: var(--paper); }
 .waterfall-overlay.active { display: block; }
@@ -673,13 +686,28 @@ const WATERFALL_CSS: string = `
 .waterfall-toolbar {
   position: fixed; z-index: 2; top: env(safe-area-inset-top); left: 14px; right: 14px;
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  padding-top: 10px;
+  padding-top: 10px; pointer-events: none;
 }
 .waterfall-toolbar button, .waterfall-preferences button {
   display: inline-flex; min-height: 44px; align-items: center; justify-content: center;
   border: 1px solid var(--line); border-radius: 14px; background: var(--panel);
   color: var(--ink); padding: 0 12px; font-size: 14px; font-weight: 720; cursor: pointer;
-  transition: transform 140ms ease-out, opacity 140ms ease-out;
+  pointer-events: auto;
+  transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), opacity 160ms ease-out;
+}
+.waterfall-toolbar-primary {
+  min-width: 72px; border-color: var(--ink) !important; background: var(--ink) !important;
+  color: var(--paper) !important; font-weight: 780 !important;
+}
+.waterfall-toolbar-tools {
+  display: inline-flex; align-items: center; gap: 4px; padding: 4px;
+  border: 1px solid var(--line); border-radius: 999px; background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 8px 20px rgba(44, 34, 26, 0.1); backdrop-filter: blur(14px);
+  pointer-events: auto;
+}
+.waterfall-toolbar-secondary {
+  min-width: 44px; border-color: transparent !important; background: transparent !important;
+  padding: 0 10px !important; font-size: 13px !important;
 }
 .waterfall-toolbar button:active, .waterfall-entry button:active, .waterfall-preferences button:active {
   transform: scale(0.98); opacity: 0.9;
@@ -690,7 +718,8 @@ const WATERFALL_CSS: string = `
   outline: 2px solid var(--accent); outline-offset: 3px;
 }
 .waterfall-reason-panel {
-  position: fixed; z-index: 2; top: calc(66px + env(safe-area-inset-top)); left: 16px; right: 16px;
+  position: fixed; z-index: 2; top: calc(66px + env(safe-area-inset-top)); left: auto; right: 14px;
+  width: min(calc(100% - 28px), 360px);
   display: block; padding: 13px 14px; border: 1px solid var(--line); border-radius: 16px;
   background: var(--panel-strong); box-shadow: var(--shadow); color: var(--accent); font-size: 14px;
   line-height: 1.45; opacity: 0; pointer-events: none; transform: translateY(-8px);
@@ -707,7 +736,7 @@ const WATERFALL_CSS: string = `
 .waterfall-preferences.active { opacity: 1; pointer-events: auto; transform: translateY(0); visibility: visible; }
 .waterfall-preferences .waterfall-toolbar {
   position: static; inset: auto; display: grid; grid-template-columns: auto 1fr auto; gap: 8px;
-  align-items: center; padding: 0; margin: 0 0 14px;
+  align-items: center; padding: 0; margin: 0 0 14px; pointer-events: auto;
 }
 .waterfall-preferences .waterfall-toolbar b { font-size: 17px; text-align: center; }
 .waterfall-preferences label {
@@ -1008,7 +1037,7 @@ function renderAggregateMainContent(
     '<p>视频和讨论一起看', isBusy ? ' · 正在更新' : '', '</p>',
     '</header>',
     statuses.length > 0 ? '<section class="aggregate-section aggregate-source-overview"><div class="aggregate-section-head"><h2>来源</h2><div class="aggregate-meta">状态摘要</div></div><div class="aggregate-status-list">' + statuses.map(renderAggregateBlock).join('') + '</div></section>' : '',
-    '<div class="waterfall-entry">', entryAvailable ? '<button type="button" data-waterfall-enter>进入发现流</button>' : '', '</div>',
+    '<div class="waterfall-entry waterfall-entry-floating">', entryAvailable ? '<button type="button" class="waterfall-entry-action" aria-label="进入发现流" data-waterfall-enter>进入发现流</button>' : '', '</div>',
     renderFilterRail(),
     '<div id="aggregate-filter-empty" hidden>没有匹配结果</div>',
     '<div class="aggregate-grid">',
@@ -1037,7 +1066,7 @@ export function renderAggregateSearchHomeDocument(document: HtmlHomeDocument, is
     '<style>', AGGREGATE_CSS, WATERFALL_CSS, '</style></head><body>',
     '<main class="aggregate-shell">',
     waterfall === null ? renderAggregateMainContent(document, isBusy, false) : waterfall.aggregateHtml,
-    '</main>', waterfall !== null ? '<section id="waterfall-discovery" class="waterfall-overlay"><div class="waterfall-toolbar"><button type="button" data-waterfall-back>返回</button><button type="button" data-waterfall-preferences>来源偏好</button><button type="button" data-waterfall-reason>推荐理由</button></div><div id="waterfall-reason-panel" class="waterfall-reason-panel" hidden></div><div id="waterfall-track" class="waterfall-track">' + waterfallStatus + '</div><div id="waterfall-preferences" class="waterfall-preferences"></div></section>' : '',
+    '</main>', waterfall !== null ? '<section id="waterfall-discovery" class="waterfall-overlay"><div class="waterfall-toolbar"><button type="button" class="waterfall-toolbar-primary" aria-label="返回聚合搜索" data-waterfall-back>返回</button><div class="waterfall-toolbar-tools"><button type="button" class="waterfall-toolbar-secondary" aria-label="来源偏好" data-waterfall-preferences>来源</button><button type="button" class="waterfall-toolbar-secondary" aria-label="推荐理由" data-waterfall-reason>理由</button></div></div><div id="waterfall-reason-panel" class="waterfall-reason-panel" hidden></div><div id="waterfall-track" class="waterfall-track">' + waterfallStatus + '</div><div id="waterfall-preferences" class="waterfall-preferences"></div></section>' : '',
     '<script>', AGGREGATE_JS, waterfall !== null ? 'window.__aiphoneWaterfallInitial=' + waterfallJson + ';' + WATERFALL_JS : '', '</script></body></html>'
   ].join('');
 }
@@ -1091,13 +1120,27 @@ function renderPostBlock(block: HtmlHomeBlock): string {
 }
 
 function renderStatusBlock(block: HtmlHomeBlock): string {
+  const fullMessage = text(block.subtitle);
+  const compactMessage = compactStatusMessage(fullMessage);
   return [
     '<details class="aggregate-card aggregate-status-card" data-kind="', escapeHtml(block.kind), '" data-source="', escapeAttribute(sourceCssValue(text(block.source))), '" data-status="', escapeAttribute(text(block.status)), '">',
     '<summary aria-label="', escapeAttribute(block.title), '">', sourceIconMarkup(text(block.source)), '<span class="aggregate-status-dot"></span></summary>',
-    text(block.subtitle).length > 0 ? '<p>' + escapeHtml(text(block.subtitle)) + '</p>' : '',
+    fullMessage.length > 0 ? '<p class="aggregate-status-message" aria-label="' + escapeAttribute(fullMessage) + '" title="' + escapeAttribute(fullMessage) + '" data-status-detail="' + escapeAttribute(fullMessage) + '">' + escapeHtml(compactMessage) + '</p>' : '',
     renderRows(block),
     '</details>'
   ].join('');
+}
+
+function compactStatusMessage(value: string): string {
+  const clean = value.replace(/\s+/g, ' ').trim();
+  if (clean.length <= 120) {
+    return clean;
+  }
+  const boundary = clean.search(/[。！？.!?]/);
+  if (boundary >= 0 && boundary < 120) {
+    return clean.slice(0, boundary + 1);
+  }
+  return clean.slice(0, 116).replace(/\s+$/, '') + '…';
 }
 
 function renderCardTop(block: HtmlHomeBlock): string {

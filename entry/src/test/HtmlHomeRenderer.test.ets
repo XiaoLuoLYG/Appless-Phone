@@ -2538,8 +2538,13 @@ export default function htmlHomeRendererTest() {
       expect(payload?.exhausted).assertFalse();
       expect(html.indexOf('"enabledSources":["youtube","hackernews"]')).assertLarger(-1);
       expect(html.indexOf('进入发现流')).assertLarger(-1);
+      expect(html.indexOf('waterfall-entry-floating')).assertLarger(-1);
       expect(html.indexOf('来源偏好')).assertLarger(-1);
       expect(html.indexOf('推荐理由')).assertLarger(-1);
+      expect(html.indexOf('waterfall-toolbar-primary')).assertLarger(-1);
+      expect(html.indexOf('waterfall-toolbar-secondary')).assertLarger(-1);
+      expect(html.indexOf('aria-label="来源偏好"')).assertLarger(-1);
+      expect(html.indexOf('aria-label="推荐理由"')).assertLarger(-1);
       expect(html.indexOf('window.__aiphoneApplyWaterfallUpdate')).assertLarger(-1);
       expect(html.indexOf('scroll-snap-type: y mandatory')).assertLarger(-1);
       expect(html.indexOf('min-height: 44px')).assertLarger(-1);
@@ -2562,6 +2567,32 @@ export default function htmlHomeRendererTest() {
       const busyHtml = renderHtmlHomeDocument(doc, true);
       expect(busyHtml.indexOf('正在更新')).assertLarger(-1);
       expect(busyHtml.indexOf('正在补充内容')).assertEqual(-1);
+    });
+
+    it('keeps long source diagnostics compact without changing filter or discovery controls', 0, () => {
+      const doc = aggregateSearchDocumentFixture();
+      const status = doc.blocks.filter((block: HtmlHomeBlock): boolean => block.kind === 'aggregate-source-status' && block.source === 'zhihu')[0];
+      doc.waterfall = waterfallRendererFixture().waterfall;
+      let longMessage = 'X 授权状态需要更新。';
+      for (let index = 0; index < 24; index += 1) {
+        longMessage += ' provider diagnostic detail ' + index.toString();
+      }
+      status.source = 'x';
+      status.status = 'error';
+      status.subtitle = longMessage;
+
+      const html = renderHtmlHomeDocument(doc);
+
+      expect(html.indexOf('aggregate-status-message')).assertLarger(-1);
+      expect(html.indexOf('-webkit-line-clamp: 2')).assertLarger(-1);
+      expect(html.indexOf('data-status-detail="')).assertLarger(-1);
+      expect(html.indexOf(longMessage)).assertLarger(-1);
+      const visibleStatus = html.match(/<p class="aggregate-status-message"[^>]*>([\s\S]*?)<\/p>/);
+      expect(visibleStatus === null).assertFalse();
+      expect(visibleStatus?.[1].indexOf('provider diagnostic detail')).assertEqual(-1);
+      expect(html.indexOf('data-filter="x"')).assertLarger(-1);
+      expect(html.indexOf('waterfall-entry-floating')).assertLarger(-1);
+      expect(html.indexOf('data-waterfall-enter')).assertLarger(-1);
     });
 
     it('does not exhaust an explicit empty source selection', 0, () => {

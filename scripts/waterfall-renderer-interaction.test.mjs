@@ -17,6 +17,13 @@ function template(name) {
   return renderer.slice(contentStart, end);
 }
 
+const aggregateCss = template('AGGREGATE_CSS');
+const waterfallCss = template('WATERFALL_CSS');
+assert.match(aggregateCss, /\.aggregate-status-message/);
+assert.match(waterfallCss, /\.waterfall-entry-floating/);
+assert.match(waterfallCss, /\.waterfall-toolbar-primary/);
+assert.match(waterfallCss, /\.waterfall-toolbar-tools/);
+
 function element() {
   const classes = new Set();
   const listeners = {};
