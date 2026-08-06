@@ -478,6 +478,24 @@ export default function aggregateSearchClientTest() {
       expect(update.state.tail.map((item) => item.id).join(',')).assertEqual('late-exact,tail-old');
     });
 
+    it('seeds late tail balancing from shown and stable sources', 0, () => {
+      const state = feedState(
+        rankedWaterfallCandidate('youtube-current', 'youtube', 'OpenAI Codex current', 1),
+        [
+          rankedWaterfallCandidate('youtube-next-1', 'youtube', 'OpenAI Codex next one', 2),
+          rankedWaterfallCandidate('youtube-next-2', 'youtube', 'OpenAI Codex next two', 3)
+        ],
+        [rankedWaterfallCandidate('youtube-tail', 'youtube', 'OpenAI Codex tail', 4)],
+        [sourceState('youtube', null), sourceState('x', null)]
+      );
+      state.shown = [rankedWaterfallCandidate('youtube-shown', 'youtube', 'OpenAI Codex shown', 0)];
+      const update = mergeWaterfallBatch(state, [
+        waterfallCandidate('x-tail', 'x', 'OpenAI Codex tail', '', 'https://x.test/x-tail', '2026-08-06T10:00:00.000Z', 5)
+      ], sourceState('x', null), WATERFALL_NOW_MS);
+
+      expect(update.state.tail.map((item) => item.id).join(',')).assertEqual('x-tail,youtube-tail');
+    });
+
     it('moves the two-item stable window after advancing', 0, () => {
       const state = feedState(
         rankedWaterfallCandidate('current-1', 'youtube', 'OpenAI Codex current', 1),
