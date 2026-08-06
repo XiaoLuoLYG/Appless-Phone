@@ -15,6 +15,7 @@ import {
 } from '@loop/agent-core';
 import { isRollingGoHotelBookingUrl } from '@loop/agent-core';
 import {
+  advanceWaterfallFeed,
   applyWaterfallSourceSelection,
   mergeWaterfallFeedSnapshot,
   WaterfallFeedState
@@ -195,6 +196,7 @@ import { createHtmlHomeDocument } from './html/HtmlHomeSnapshot';
 import { buildMultiTaskHomePayload, renderHtmlHomeDocument } from './html/HtmlHomeRenderer';
 import {
   buildWaterfallHomePayload,
+  waterfallAdvanceCurrentFromAction,
   waterfallEnabledSourcesFromAction
 } from './html/HtmlAggregateSearchHomeRenderer';
 import { createFirecrawlPendingDocument, isFirecrawlToolId } from './html/HtmlFirecrawlHomeRenderer';
@@ -1154,6 +1156,12 @@ struct Index {
     }
   }
 
+  private publishWaterfallPayload(document: HtmlHomeDocument): void {
+    const payload = buildWaterfallHomePayload(document, this.isBusy, this.waterfallFeedState);
+    this.waterfallPayloadJson = payload === null ? '' : JSON.stringify(payload);
+    this.waterfallPayloadTick = this.waterfallPayloadTick + 1;
+  }
+
   private syncWaterfallPayloadUpdate(document: HtmlHomeDocument): void {
     if (document.kind !== 'aggregate-search' || document.waterfall === undefined) {
       this.waterfallPayloadJson = '';
@@ -1172,13 +1180,11 @@ struct Index {
         Date.now()
       ).state;
     }
-    const payload = buildWaterfallHomePayload(document, this.isBusy, this.waterfallFeedState);
-    this.waterfallPayloadJson = payload === null ? '' : JSON.stringify(payload);
-    this.waterfallPayloadTick = this.waterfallPayloadTick + 1;
+    this.publishWaterfallPayload(document);
   }
 
   private handleWaterfallClientAction(action: A2uiAction): boolean {
-    if (action.id !== 'waterfall.sources.select') {
+    if (action.id !== 'waterfall.sources.select' && action.id !== 'waterfall.feed.advance') {
       return false;
     }
     const document = this.currentHtmlHomeDocument();
@@ -1187,23 +1193,32 @@ struct Index {
       return true;
     }
     const surfaceId = document.surfaceId ?? '';
-    const enabledSources = waterfallEnabledSourcesFromAction(action, surfaceId);
-    if (enabledSources === null) {
-      this.logHtmlHomeActionError(action, 'invalid_waterfall_source_selection');
-      return true;
-    }
     if (this.waterfallFeedState === null || this.waterfallFeedSurfaceId !== surfaceId) {
       this.waterfallFeedState = document.waterfall;
       this.waterfallFeedSurfaceId = surfaceId;
     }
-    this.waterfallFeedState = applyWaterfallSourceSelection(
-      this.waterfallFeedState,
-      enabledSources,
-      Date.now()
-    ).state;
-    const payload = buildWaterfallHomePayload(document, this.isBusy, this.waterfallFeedState);
-    this.waterfallPayloadJson = payload === null ? '' : JSON.stringify(payload);
-    this.waterfallPayloadTick = this.waterfallPayloadTick + 1;
+    if (action.id === 'waterfall.sources.select') {
+      const enabledSources = waterfallEnabledSourcesFromAction(action, surfaceId);
+      if (enabledSources === null) {
+        this.logHtmlHomeActionError(action, 'invalid_waterfall_source_selection');
+        return true;
+      }
+      this.waterfallFeedState = applyWaterfallSourceSelection(
+        this.waterfallFeedState,
+        enabledSources,
+        Date.now()
+      ).state;
+      this.publishWaterfallPayload(document);
+      return true;
+    }
+    const currentId = waterfallAdvanceCurrentFromAction(action, surfaceId);
+    const current = this.waterfallFeedState.current;
+    if (currentId === null || current === null || current.id !== currentId) {
+      this.logHtmlHomeActionError(action, 'stale_waterfall_current');
+      return true;
+    }
+    this.waterfallFeedState = advanceWaterfallFeed(this.waterfallFeedState, Date.now()).state;
+    this.publishWaterfallPayload(document);
     return true;
   }
 
