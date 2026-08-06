@@ -523,6 +523,22 @@ function appendTrainBookingActions(block: HtmlHomeBlock, sourceComponentId: stri
   });
 }
 
+function appendTrainPresaleScheduleAction(
+  block: HtmlHomeBlock,
+  sourceComponentId: string,
+  args: TrainPresaleScheduleActionArgs
+): void {
+  block.actions.push({
+    id: 'train.presale.schedule',
+    label: '开售抢票',
+    prompt: '',
+    variant: 'primary',
+    kind: 'client',
+    sourceComponentId: sourceComponentId,
+    args: args
+  });
+}
+
 function appendTravelBlocks(document: HtmlHomeDocument, surface: A2uiSurfaceState, component: A2uiComponent): void {
   const options = travelOptions(surface, component);
   options.forEach((item: A2uiTravelOptionData, index: number) => {
@@ -541,7 +557,27 @@ function appendTravelBlocks(document: HtmlHomeDocument, surface: A2uiSurfaceStat
     appendMetric(block.metrics, 'availability', item.availability);
     appendMetric(block.rows, 'detail', item.detail);
     if (item.source === 'train') {
-      appendTrainBookingActions(block, component.id, item.bookingUrl);
+      const trainCode = textOf(item.trainCode);
+      const travelDate = textOf(item.travelDate);
+      const fromCode = textOf(item.fromCode);
+      const toCode = textOf(item.toCode);
+      const saleAt = textOf(item.saleAt);
+      if (item.saleState === 'presale' && trainCode.length > 0 && travelDate.length > 0 &&
+        fromCode.length > 0 && toCode.length > 0 && saleAt.length > 0) {
+        appendTrainPresaleScheduleAction(block, component.id, {
+          trainCode: trainCode,
+          travelDate: travelDate,
+          from: item.from,
+          fromCode: fromCode,
+          to: item.to,
+          toCode: toCode,
+          depart: item.depart,
+          arrive: item.arrive,
+          saleAt: saleAt
+        });
+      } else if (item.saleState !== 'presale') {
+        appendTrainBookingActions(block, component.id, item.bookingUrl);
+      }
     }
     block.actions.push(clientAction('html_pin_travel', '固定到桌面', JSON.stringify({
       index: index,
@@ -579,7 +615,7 @@ function appendTrainBlocks(document: HtmlHomeDocument, surface: A2uiSurfaceState
     appendMetric(block.rows, 'hardSeat', item.hardSeat);
     appendMetric(block.rows, 'sleeperSoft', item.sleeperSoft);
     if (item.saleState === 'presale') {
-      const scheduleArgs: TrainPresaleScheduleActionArgs = {
+      appendTrainPresaleScheduleAction(block, component.id, {
         trainCode: item.trainCode,
         travelDate: textOf(item.travelDate),
         from: item.from,
@@ -589,15 +625,6 @@ function appendTrainBlocks(document: HtmlHomeDocument, surface: A2uiSurfaceState
         depart: item.depart,
         arrive: item.arrive,
         saleAt: textOf(item.saleAt)
-      };
-      block.actions.push({
-        id: 'train.presale.schedule',
-        label: '开售抢票',
-        prompt: '',
-        variant: 'primary',
-        kind: 'client',
-        sourceComponentId: component.id,
-        args: scheduleArgs
       });
     } else {
       appendTrainBookingActions(block, component.id, item.bookingUrl);

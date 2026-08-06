@@ -1475,6 +1475,43 @@ export default function toolGatewayClientTest() {
       expect(JSON.stringify(data.options[0]).indexOf('"bookingUrl":"' + bookingUrl + '"')).assertLarger(-1);
     });
 
+    it('preserves presale train metadata in combined travel options', 0, () => {
+      const sources: DataSource[] = [{
+        provider: 'fixture',
+        backend: 'local_adapter',
+        operation: 'search',
+        fetchedAt: '2026-07-22T00:00:00.000Z'
+      }];
+      const bookingUrl = 'https://kyfw.12306.cn/otn/leftTicket/init?real=presale';
+      const trainData: TrainStructuredData = {
+        title: '12306 预售车次',
+        body: '真实预售结果',
+        summary: '1 趟待开售车次',
+        trains: [{
+          trainCode: 'G1', from: '深圳北', to: '上海虹桥', depart: '09:00', arrive: '13:28', duration: '4h28m',
+          seats: '', status: '待开售', business: '', first: '', second: '', noSeat: '', hardSeat: '', sleeperSoft: '',
+          price: '553', bookingUrl: bookingUrl, travelDate: '2026-08-20', saleState: 'presale',
+          saleAt: '2026-08-10T12:00:00+08:00', fromCode: 'IZQ', toCode: 'SHH'
+        }]
+      };
+      const flightData: FlightStructuredData = {
+        title: '飞常准航班查询', body: '实时结果', summary: '0 个航班', flights: []
+      };
+      const result = combineTravelStructuredResults(
+        '深圳到上海',
+        trainStructuredDataResult(trainData, sources),
+        flightStructuredDataResult(flightData, sources)
+      );
+      const data = result.data as TravelStructuredData;
+
+      expect(data.options.length).assertEqual(1);
+      expect(JSON.stringify(data.options[0]).indexOf('"saleState":"presale"')).assertLarger(-1);
+      expect(JSON.stringify(data.options[0]).indexOf('"saleAt":"2026-08-10T12:00:00+08:00"')).assertLarger(-1);
+      expect(JSON.stringify(data.options[0]).indexOf('"travelDate":"2026-08-20"')).assertLarger(-1);
+      expect(JSON.stringify(data.options[0]).indexOf('"fromCode":"IZQ"')).assertLarger(-1);
+      expect(JSON.stringify(data.options[0]).indexOf('"toCode":"SHH"')).assertLarger(-1);
+    });
+
     it('derives aggregate travel retryability only from child error flags', 0, () => {
       const trainSource: DataSource = {
         provider: '12306', backend: 'local_adapter', operation: 'leftTicket',
