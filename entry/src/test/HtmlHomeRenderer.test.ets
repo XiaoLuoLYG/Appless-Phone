@@ -2516,6 +2516,7 @@ export default function htmlHomeRendererTest() {
       expect(payload?.candidates[0].id).assertEqual('video-1');
       expect(payload?.candidates[1].id).assertEqual('image-2');
       expect(payload?.candidates[2].id).assertEqual('post-3');
+      expect(payload?.exhausted).assertFalse();
       expect(html.indexOf('"enabledSources":["youtube","hackernews"]')).assertLarger(-1);
       expect(html.indexOf('进入发现流')).assertLarger(-1);
       expect(html.indexOf('来源偏好')).assertLarger(-1);
@@ -2536,11 +2537,46 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('OpenAI Codex discussion')).assertLarger(-1);
       expect(html.indexOf('https://www.youtube.com/watch?v=abc123')).assertLarger(-1);
       expect(html.indexOf('正在补充内容')).assertEqual(-1);
-      expect(html.indexOf('本轮内容已结束')).assertLarger(-1);
+      expect(html.indexOf('<div id="waterfall-track" class="waterfall-track"></div>')).assertLarger(-1);
       expect(html.indexOf('result 3')).assertEqual(-1);
 
       const replenishingHtml = renderHtmlHomeDocument(doc, true);
       expect(replenishingHtml.indexOf('正在补充内容')).assertLarger(-1);
+    });
+
+    it('does not exhaust an explicit empty source selection', 0, () => {
+      const doc = aggregateSearchDocumentFixture();
+      doc.waterfall = {
+        query: 'codex', enabledSources: [], preferenceDescription: '', shown: [], current: null,
+        stable: [], tail: [], sources: [{ source: 'youtube', phase: 'exhausted', continuation: null,
+          inFlight: false, reservedCount: 0, message: '本轮内容已结束' }]
+      };
+
+      expect(buildWaterfallHomePayload(doc, false)?.exhausted).assertFalse();
+    });
+
+    it('exhausts enabled terminal sources only after unseen inventory is empty', 0, () => {
+      const doc = aggregateSearchDocumentFixture();
+      doc.waterfall = {
+        query: 'codex', enabledSources: ['youtube'], preferenceDescription: '', shown: [], current: null,
+        stable: [], tail: [], sources: [{ source: 'youtube', phase: 'exhausted', continuation: null,
+          inFlight: false, reservedCount: 0, message: '本轮内容已结束' }]
+      };
+
+      expect(buildWaterfallHomePayload(doc, false)?.exhausted).assertTrue();
+    });
+
+    it('keeps an enabled pending empty feed in the replenishing state', 0, () => {
+      const doc = aggregateSearchDocumentFixture();
+      doc.waterfall = {
+        query: 'codex', enabledSources: ['youtube'], preferenceDescription: '', shown: [], current: null,
+        stable: [], tail: [], sources: [{ source: 'youtube', phase: 'loading', continuation: null,
+          inFlight: true, reservedCount: 0, message: '正在搜索' }]
+      };
+      const payload = buildWaterfallHomePayload(doc, false);
+
+      expect(payload?.exhausted).assertFalse();
+      expect(payload?.replenishing).assertTrue();
     });
 
     it('keeps an explicit empty Waterfall source selection in the posted client action', 0, () => {

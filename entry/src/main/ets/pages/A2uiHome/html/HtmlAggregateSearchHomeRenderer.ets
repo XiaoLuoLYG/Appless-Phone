@@ -830,8 +830,15 @@ const WATERFALL_JS: string = `
   function render() {
     if (!track || !state) return;
     var items = candidates(state).filter(function (item) { return enabledSources.indexOf(item.source) >= 0; });
-    var empty = items.length === 0 ? '<div class="waterfall-empty"><span>至少开启一个来源</span><button type="button" data-waterfall-empty-sources>打开来源偏好</button></div>' : '';
-    var status = state.replenishing ? '<div class="waterfall-status">\\u6b63\\u5728\\u8865\\u5145\\u5185\\u5bb9</div>' : (state.exhausted ? '<div class="waterfall-status">\\u672c\\u8f6e\\u5185\\u5bb9\\u5df2\\u7ed3\\u675f</div>' : '');
+    var empty = enabledSources.length === 0 ? '<div class="waterfall-empty"><span>至少开启一个来源</span><button type="button" data-waterfall-empty-sources>打开来源偏好</button></div>' : '';
+    var status = '';
+    if (enabledSources.length > 0 && items.length === 0) {
+      status = state.exhausted ? '<div class="waterfall-status">\\u672c\\u8f6e\\u5185\\u5bb9\\u5df2\\u7ed3\\u675f</div>' :
+        (state.replenishing ? '<div class="waterfall-status">\\u6b63\\u5728\\u8865\\u5145\\u5185\\u5bb9</div>' :
+          '<div class="waterfall-status">\\u6b63\\u5728\\u6c47\\u96c6\\u5185\\u5bb9\\u2026</div>');
+    } else if (items.length > 0 && state.replenishing) {
+      status = '<div class="waterfall-status">\\u6b63\\u5728\\u8865\\u5145\\u5185\\u5bb9</div>';
+    }
     track.innerHTML = status + empty + items.map(renderCandidate).join('');
     track.scrollTop = 0;
     if (reasonPanel) {
@@ -964,7 +971,10 @@ export function buildWaterfallHomePayload(
   state.stable.forEach(append);
   state.tail.forEach(append);
   const replenishing = isBusy || state.sources.some((source: WaterfallSourceState): boolean => source.inFlight || source.phase === 'loading');
-  const exhausted = state.sources.length > 0 && state.sources.every((source: WaterfallSourceState): boolean =>
+  const relevantSources = state.sources.filter((source: WaterfallSourceState): boolean =>
+    state.enabledSources.indexOf(source.source) >= 0);
+  const exhausted = candidates.length === 0 && state.enabledSources.length > 0 &&
+    relevantSources.length === state.enabledSources.length && relevantSources.every((source: WaterfallSourceState): boolean =>
     source.phase === 'empty' || source.phase === 'needs_auth' || source.phase === 'error' || source.phase === 'exhausted' ||
     (source.phase === 'success' && source.continuation === null));
   return {
