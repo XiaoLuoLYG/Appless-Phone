@@ -118,12 +118,54 @@ window.__aiphoneApplyWaterfallUpdate({
   enabledSources: [],
   aggregateHtml: '',
   candidates: [candidate('current'), candidate('next')],
-  sources: []
+  sources: [],
+  replenishing: false,
+  exhausted: true
 });
 assert.match(track.innerHTML, /data-waterfall-empty-sources/);
+assert.doesNotMatch(track.innerHTML, /\\u672c\\u8f6e\\u5185\\u5bb9\\u5df2\\u7ed3\\u675f/);
 track.emit('click', {
   target: {
     closest: (selector) => selector === '[data-waterfall-empty-sources]' ? {} : null
   }
 });
 assert.equal(preferences.classList.contains('active'), true);
+
+window.__aiphoneApplyWaterfallUpdate({
+  surfaceId: 'surface-1',
+  enabledSources: ['youtube'],
+  aggregateHtml: '',
+  candidates: [],
+  sources: [],
+  replenishing: false,
+  exhausted: true
+});
+assert.match(track.innerHTML, /\\u672c\\u8f6e\\u5185\\u5bb9\\u5df2\\u7ed3\\u675f/);
+assert.doesNotMatch(track.innerHTML, /至少开启一个来源/);
+assert.doesNotMatch(track.innerHTML, /data-waterfall-empty-sources/);
+
+window.__aiphoneApplyWaterfallUpdate({
+  surfaceId: 'surface-1',
+  enabledSources: ['youtube'],
+  aggregateHtml: '',
+  candidates: [],
+  sources: [],
+  replenishing: true,
+  exhausted: false
+});
+assert.match(track.innerHTML, /\\u6b63\\u5728\\u8865\\u5145\\u5185\\u5bb9/);
+assert.doesNotMatch(track.innerHTML, /至少开启一个来源/);
+assert.doesNotMatch(track.innerHTML, /\\u672c\\u8f6e\\u5185\\u5bb9\\u5df2\\u7ed3\\u675f/);
+
+window.__aiphoneApplyWaterfallUpdate({
+  surfaceId: 'surface-1',
+  enabledSources: ['youtube'],
+  aggregateHtml: '',
+  candidates: [],
+  sources: [],
+  replenishing: false,
+  exhausted: false
+});
+assert.match(track.innerHTML, /\\u6b63\\u5728\\u6c47\\u96c6\\u5185\\u5bb9\\u2026/);
+assert.doesNotMatch(track.innerHTML, /至少开启一个来源/);
+assert.doesNotMatch(track.innerHTML, /\\u672c\\u8f6e\\u5185\\u5bb9\\u5df2\\u7ed3\\u675f/);
