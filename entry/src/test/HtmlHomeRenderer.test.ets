@@ -10,6 +10,7 @@ import {
 import { renderHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeRenderer';
 import {
   buildWaterfallHomePayload,
+  waterfallAdvanceCurrentFromAction,
   waterfallEnabledSourcesFromAction
 } from '../main/ets/pages/A2uiHome/html/HtmlAggregateSearchHomeRenderer';
 import { buildMultiTaskHomePayload } from '../main/ets/pages/A2uiHome/html/HtmlMultiTaskHomeRenderer';
@@ -23,7 +24,12 @@ import {
 } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
 import { parseHtmlHomeAction } from '../main/ets/pages/A2uiHome/components/HtmlHomeSurfaceView';
 import { renderRideDriverMapHtml } from '../main/ets/pages/A2uiHome/html/RideDriverMapHtmlRenderer';
-import { WaterfallFeedState, WaterfallRankedCandidate, WaterfallSourceState } from '@loop/agent-core';
+import {
+  advanceWaterfallFeed,
+  WaterfallFeedState,
+  WaterfallRankedCandidate,
+  WaterfallSourceState
+} from '@loop/agent-core';
 
 interface GooglePayCheckoutArgsFixture {
   provider: string;
@@ -2540,6 +2546,27 @@ export default function htmlHomeRendererTest() {
       expect(action === null).assertFalse();
       expect(waterfallEnabledSourcesFromAction(action as A2uiAction, surfaceId)?.length).assertEqual(0);
       expect(waterfallEnabledSourcesFromAction(action as A2uiAction, 'other-surface')).assertEqual(null);
+    });
+
+    it('turns the posted Waterfall scroll action into one current-card advance', 0, () => {
+      const doc = waterfallRendererFixture();
+      const state = doc.waterfall as WaterfallFeedState;
+      const surfaceId = doc.surfaceId ?? '';
+      const html = renderHtmlHomeDocument(doc);
+      const action = parseHtmlHomeAction(
+        '{"id":"waterfall.feed.advance","label":"下一条","prompt":"","variant":"secondary",' +
+        '"kind":"client","args":{"surfaceId":"' + surfaceId + '","currentId":"video-1"}}'
+      );
+      const currentId = waterfallAdvanceCurrentFromAction(action as A2uiAction, surfaceId);
+      const update = advanceWaterfallFeed(state, Date.parse('2026-08-06T12:00:00.000Z'));
+
+      expect(currentId).assertEqual('video-1');
+      expect(update.state.shown.map((item) => item.id).join(',')).assertEqual('video-1');
+      expect(update.state.current?.id).assertEqual('image-2');
+      expect(update.state.stable.map((item) => item.id).join(',')).assertEqual('post-3');
+      expect(html.indexOf('waterfall.feed.advance')).assertLarger(-1);
+      expect(html.indexOf("track.addEventListener('scroll'")).assertLarger(-1);
+      expect(html.indexOf('data-waterfall-id')).assertLarger(-1);
     });
 
     it('keeps the Waterfall entry hidden when no candidate is valid', 0, () => {

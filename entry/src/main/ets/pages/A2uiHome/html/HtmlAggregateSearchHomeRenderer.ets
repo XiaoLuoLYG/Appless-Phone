@@ -660,7 +660,8 @@ const WATERFALL_JS: string = `
   var state = window.__aiphoneWaterfallInitial || null;
   var mode = 'entry';
   var enabledSources = state && state.enabledSources ? state.enabledSources.slice() : [];
-  var fixedIds = [];
+  var advancePending = false;
+  var scrollTimer = 0;
   function text(value) { return value === null || value === undefined ? '' : String(value); }
   function escapeHtml(value) { return text(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
   function sourceLabel(source) {
@@ -680,20 +681,11 @@ const WATERFALL_JS: string = `
   }
   function mergePayload(payload) {
     if (!payload) return;
-    var incoming = candidates(payload);
-    var old = candidates(state);
-    if (old.length > 0 && fixedIds.length === 0) fixedIds = old.slice(0, 3).map(function (item) { return item.id; });
-    var byId = {};
-    old.forEach(function (item) { byId[item.id] = item; });
-    incoming.forEach(function (item) { if (!byId[item.id]) byId[item.id] = item; });
-    var merged = [];
-    fixedIds.forEach(function (id) { if (byId[id]) merged.push(byId[id]); });
-    incoming.forEach(function (item) {
-      if (fixedIds.indexOf(item.id) < 0 && merged.every(function (known) { return known.id !== item.id; })) merged.push(item);
-    });
+    var oldCurrent = candidates(state)[0];
     state = payload;
-    state.candidates = merged;
     enabledSources = payload.enabledSources ? payload.enabledSources.slice() : [];
+    var nextCurrent = candidates(state)[0];
+    if (!oldCurrent || !nextCurrent || oldCurrent.id !== nextCurrent.id) advancePending = false;
   }
   function postSourceSelection() {
     if (!state || !window.AIPhoneHome || typeof window.AIPhoneHome.postAction !== 'function') return;
@@ -702,10 +694,21 @@ const WATERFALL_JS: string = `
       args: { surfaceId: state.surfaceId || '', enabledSources: enabledSources }
     }));
   }
+  function postAdvanceIfNeeded() {
+    var items = candidates(state);
+    if (mode !== 'discovering' || advancePending || !track || items.length < 2 ||
+      track.scrollTop < Math.max(1, track.clientHeight) / 2 ||
+      !window.AIPhoneHome || typeof window.AIPhoneHome.postAction !== 'function') return;
+    advancePending = true;
+    window.AIPhoneHome.postAction(JSON.stringify({
+      id: 'waterfall.feed.advance', label: '下一条', prompt: '', variant: 'secondary', kind: 'client',
+      args: { surfaceId: state.surfaceId || '', currentId: items[0].id }
+    }));
+  }
   function renderCandidate(item) {
     var cover = item.coverUrl ? '<img src="' + escapeHtml(item.coverUrl) + '" alt="' + escapeHtml(item.title) + '" loading="lazy" />' : '';
     var link = item.url ? '<a href="' + escapeHtml(item.url) + '" target="_blank" rel="noopener noreferrer">打开原文</a>' : '';
-    return '<article class="waterfall-card"><div class="waterfall-meta">' + escapeHtml(sourceLabel(item.source)) + ' · ' + escapeHtml(item.mediaType) + '</div>' +
+    return '<article class="waterfall-card" data-waterfall-id="' + escapeHtml(item.id) + '"><div class="waterfall-meta">' + escapeHtml(sourceLabel(item.source)) + ' · ' + escapeHtml(item.mediaType) + '</div>' +
       cover + '<h2>' + escapeHtml(item.title) + '</h2><p>' + escapeHtml(item.summary) + '</p>' +
       '<div class="waterfall-reason">推荐理由：' + escapeHtml(item.reason) + '</div>' +
       (item.publishedAt ? '<div class="waterfall-meta">' + escapeHtml(item.publishedAt) + '</div>' : '') + link + '</article>';
@@ -737,7 +740,12 @@ const WATERFALL_JS: string = `
     var empty = items.length === 0 ? '<div class="waterfall-empty">至少开启一个来源</div>' : '';
     var status = state.replenishing ? '<div class="waterfall-status">\\u6b63\\u5728\\u8865\\u5145\\u5185\\u5bb9</div>' : (state.exhausted ? '<div class="waterfall-status">\\u672c\\u8f6e\\u5185\\u5bb9\\u5df2\\u7ed3\\u675f</div>' : '');
     track.innerHTML = status + empty + items.map(renderCandidate).join('');
+    track.scrollTop = 0;
   }
+  track.addEventListener('scroll', function () {
+    clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(postAdvanceIfNeeded, 80);
+  });
   document.querySelectorAll('[data-waterfall-enter]').forEach(function (button) {
     button.addEventListener('click', function () { mode = 'discovering'; overlay.classList.add('active'); render(); });
   });
@@ -764,13 +772,24 @@ export function shouldRenderAggregateSearchHomeDocument(document: HtmlHomeDocume
 
 type WaterfallActionValue = Object | string | number | boolean | null | undefined;
 
-export function waterfallEnabledSourcesFromAction(action: A2uiAction, surfaceId: string): string[] | null {
-  if (action.id !== 'waterfall.sources.select' || action.kind !== 'client' || action.args === undefined) {
+function waterfallArgsFromAction(
+  action: A2uiAction,
+  actionId: string,
+  surfaceId: string
+): Record<string, WaterfallActionValue> | null {
+  if (action.id !== actionId || action.kind !== 'client' || action.args === undefined) {
     return null;
   }
   const args = action.args as Record<string, WaterfallActionValue>;
-  if (typeof args['surfaceId'] !== 'string' || args['surfaceId'] !== surfaceId ||
-    !Array.isArray(args['enabledSources'])) {
+  if (typeof args['surfaceId'] !== 'string' || args['surfaceId'] !== surfaceId) {
+    return null;
+  }
+  return args;
+}
+
+export function waterfallEnabledSourcesFromAction(action: A2uiAction, surfaceId: string): string[] | null {
+  const args = waterfallArgsFromAction(action, 'waterfall.sources.select', surfaceId);
+  if (args === null || !Array.isArray(args['enabledSources'])) {
     return null;
   }
   const rawSources = args['enabledSources'] as WaterfallActionValue[];
@@ -788,6 +807,15 @@ export function waterfallEnabledSourcesFromAction(action: A2uiAction, surfaceId:
     }
   }
   return enabledSources;
+}
+
+export function waterfallAdvanceCurrentFromAction(action: A2uiAction, surfaceId: string): string | null {
+  const args = waterfallArgsFromAction(action, 'waterfall.feed.advance', surfaceId);
+  if (args === null || typeof args['currentId'] !== 'string') {
+    return null;
+  }
+  const currentId = (args['currentId'] as string).trim();
+  return currentId.length > 0 ? currentId : null;
 }
 
 export function buildWaterfallHomePayload(
