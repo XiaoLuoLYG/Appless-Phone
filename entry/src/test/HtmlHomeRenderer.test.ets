@@ -2555,6 +2555,26 @@ export default function htmlHomeRendererTest() {
       expect(buildWaterfallHomePayload(doc, false)?.exhausted).assertFalse();
     });
 
+    it('derives end state from enabled sources while retaining disabled candidates', 0, () => {
+      const doc = waterfallRendererFixture();
+      const hidden = (doc.waterfall as WaterfallFeedState).tail[0];
+      hidden.source = 'x';
+      doc.waterfall = {
+        query: 'codex', enabledSources: ['youtube'], preferenceDescription: '', shown: [], current: null,
+        stable: [], tail: [hidden], sources: [
+          { source: 'youtube', phase: 'exhausted', continuation: null,
+            inFlight: false, reservedCount: 0, message: '本轮内容已结束' },
+          { source: 'x', phase: 'loading', continuation: null,
+            inFlight: true, reservedCount: 0, message: '正在搜索' }
+        ]
+      };
+      const payload = buildWaterfallHomePayload(doc, false);
+
+      expect(payload?.candidates[0].id).assertEqual('post-3');
+      expect(payload?.replenishing).assertFalse();
+      expect(payload?.exhausted).assertTrue();
+    });
+
     it('exhausts enabled terminal sources only after unseen inventory is empty', 0, () => {
       const doc = aggregateSearchDocumentFixture();
       doc.waterfall = {
@@ -2564,6 +2584,18 @@ export default function htmlHomeRendererTest() {
       };
 
       expect(buildWaterfallHomePayload(doc, false)?.exhausted).assertTrue();
+    });
+
+    it('does not exhaust a terminal source while continuation remains', 0, () => {
+      const doc = aggregateSearchDocumentFixture();
+      doc.waterfall = {
+        query: 'codex', enabledSources: ['youtube'], preferenceDescription: '', shown: [], current: null,
+        stable: [], tail: [], sources: [{ source: 'youtube', phase: 'error',
+          continuation: { kind: 'cursor', value: 'next' },
+          inFlight: false, reservedCount: 0, message: '稍后重试' }]
+      };
+
+      expect(buildWaterfallHomePayload(doc, false)?.exhausted).assertFalse();
     });
 
     it('keeps an enabled pending empty feed in the replenishing state', 0, () => {
