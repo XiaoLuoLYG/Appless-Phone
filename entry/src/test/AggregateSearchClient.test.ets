@@ -334,6 +334,24 @@ export default function aggregateSearchClientTest() {
       expect(ranked[0].reason).assertEqual('标题命中查询 · 24 小时内发布');
     });
 
+    it('does not count the same token twice toward an all-token match', 0, () => {
+      const ranked = rankWaterfallCandidates({
+        query: 'openai codex',
+        candidates: [
+          waterfallCandidate('repeated-openai', 'youtube', 'OpenAI update', 'OpenAI news',
+            'https://youtube.test/repeated-openai', '2026-08-06T10:00:00.000Z', 0)
+        ],
+        enabledSources: ['youtube'],
+        shownIds: [],
+        stableIds: [],
+        preferenceDescription: ''
+      }, WATERFALL_NOW_MS);
+
+      expect(ranked[0].signals.relevanceTier).assertEqual(2);
+      expect(ranked[0].signals.titleHits).assertEqual(1);
+      expect(ranked[0].signals.summaryHits).assertEqual(1);
+    });
+
     it('uses freshness then original order without random output', 0, () => {
       const candidates = [
         waterfallCandidate('same-old', 'youtube', 'OpenAI Codex', 'Same title', 'https://youtube.test/old', '2026-07-10T00:00:00.000Z', 0),

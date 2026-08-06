@@ -127,8 +127,14 @@ function relevanceSignals(query: string, candidate: WaterfallCandidate): Waterfa
   const text = textForCandidate(candidate);
   const titleHits = tokenHits(tokens, text.title);
   const summaryHits = tokenHits(tokens, text.summary);
+  let matchedTokens = 0;
+  tokens.forEach((token: string): void => {
+    if (text.title.indexOf(token) >= 0 || text.summary.indexOf(token) >= 0) {
+      matchedTokens += 1;
+    }
+  });
   const phraseHit = phrase.length > 0 && (text.title.indexOf(phrase) >= 0 || text.summary.indexOf(phrase) >= 0);
-  const allTokensHit = tokens.length > 0 && titleHits + summaryHits >= tokens.length;
+  const allTokensHit = tokens.length > 0 && matchedTokens === tokens.length;
   const anyTokenHit = titleHits + summaryHits > 0;
   return {
     relevanceTier: phraseHit || allTokensHit ? 3 : (anyTokenHit ? 2 : 1),
