@@ -302,7 +302,8 @@ const coreRegressionCases = [
     expectedDataRounds: [
       { toolId: 'ride.estimate', round: 1 }
     ]
-  }
+  },
+  { id: 'C23', query: '我想看看现在热映电影、票房和明星动态', expectsTool: true, expectedToolId: 'movie.open' }
 ];
 
 const retainedFullCases = [
@@ -384,7 +385,8 @@ const coreScenarioManifest = [
   ['C19', ['calendar.events.search', 'calendar.event.create', 'calendar.event.update', 'calendar.event.delete']],
   ['C20', ['hotel.search']],
   ['C21', ['time', 'ride.estimate']],
-  ['C22', ['ride.estimate', 'luckin.order.preview', 'payment.send']]
+  ['C22', ['ride.estimate', 'luckin.order.preview', 'payment.send']],
+  ['C23', ['movie.open']]
 ].map(([id, expectedToolIds]) => ({ id, expectedToolIds }));
 
 const fullScenarioManifest = retainedFullCases.map((testCase) => ({
@@ -832,6 +834,12 @@ function expectedCaseForQuery(query) {
     return {
       expectsTool: true,
       expectedToolId: 'worldcup.open'
+    };
+  }
+  if (/热映电影|电影票房|院线电影|电影专页|明星动态/.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'movie.open'
     };
   }
   if (/Google\s*Calendar|谷歌日历/i.test(query) || /日程|会议|约会/.test(query)) {
@@ -1721,6 +1729,7 @@ function analyze(
       /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel|LocalToolRequest)\][^\n]*toolId=gmail\.open\.web/.test(text) &&
       /\[AIPhone\]\[A2uiHomeOpenUrl\] ok=true scheme=https chars=\d+/.test(text),
     worldCupOpened: /\[AIPhone\]\[AnythingDemoRouteByTool\]/.test(text),
+    movieOpened: /\[AIPhone\]\[MovieDemoRouteByTool\]/.test(text),
     syntheticFallback: forbiddenSyntheticMarkers.some((marker) => text.includes(marker))
   };
   const modelPassed = multiAgentLifecycle.ok;
@@ -1733,13 +1742,16 @@ function analyze(
     result.model200 && !result.directIntent && !result.syntheticFallback;
   const htmlDocumentPassed = result.htmlHomeDocument.ok ||
     (isSocialHubExpectedToolId(expectedToolId) && result.htmlHomeDocument.count > 0) ||
-    (expectedToolId === 'worldcup.open' && result.worldCupOpened);
+    (expectedToolId === 'worldcup.open' && result.worldCupOpened) ||
+    (expectedToolId === 'movie.open' && result.movieOpened);
   const baseWithoutTransport = expectsDirectText ?
     !result.htmlLoadError && directTextLifecycle :
     !result.htmlLoadError &&
       result.htmlHomeSurfaceLoad.ok &&
       !result.syntheticFallback &&
-      (!result.directIntent || (expectedToolId === 'worldcup.open' && result.worldCupOpened)) &&
+      (!result.directIntent ||
+        (expectedToolId === 'worldcup.open' && result.worldCupOpened) ||
+        (expectedToolId === 'movie.open' && result.movieOpened)) &&
       htmlDocumentPassed;
   result.modelPassed = modelPassed;
   result.directTextLifecycle = directTextLifecycle;
@@ -1990,6 +2002,9 @@ function layoutExpectationsForQuery(query) {
   }
   if (/B站|B 站|Bilibili|哔哩哔哩/i.test(query)) {
     return ['哔哩哔哩', 'media.video.search', '跳转'];
+  }
+  if (/热映电影|电影票房|院线电影|电影专页|明星动态/.test(query)) {
+    return ['电影 Anything OS', '当日票房', '明星正在发生'];
   }
   if (isCalendarQuery(query)) {
     return /删除|取消/.test(query)
@@ -3241,6 +3256,7 @@ async function runQuery(query, index, expectedTool, expectedCaseOverride = null,
   const allowsSocialHubTruthfulState = socialHubVisibleOutput && hasTruthfulSocialHubState(evidenceText);
   const aggregateMediaVisibleOutput = expectedToolId === 'media.aggregate.search' && hasVisibleAggregateMediaOutput(evidenceText);
   const worldCupVisibleOutput = expectedToolId === 'worldcup.open' && evidenceText.includes('世界杯 Anything OS');
+  const movieVisibleOutput = expectedToolId === 'movie.open' && evidenceText.includes('电影 Anything OS');
   const allowsExternalGmailWeb = isGmailWebQuery(query) && summary.gmailWebOpened === true;
   const allowsAggregateMailProviderFailure = expectedToolId === 'mail.search' &&
     !isQqMailQuery(query) &&
@@ -3299,7 +3315,7 @@ async function runQuery(query, index, expectedTool, expectedCaseOverride = null,
     (summary.allowsCorrelatedDynamicAuth ||
       (isSocialHubCase ?
         socialHubVisibleOutput :
-        (worldCupVisibleOutput || expectedMarkers.length === 0 || expectedHits.length > 0) &&
+        (worldCupVisibleOutput || movieVisibleOutput || expectedMarkers.length === 0 || expectedHits.length > 0) &&
         calendarMarkersOk &&
         composioCardMarkersOk &&
         aggregateMediaMarkersOk &&
@@ -3436,6 +3452,15 @@ async function runQuery(query, index, expectedTool, expectedCaseOverride = null,
       summary.hasExpectedToolId &&
       summary.worldCupOpened === true &&
       worldCupVisibleOutput &&
+      summary.layoutOk;
+  } else if (expectedToolId === 'movie.open') {
+    summary.ok = summary.basePassedWithoutTransport === true &&
+      summary.modelPassed === true &&
+      summary.toolRequested &&
+      summary.toolOk &&
+      summary.hasExpectedToolId &&
+      summary.movieOpened === true &&
+      movieVisibleOutput &&
       summary.layoutOk;
   } else if (layoutEvidenceRecovered) {
     summary.basePassedWithoutTransport = true;
