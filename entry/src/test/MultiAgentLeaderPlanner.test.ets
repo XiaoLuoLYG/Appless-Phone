@@ -433,6 +433,25 @@ class QueueLocalModel implements LocalModel {
   }
 }
 
+const CAPTURED_LOCAL_FOOD_DECISION: string = '{"personaId":"food_companion","skillId":"",' +
+  '"requestedCapabilityIds":["local.food.search"],"roundAction":"execute",' +
+  '"continuationMode":"complete","dataTasks":[{"localId":"search_coffee_shops",' +
+  '"goal":"搜索深圳坂田华为基地附近的咖啡店","allowedToolIds":["local.food.search"],' +
+  '"toolId":"local.food.search","input":{"query":"深圳坂田华为基地附近的咖啡店"},' +
+  '"required":true}],"uiIntent":{"purpose":"search","preferredDensity":"compact",' +
+  '"requiredSections":["results"]}}';
+
+class IntentAliasSensitiveFoodModel implements LocalModel {
+  prompts: string[] = [];
+
+  async complete(prompt: string): Promise<string> {
+    this.prompts.push(prompt);
+    return prompt.indexOf('local.food.search') >= 0 ?
+      CAPTURED_LOCAL_FOOD_DECISION :
+      CAPTURED_LOCAL_FOOD_DECISION.replaceAll('local.food.search', 'food.search');
+  }
+}
+
 const socialInputNormalizer: LeaderDataTaskInputNormalizer = (
   _input: InputUserPayload,
   task: LeaderDecisionDataTask
@@ -972,6 +991,36 @@ async function failsAtRound(output: string, round: number): Promise<boolean> {
 
 export default function multiAgentLeaderPlannerTest() {
   describe('multiAgentLeaderPlanner', () => {
+    it('keeps internal food intent aliases out of Leader capability IDs', 0, async () => {
+      const context = planningContext();
+      let foodToolIndex: number = -1;
+      for (let index = 0; index < context.tools.length; index++) {
+        if (context.tools[index].toolId === 'food.search') {
+          foodToolIndex = index;
+          context.tools[index].intent = 'local.food.search';
+          context.tools[index].planningHint =
+            'local.food.search risk=read inputSchema=foodSearchQuery outputSchema=foodChoices';
+        }
+      }
+      context.personas[0].personaId = 'food_companion';
+      context.personas[0].activeSkills = [];
+      const model = new IntentAliasSensitiveFoodModel();
+
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: '帮我搜索深圳坂田华为基地附近的咖啡店' },
+        context,
+        1,
+        (): boolean => true
+      );
+
+      expect(decision.dataTasks[0].toolId).assertEqual('food.search');
+      expect(model.prompts.length).assertEqual(1);
+      expect(model.prompts[0].indexOf('local.food.search')).assertEqual(-1);
+      expect(foodToolIndex).assertLarger(-1);
+      expect(context.tools[foodToolIndex].intent).assertEqual('local.food.search');
+    });
+
     it('rejects an oversized registered tool catalog before calling the model', 0, async () => {
       const model = new QueueLocalModel([LIVE_ANSWER_WITHOUT_REASON_CODE]);
       const context = planningContext();
