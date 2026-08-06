@@ -146,6 +146,7 @@ export * from './src/main/ets/aiphone/runtime/ToolDefinitionRegistry';
 export * from './src/main/ets/aiphone/runtime/ToolDefinitionTypes';
 export * from './src/main/ets/aiphone/runtime/ToolGatewayClient';
 export * from './src/main/ets/aiphone/runtime/Utf8Bytes';
+export * from './src/main/ets/aiphone/runtime/WaterfallAnythingCore';
 export * from './src/main/ets/aiphone/runtime/YouTubeApiClient';
 export * from './src/main/ets/aiphone/payment/PaymentCore';
 export * from './src/main/ets/aiphone/payment/PaymentA2ui';

@@ -11,8 +11,17 @@ import {
   AggregateSearchStatus,
   AggregateSearchSourceStatus,
   AggregateSearchVideo,
-  aggregateSourceLabel
+  aggregateSourceLabel,
+  AggregateSearchSourceBatch
 } from './AggregateSearchTypes';
+import {
+  WaterfallCandidate,
+  WaterfallContinuation,
+  WaterfallFeedState,
+  WaterfallSourceState,
+  WaterfallSourcePhase,
+  mergeWaterfallBatch
+} from './WaterfallAnythingCore';
 
 type AggregateArgValue = Object | string | number | boolean | null | undefined;
 type AggregateArgRecord = Record<string, AggregateArgValue>;
@@ -32,6 +41,57 @@ interface AggregateComposioFixedRequest {
 interface AggregateXSearchArgs {
   query: string;
   pageSize: number;
+}
+
+function waterfallPostCoverUrl(post: AggregateSearchPost): string {
+  const labels: string[] = ['mediaurl', 'image', 'images', 'thumbnail', 'cover', 'pic', 'picture'];
+  for (let index = 0; index < post.rows.length; index++) {
+    const label = post.rows[index].label.trim().toLowerCase();
+    if (labels.indexOf(label) >= 0 && post.rows[index].value.trim().toLowerCase().startsWith('http')) {
+      return post.rows[index].value.trim();
+    }
+  }
+  return '';
+}
+
+function waterfallTitle(value: string): string {
+  return /^result\s+\d+$/i.test(value.trim()) ? '' : value;
+}
+
+export function aggregateMediaCandidates(
+  videos: AggregateSearchVideo[],
+  posts: AggregateSearchPost[],
+  batchIndex: number
+): WaterfallCandidate[] {
+  const candidates: WaterfallCandidate[] = [];
+  videos.forEach((video: AggregateSearchVideo, index: number) => {
+    candidates.push({
+      id: video.id,
+      source: video.source,
+      mediaType: 'video',
+      title: video.title,
+      summary: video.summary,
+      url: video.url,
+      coverUrl: video.thumbnail,
+      publishedAt: video.publishedAt,
+      originalIndex: batchIndex * 1000 + index
+    });
+  });
+  posts.forEach((post: AggregateSearchPost, index: number) => {
+    const coverUrl = waterfallPostCoverUrl(post);
+    candidates.push({
+      id: post.id,
+      source: post.source,
+      mediaType: coverUrl.length > 0 ? 'image_text' : 'post',
+      title: waterfallTitle(post.title),
+      summary: post.text,
+      url: post.url,
+      coverUrl: coverUrl,
+      publishedAt: post.publishedAt,
+      originalIndex: batchIndex * 1000 + videos.length + index
+    });
+  });
+  return candidates;
 }
 
 export interface AggregateZhihuConfig {
@@ -844,79 +904,227 @@ function emptyZhihuConfig(): AggregateZhihuConfig {
   };
 }
 
+export type AggregateSearchPartialObserver = (result: AggregateSearchResult) => void;
+
+function waterfallPhaseFor(status: AggregateSearchStatus): WaterfallSourcePhase {
+  if (status === 'success') {
+    return 'success';
+  }
+  if (status === 'empty') {
+    return 'empty';
+  }
+  if (status === 'needs_auth') {
+    return 'needs_auth';
+  }
+  return 'error';
+}
+
+function sourceStateFor(batch: AggregateSearchSourceBatch): WaterfallSourceState {
+  return {
+    source: batch.source,
+    phase: waterfallPhaseFor(batch.status.status),
+    continuation: batch.continuation,
+    inFlight: false,
+    reservedCount: 0,
+    message: batch.status.message
+  };
+}
+
+function loadingWaterfallState(query: string, sources: AggregateSearchSource[]): WaterfallFeedState {
+  const sourceStates: WaterfallSourceState[] = sources.map((source: AggregateSearchSource): WaterfallSourceState => ({
+    source: source,
+    phase: 'loading',
+    continuation: null,
+    inFlight: false,
+    reservedCount: 0,
+    message: ''
+  }));
+  return {
+    query: query,
+    enabledSources: sources.slice(),
+    preferenceDescription: '',
+    shown: [],
+    current: null,
+    stable: [],
+    tail: [],
+    sources: sourceStates
+  };
+}
+
+function orderedAggregateStatuses(sources: AggregateSearchSource[], statuses: AggregateSearchSourceStatus[]): AggregateSearchSourceStatus[] {
+  const ordered: AggregateSearchSourceStatus[] = [];
+  sources.forEach((source: AggregateSearchSource): void => {
+    statuses.forEach((status: AggregateSearchSourceStatus): void => {
+      if (status.source === source && ordered.indexOf(status) < 0) {
+        ordered.push(status);
+      }
+    });
+  });
+  return ordered;
+}
+
+function replaceAggregateStatus(statuses: AggregateSearchSourceStatus[], next: AggregateSearchSourceStatus): void {
+  for (let index = 0; index < statuses.length; index++) {
+    if (statuses[index].source === next.source) {
+      statuses[index] = next;
+      return;
+    }
+  }
+  statuses.push(next);
+}
+
+function failedAggregateBatch(source: AggregateSearchSource, error: Error | Object | string | number | boolean | null | undefined): AggregateSearchSourceBatch {
+  return {
+    source: source,
+    videos: [],
+    posts: [],
+    status: statusFor(source, 'error', aggregateSourceLabel(source) + ' 调用失败：' + errorText(error), 0),
+    continuation: null
+  };
+}
+
+export async function streamAggregateSearchSourceBatches(
+  query: string,
+  requestedSources: AggregateSearchSource[],
+  tasks: Promise<AggregateSearchSourceBatch>[],
+  onPartial: AggregateSearchPartialObserver,
+  nowMs: number
+): Promise<AggregateSearchResult> {
+  const videos: AggregateSearchVideo[] = [];
+  const posts: AggregateSearchPost[] = [];
+  const statuses: AggregateSearchSourceStatus[] = [];
+  let waterfall = loadingWaterfallState(query, requestedSources);
+  let batchIndex = 0;
+  let partialChain: Promise<void> = Promise.resolve();
+  const wrappedTasks: Promise<void>[] = [];
+  for (let index = 0; index < tasks.length; index++) {
+    const source = requestedSources[index];
+    wrappedTasks.push(tasks[index].then((batch: AggregateSearchSourceBatch): Promise<void> => {
+      partialChain = partialChain.then((): void => {
+        batch.videos.forEach((video: AggregateSearchVideo): void => {
+          videos.push(video);
+        });
+        batch.posts.forEach((post: AggregateSearchPost): void => {
+          posts.push(post);
+        });
+        replaceAggregateStatus(statuses, batch.status);
+        waterfall = mergeWaterfallBatch(
+          waterfall,
+          aggregateMediaCandidates(batch.videos.slice(0, 5), batch.posts.slice(0, 5), batchIndex),
+          sourceStateFor(batch),
+          nowMs
+        ).state;
+        batchIndex += 1;
+        const snapshot = aggregateSearchResultFromParts(query, videos, posts, orderedAggregateStatuses(requestedSources, statuses));
+        snapshot.waterfall = waterfall;
+        onPartial(snapshot);
+      });
+      return partialChain;
+    }).catch((error: Error | Object | string | number | boolean | null | undefined): Promise<void> => {
+      const failed = failedAggregateBatch(source, error);
+      partialChain = partialChain.then((): void => {
+        replaceAggregateStatus(statuses, failed.status);
+        waterfall = mergeWaterfallBatch(waterfall, [], sourceStateFor(failed), nowMs).state;
+        batchIndex += 1;
+        const snapshot = aggregateSearchResultFromParts(query, videos, posts, orderedAggregateStatuses(requestedSources, statuses));
+        snapshot.waterfall = waterfall;
+        onPartial(snapshot);
+      });
+      return partialChain;
+    }));
+  }
+  await Promise.all(wrappedTasks);
+  await partialChain;
+  const result = aggregateSearchResultFromParts(query, videos, posts, orderedAggregateStatuses(requestedSources, statuses));
+  result.waterfall = waterfall;
+  return result;
+}
+
+async function aggregateMediaSourceBatch(
+  source: AggregateSearchSource,
+  query: string,
+  youtubeApiKey: string
+): Promise<AggregateSearchSourceBatch> {
+  const mediaArgs: AggregateMediaSearchArgs = { query: query, sources: [source] };
+  const mediaResults = await callMediaVideoSearch(query, mediaArgs as Object, youtubeApiKey);
+  const videos: AggregateSearchVideo[] = [];
+  mediaResults.forEach((result: DynamicGenericToolResult, index: number): void => {
+    if (result.status !== 'success' || dynamicSource(result) !== source || videos.length >= 5) {
+      return;
+    }
+    const video = videoFromDynamic(source, result, index);
+    if (video.url.length > 0) {
+      videos.push(video);
+    }
+  });
+  const matching = mediaResults.filter((result: DynamicGenericToolResult): boolean => dynamicSource(result) === source);
+  const rawStatus = videos.length > 0 ? 'success' : (matching.length > 0 ? matching[0].status : 'empty');
+  return {
+    source: source,
+    videos: videos,
+    posts: [],
+    status: statusFor(source, rawStatus, mediaMessage(source, videos.length, matching), videos.length),
+    continuation: null
+  };
+}
+
+async function aggregateComposioSourceBatch(
+  source: AggregateSearchSource,
+  provider: string,
+  prompt: string,
+  fixedToolId: string = '',
+  fixedArgs: Object | null = null
+): Promise<AggregateSearchSourceBatch> {
+  const posts: AggregateSearchPost[] = [];
+  const statuses: AggregateSearchSourceStatus[] = [];
+  await appendComposioPosts(source, provider, prompt, posts, statuses, fixedToolId, fixedArgs);
+  return {
+    source: source,
+    videos: [],
+    posts: posts.slice(0, 5),
+    status: statuses.length > 0 ? statuses[0] : statusFor(source, 'empty', provider + ' returned 0 rows.', 0),
+    continuation: null
+  };
+}
+
+async function aggregateZhihuSourceBatch(config: AggregateZhihuConfig, query: string): Promise<AggregateSearchSourceBatch> {
+  const posts: AggregateSearchPost[] = [];
+  const statuses: AggregateSearchSourceStatus[] = [];
+  await appendZhihuPosts(config, query, posts, statuses);
+  return {
+    source: 'zhihu',
+    videos: [],
+    posts: posts.slice(0, 5),
+    status: statuses.length > 0 ? statuses[0] : statusFor('zhihu', 'empty', '知乎返回 0 条。', 0),
+    continuation: null
+  };
+}
+
 export async function callAggregateSearch(
   prompt: string,
   args: Object | null,
   youtubeApiKey: string,
-  zhihuConfig: AggregateZhihuConfig = emptyZhihuConfig()
+  zhihuConfig: AggregateZhihuConfig = emptyZhihuConfig(),
+  onPartial: AggregateSearchPartialObserver | null = null,
+  nowMs: number = Date.now()
 ): Promise<AggregateSearchResult> {
   const query = aggregateSearchQueryFromArgs(prompt, args);
   const sources = aggregateSearchSourcesFromArgs(args);
-  const videos: AggregateSearchVideo[] = [];
-  const posts: AggregateSearchPost[] = [];
-  const statuses: AggregateSearchSourceStatus[] = [];
-
-  if (sources.indexOf('youtube') >= 0 || sources.indexOf('bilibili') >= 0) {
-    const mediaSources: string[] = [];
-    if (sources.indexOf('youtube') >= 0) {
-      mediaSources.push('youtube');
+  const tasks: Promise<AggregateSearchSourceBatch>[] = [];
+  sources.forEach((source: AggregateSearchSource): void => {
+    if (source === 'youtube' || source === 'bilibili') {
+      tasks.push(aggregateMediaSourceBatch(source, query, youtubeApiKey));
+    } else if (source === 'x') {
+      const xArgs: AggregateXSearchArgs = { query: query, pageSize: 5 };
+      tasks.push(aggregateComposioSourceBatch(source, 'X', '帮我用 Composio X 搜索 ' + query + ' 的公开 post', 'x.post.search', xArgs as Object));
+    } else if (source === 'hackernews') {
+      tasks.push(aggregateComposioSourceBatch(source, 'Hacker News', '帮我用 Composio Hacker News 查 ' + query));
+    } else if (source === 'reddit') {
+      tasks.push(aggregateComposioSourceBatch(source, 'Reddit', '帮我用 Composio Reddit 查 ' + query + ' 的帖子'));
+    } else {
+      tasks.push(aggregateZhihuSourceBatch(zhihuConfig, query));
     }
-    if (sources.indexOf('bilibili') >= 0) {
-      mediaSources.push('bilibili');
-    }
-    const mediaArgs: AggregateMediaSearchArgs = {
-      query: query,
-      sources: mediaSources
-    };
-    const mediaResults = await callMediaVideoSearch(query, mediaArgs as Object, youtubeApiKey);
-    mediaResults.forEach((result: DynamicGenericToolResult, index: number) => {
-      if (result.status !== 'success') {
-        return;
-      }
-      const video = videoFromDynamic(dynamicSource(result), result, index);
-      if (video.url.length > 0) {
-        videos.push(video);
-      }
-    });
-    if (sources.indexOf('youtube') >= 0) {
-      const youtubeResults = mediaResults.filter((result: DynamicGenericToolResult) => dynamicSource(result) === 'youtube');
-      const youtubeCount = videos.filter((video: AggregateSearchVideo) => video.source === 'youtube').length;
-      const youtubeStatus = youtubeCount > 0 ? 'success' : (youtubeResults.length > 0 ? youtubeResults[0].status : 'empty');
-      statuses.push(statusFor('youtube', youtubeStatus, mediaMessage('youtube', youtubeCount, youtubeResults), youtubeCount));
-    }
-    if (sources.indexOf('bilibili') >= 0) {
-      const bilibiliResults = mediaResults.filter((result: DynamicGenericToolResult) => dynamicSource(result) === 'bilibili');
-      const bilibiliCount = videos.filter((video: AggregateSearchVideo) => video.source === 'bilibili').length;
-      const bilibiliStatus = bilibiliCount > 0 ? 'success' : (bilibiliResults.length > 0 ? bilibiliResults[0].status : 'empty');
-      statuses.push(statusFor('bilibili', bilibiliStatus, mediaMessage('bilibili', bilibiliCount, bilibiliResults), bilibiliCount));
-    }
-  }
-
-  if (sources.indexOf('x') >= 0) {
-    const xArgs: AggregateXSearchArgs = {
-      query: query,
-      pageSize: 5
-    };
-    await appendComposioPosts(
-      'x',
-      'X',
-      '帮我用 Composio X 搜索 ' + query + ' 的公开 post',
-      posts,
-      statuses,
-      'x.post.search',
-      xArgs as Object
-    );
-  }
-
-  if (sources.indexOf('hackernews') >= 0) {
-    await appendComposioPosts('hackernews', 'Hacker News', '帮我用 Composio Hacker News 查 ' + query, posts, statuses);
-  }
-  if (sources.indexOf('reddit') >= 0) {
-    await appendComposioPosts('reddit', 'Reddit', '帮我用 Composio Reddit 查 ' + query + ' 的帖子', posts, statuses);
-  }
-  if (sources.indexOf('zhihu') >= 0) {
-    await appendZhihuPosts(zhihuConfig, query, posts, statuses);
-  }
-
-  return aggregateSearchResultFromParts(query, videos, posts, statuses);
+  });
+  const observer: AggregateSearchPartialObserver = onPartial === null ? (() => {}) : onPartial;
+  return streamAggregateSearchSourceBatches(query, sources, tasks, observer, nowMs);
 }

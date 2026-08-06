@@ -990,6 +990,11 @@ export default function multiAgentRuntimeTest() {
       const inputLine = formatter.line(inputMessage);
       const firstDataLine = formatter.line(firstDataMessage);
       const firstResultLine = formatter.line(firstResultMessage);
+      firstResultMessage.type = AgentMessageType.TASK_RESULT_DATA_PARTIAL;
+      firstResult.status = 'partial';
+      const firstPartialLine = formatter.line(firstResultMessage);
+      firstResultMessage.type = AgentMessageType.TASK_RESULT_DATA;
+      firstResult.status = 'success';
       const dataLine = formatter.line(dataMessage);
       const uiLine = formatter.line(uiMessage);
       const turnLine = formatter.line(turnMessage);
@@ -1003,7 +1008,11 @@ export default function multiAgentRuntimeTest() {
       );
       expect(firstResultLine).assertEqual(
         '[AIPhone][MultiAgentDataResult] conversation=caf571c80 turn=t18046e8c task=k2 ' +
-          'tool=maps.place.search status=success sources=0 error=false'
+          'tool=maps.place.search phase=final status=success sources=0 error=false'
+      );
+      expect(firstPartialLine).assertEqual(
+        '[AIPhone][MultiAgentDataResult] conversation=caf571c80 turn=t18046e8c task=k2 ' +
+          'tool=maps.place.search phase=stream status=partial sources=0 error=false'
       );
       expect(dataLine).assertEqual(
         '[AIPhone][MultiAgentDataTask] conversation=caf571c80 turn=t18046e8c task=k3 ' +

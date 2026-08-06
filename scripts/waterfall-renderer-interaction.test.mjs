@@ -1,0 +1,208 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+
+const renderer = readFileSync(
+  new URL('../entry/src/main/ets/pages/A2uiHome/html/HtmlAggregateSearchHomeRenderer.ets', import.meta.url),
+  'utf8'
+);
+
+function template(name) {
+  const marker = `const ${name}: string = \``;
+  const start = renderer.indexOf(marker);
+  assert.notEqual(start, -1, `${name} template is missing`);
+  const contentStart = start + marker.length;
+  const end = renderer.indexOf('\n`;', contentStart);
+  assert.notEqual(end, -1, `${name} template is unterminated`);
+  return renderer.slice(contentStart, end);
+}
+
+function element() {
+  const classes = new Set();
+  const listeners = {};
+  return {
+    scrollTop: 0,
+    clientHeight: 1000,
+    innerHTML: '',
+    classList: {
+      add: (name) => classes.add(name),
+      remove: (name) => classes.delete(name),
+      toggle: (name) => classes.has(name) ? classes.delete(name) : classes.add(name),
+      contains: (name) => classes.has(name)
+    },
+    addEventListener: (type, listener) => {
+      listeners[type] = listener;
+    },
+    emit: (type, event = {}) => {
+      listeners[type]?.(event);
+    },
+    querySelectorAll: () => []
+  };
+}
+
+const overlay = element();
+const track = element();
+const preferences = element();
+const reasonPanel = element();
+reasonPanel.hidden = true;
+reasonPanel.textContent = '';
+const reasonButton = element();
+const documentListeners = {};
+const actions = [];
+const document = {
+  getElementById: (id) => ({
+    'waterfall-discovery': overlay,
+    'waterfall-track': track,
+    'waterfall-preferences': preferences,
+    'waterfall-reason-panel': reasonPanel
+  })[id] ?? null,
+  querySelector: () => null,
+  querySelectorAll: (selector) => selector === '[data-waterfall-reason]' ? [reasonButton] : [],
+  addEventListener: (type, listener) => {
+    documentListeners[type] = listener;
+  }
+};
+const candidate = (id) => ({
+  id,
+  source: 'youtube',
+  mediaType: 'video',
+  title: id,
+  summary: id,
+  url: `https://example.test/${id}`,
+  coverUrl: '',
+  publishedAt: '',
+  reason: '标题命中查询'
+});
+const window = {
+  __aiphoneWaterfallInitial: {
+    surfaceId: 'surface-1',
+    enabledSources: ['youtube'],
+    aggregateHtml: '',
+    candidates: [candidate('current'), candidate('next')],
+    sources: []
+  },
+  AIPhoneHome: {
+    postAction: (value) => actions.push(JSON.parse(value))
+  }
+};
+
+vm.runInNewContext(template('WATERFALL_JS'), {
+  window,
+  document,
+  setTimeout,
+  clearTimeout
+});
+documentListeners.click({
+  target: {
+    closest: (selector) => selector === '[data-waterfall-enter]' ? {} : null
+  }
+});
+reasonButton.emit('click');
+assert.equal(reasonPanel.hidden, false);
+assert.equal(reasonPanel.textContent, '推荐理由：标题命中查询');
+assert.equal(reasonPanel.classList.contains('active'), true);
+reasonButton.emit('click');
+assert.equal(reasonPanel.hidden, true);
+assert.equal(reasonPanel.classList.contains('active'), false);
+reasonButton.emit('click');
+assert.equal(reasonPanel.hidden, false);
+assert.equal(reasonPanel.classList.contains('active'), true);
+
+track.scrollTop = 600;
+track.emit('scroll');
+await new Promise((resolve) => setTimeout(resolve, 120));
+assert.equal(actions.at(-1)?.id, 'waterfall.feed.advance');
+
+window.__aiphoneApplyWaterfallUpdate({
+  surfaceId: 'surface-1',
+  enabledSources: [],
+  aggregateHtml: '',
+  candidates: [candidate('current'), candidate('next')],
+  sources: [],
+  replenishing: false,
+  exhausted: true
+});
+assert.match(track.innerHTML, /data-waterfall-empty-sources/);
+assert.doesNotMatch(track.innerHTML, /\\u672c\\u8f6e\\u5185\\u5bb9\\u5df2\\u7ed3\\u675f/);
+track.emit('click', {
+  target: {
+    closest: (selector) => selector === '[data-waterfall-empty-sources]' ? {} : null
+  }
+});
+assert.equal(preferences.classList.contains('active'), true);
+
+window.__aiphoneApplyWaterfallUpdate({
+  surfaceId: 'surface-1',
+  enabledSources: ['youtube'],
+  aggregateHtml: '',
+  candidates: [],
+  sources: [],
+  replenishing: false,
+  exhausted: true
+});
+assert.match(track.innerHTML, /\\u672c\\u8f6e\\u5185\\u5bb9\\u5df2\\u7ed3\\u675f/);
+assert.doesNotMatch(track.innerHTML, /至少开启一个来源/);
+assert.doesNotMatch(track.innerHTML, /data-waterfall-empty-sources/);
+
+window.__aiphoneApplyWaterfallUpdate({
+  surfaceId: 'surface-1',
+  enabledSources: ['youtube'],
+  aggregateHtml: '',
+  candidates: [],
+  sources: [],
+  replenishing: true,
+  exhausted: false
+});
+assert.match(track.innerHTML, /\\u6b63\\u5728\\u8865\\u5145\\u5185\\u5bb9/);
+assert.doesNotMatch(track.innerHTML, /至少开启一个来源/);
+assert.doesNotMatch(track.innerHTML, /\\u672c\\u8f6e\\u5185\\u5bb9\\u5df2\\u7ed3\\u675f/);
+
+window.__aiphoneApplyWaterfallUpdate({
+  surfaceId: 'surface-1',
+  enabledSources: ['youtube'],
+  aggregateHtml: '',
+  candidates: [],
+  sources: [{
+    source: 'youtube',
+    phase: 'error',
+    continuation: { kind: 'cursor', value: 'next' },
+    inFlight: false
+  }],
+  replenishing: false,
+  exhausted: false
+});
+assert.match(track.innerHTML, /\\u6b63\\u5728\\u6c47\\u96c6\\u5185\\u5bb9\\u2026/);
+assert.doesNotMatch(track.innerHTML, /至少开启一个来源/);
+assert.doesNotMatch(track.innerHTML, /\\u672c\\u8f6e\\u5185\\u5bb9\\u5df2\\u7ed3\\u675f/);
+
+const disabledCandidate = candidate('disabled-x');
+disabledCandidate.source = 'x';
+window.__aiphoneApplyWaterfallUpdate({
+  surfaceId: 'surface-1',
+  enabledSources: ['youtube'],
+  aggregateHtml: '',
+  candidates: [disabledCandidate],
+  sources: [
+    { source: 'youtube', phase: 'exhausted', continuation: null, inFlight: false },
+    { source: 'x', phase: 'loading', continuation: null, inFlight: true }
+  ],
+  replenishing: false,
+  exhausted: true
+});
+assert.match(track.innerHTML, /\\u672c\\u8f6e\\u5185\\u5bb9\\u5df2\\u7ed3\\u675f/);
+assert.doesNotMatch(track.innerHTML, /disabled-x/);
+
+window.__aiphoneApplyWaterfallUpdate({
+  surfaceId: 'surface-1',
+  enabledSources: ['x'],
+  aggregateHtml: '',
+  candidates: [disabledCandidate],
+  sources: [
+    { source: 'youtube', phase: 'exhausted', continuation: null, inFlight: false },
+    { source: 'x', phase: 'success', continuation: null, inFlight: false }
+  ],
+  replenishing: false,
+  exhausted: false
+});
+assert.match(track.innerHTML, /disabled-x/);
+assert.doesNotMatch(track.innerHTML, /\\u672c\\u8f6e\\u5185\\u5bb9\\u5df2\\u7ed3\\u675f/);

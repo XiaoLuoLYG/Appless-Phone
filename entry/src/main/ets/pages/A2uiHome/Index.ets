@@ -14,6 +14,12 @@ import {
   defaultLocalModelSettings
 } from '@loop/agent-core';
 import { isRollingGoHotelBookingUrl } from '@loop/agent-core';
+import {
+  advanceWaterfallFeed,
+  applyWaterfallSourceSelection,
+  mergeWaterfallFeedSnapshot,
+  WaterfallFeedState
+} from '@loop/agent-core';
 import router from '@ohos.router';
 import { abilityAccessCtrl, bundleManager, common, Permissions } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
@@ -188,6 +194,11 @@ import { RegisteredPageActionContext } from './agent/AiphoneRegisteredActionExec
 import { socialHubComposioToolkitCandidates } from './components/SocialHubViewData';
 import { createHtmlHomeDocument } from './html/HtmlHomeSnapshot';
 import { buildMultiTaskHomePayload, renderHtmlHomeDocument } from './html/HtmlHomeRenderer';
+import {
+  buildWaterfallHomePayload,
+  waterfallAdvanceCurrentFromAction,
+  waterfallEnabledSourcesFromAction
+} from './html/HtmlAggregateSearchHomeRenderer';
 import { createFirecrawlPendingDocument, isFirecrawlToolId } from './html/HtmlFirecrawlHomeRenderer';
 import { isHtmlHomeActionAllowed } from './html/HtmlHomeActionPolicy';
 import { HtmlHomeAction, HtmlHomeBlock, HtmlHomeDocument } from './html/HtmlHomeTypes';
@@ -701,6 +712,12 @@ struct Index {
   @State multiTaskPayloadJson: string = '';
   @State multiTaskShellHtml: string = '';
   @State multiTaskPayloadTick: number = 0;
+  @State waterfallPayloadJson: string = '';
+  @State waterfallPayloadTick: number = 0;
+  private waterfallShellHtml: string = '';
+  private waterfallShellSurfaceId: string = '';
+  private waterfallFeedState: WaterfallFeedState | null = null;
+  private waterfallFeedSurfaceId: string = '';
   private multiTaskActiveSectionId: string = '';
   private multiTaskUserPinnedSection: boolean = false;
   private multiTaskLastMergedRawBySlot: Record<string, string> = {};
@@ -1135,6 +1152,81 @@ struct Index {
     this.multiTaskPayloadTick = this.multiTaskPayloadTick + 1;
   }
 
+  private ensureWaterfallShellHtml(document: HtmlHomeDocument): void {
+    const surfaceId = document.surfaceId ?? '';
+    if (this.waterfallShellHtml.length > 0 && this.waterfallShellSurfaceId === surfaceId) {
+      return;
+    }
+    this.waterfallShellHtml = renderHtmlHomeDocument(document, false);
+    this.waterfallShellSurfaceId = surfaceId;
+  }
+
+  private publishWaterfallPayload(document: HtmlHomeDocument): void {
+    const payload = buildWaterfallHomePayload(document, this.isBusy, this.waterfallFeedState);
+    this.waterfallPayloadJson = payload === null ? '' : JSON.stringify(payload);
+    this.waterfallPayloadTick = this.waterfallPayloadTick + 1;
+  }
+
+  private syncWaterfallPayloadUpdate(document: HtmlHomeDocument): void {
+    if (document.kind !== 'aggregate-search' || document.waterfall === undefined) {
+      this.waterfallPayloadJson = '';
+      this.waterfallFeedState = null;
+      this.waterfallFeedSurfaceId = '';
+      return;
+    }
+    const surfaceId = document.surfaceId ?? '';
+    if (this.waterfallFeedState === null || this.waterfallFeedSurfaceId !== surfaceId) {
+      this.waterfallFeedState = document.waterfall;
+      this.waterfallFeedSurfaceId = surfaceId;
+    } else {
+      this.waterfallFeedState = mergeWaterfallFeedSnapshot(
+        this.waterfallFeedState,
+        document.waterfall,
+        Date.now()
+      ).state;
+    }
+    this.publishWaterfallPayload(document);
+  }
+
+  private handleWaterfallClientAction(action: A2uiAction): boolean {
+    if (action.id !== 'waterfall.sources.select' && action.id !== 'waterfall.feed.advance') {
+      return false;
+    }
+    const document = this.currentHtmlHomeDocument();
+    if (document.kind !== 'aggregate-search' || document.waterfall === undefined) {
+      this.logHtmlHomeActionError(action, 'waterfall_surface_required');
+      return true;
+    }
+    const surfaceId = document.surfaceId ?? '';
+    if (this.waterfallFeedState === null || this.waterfallFeedSurfaceId !== surfaceId) {
+      this.waterfallFeedState = document.waterfall;
+      this.waterfallFeedSurfaceId = surfaceId;
+    }
+    if (action.id === 'waterfall.sources.select') {
+      const enabledSources = waterfallEnabledSourcesFromAction(action, surfaceId);
+      if (enabledSources === null) {
+        this.logHtmlHomeActionError(action, 'invalid_waterfall_source_selection');
+        return true;
+      }
+      this.waterfallFeedState = applyWaterfallSourceSelection(
+        this.waterfallFeedState,
+        enabledSources,
+        Date.now()
+      ).state;
+      this.publishWaterfallPayload(document);
+      return true;
+    }
+    const currentId = waterfallAdvanceCurrentFromAction(action, surfaceId);
+    const current = this.waterfallFeedState.current;
+    if (currentId === null || current === null || current.id !== currentId) {
+      this.logHtmlHomeActionError(action, 'stale_waterfall_current');
+      return true;
+    }
+    this.waterfallFeedState = advanceWaterfallFeed(this.waterfallFeedState, Date.now()).state;
+    this.publishWaterfallPayload(document);
+    return true;
+  }
+
   private scheduleMultiTaskPayloadRefresh(): void {
     if (!isMultiTaskSurface(this.currentSurface)) {
       return;
@@ -1162,7 +1254,18 @@ struct Index {
       this.syncMultiTaskPayloadUpdate(document);
       return;
     }
+    if (document.kind === 'aggregate-search' && document.waterfall !== undefined) {
+      this.multiTaskShellHtml = '';
+      this.ensureWaterfallShellHtml(document);
+      this.syncWaterfallPayloadUpdate(document);
+      return;
+    }
     this.multiTaskShellHtml = '';
+    this.waterfallShellHtml = '';
+    this.waterfallShellSurfaceId = '';
+    this.waterfallPayloadJson = '';
+    this.waterfallFeedState = null;
+    this.waterfallFeedSurfaceId = '';
     this.htmlHomeStableHtml = this.currentHtmlHomeHtml();
   }
 
@@ -1235,6 +1338,9 @@ struct Index {
     }
     if (isMultiTaskSurface(this.currentSurface) && this.multiTaskShellHtml.length > 0) {
       return this.multiTaskShellHtml;
+    }
+    if (this.waterfallShellHtml.length > 0) {
+      return this.waterfallShellHtml;
     }
     if (this.shouldKeepLuckinConfirmWebHtmlStable() || this.shouldKeepLuckinPaymentWebHtmlStable()) {
       return this.htmlHomeStableHtml.length > 0 ? this.htmlHomeStableHtml : this.currentHtmlHomeHtml();
@@ -4993,6 +5099,9 @@ struct Index {
       this.activateMultiTaskSection(action.prompt);
       return;
     }
+    if (this.handleWaterfallClientAction(action)) {
+      return;
+    }
     if (this.isLuckinPaymentActionId(action.id)) {
       this.logLuckinPaymentAction(action, 'received');
     }
@@ -5802,6 +5911,8 @@ struct Index {
         htmlHomeHtml: this.htmlHomeHtmlForView(),
         multiTaskPayloadJson: this.multiTaskPayloadJson,
         multiTaskPayloadTick: this.multiTaskPayloadTick,
+        waterfallPayloadJson: this.waterfallPayloadJson,
+        waterfallPayloadTick: this.waterfallPayloadTick,
         mailDetailEventJson: this.mailDetailEventJson,
         mailReplyEventJson: this.mailReplyEventJson,
         mailCalendarEventJson: this.mailCalendarEventJson,

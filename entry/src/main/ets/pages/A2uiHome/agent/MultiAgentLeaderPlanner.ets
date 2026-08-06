@@ -1438,7 +1438,21 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     const completedToolIds: string[] = this.currentTurnCompletedToolIds(message, input, context, round);
     const dataOwnerIds: string[] = leaderDataCapabilityIds(context);
     const actionOwnerIds: string[] = leaderActionCapabilityIds(context);
-    const toolCatalog: string = JSON.stringify(context.tools);
+    const promptTools: LeaderToolMetadata[] = context.tools.map(
+      (tool: LeaderToolMetadata): LeaderToolMetadata => ({
+        toolId: tool.toolId,
+        domain: tool.domain,
+        intent: tool.toolId,
+        riskLevel: tool.riskLevel,
+        registeredBackends: tool.registeredBackends,
+        inputSchema: tool.inputSchema,
+        outputSchema: tool.outputSchema,
+        actions: tool.actions,
+        planningHint: tool.planningHint === undefined ? undefined :
+          tool.planningHint.split(tool.intent).join(tool.toolId)
+      })
+    );
+    const toolCatalog: string = JSON.stringify(promptTools);
     if (toolCatalog.length > MAX_LEADER_TOOL_CATALOG_CHARS) {
       throw new Error('LEADER_TOOL_CATALOG_LIMIT');
     }

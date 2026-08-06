@@ -996,22 +996,18 @@ const RIDE_HAILING_HOME_JS: string = `
     var confirms = rideConfirmActions(actions);
     if (confirms.length === 0) { return null; }
     var name = text(item && item.name);
-    var price = ridePrice(item && item.price);
-    var category = text(item && item.category);
     for (var index = 0; index < confirms.length; index++) {
       var action = confirms[index];
-      var haystack = (text(action && action.label) + ' ' + text(action && action.prompt)).toLowerCase();
-      if (name.length > 0 && haystack.indexOf(name.toLowerCase()) >= 0) {
-        return action;
-      }
-      if (category.length > 0 && haystack.indexOf(category.toLowerCase()) >= 0) {
-        return action;
-      }
-      if (price.length > 0 && haystack.indexOf(price.toLowerCase()) >= 0) {
+      var actionLabel = text(action && action.label).trim();
+      var actionPrompt = text(action && action.prompt).trim();
+      if (name.length > 0 &&
+        (actionLabel === '确认叫' + name ||
+          actionPrompt === '确认下单：' + name ||
+          actionPrompt.indexOf('确认下单：' + name + ' ') === 0)) {
         return action;
       }
     }
-    return confirms[0];
+    return null;
   }
   function rideStageLabel(stage, showDriver) {
     if (stage === 'estimate') { return '待确认'; }
@@ -1124,17 +1120,21 @@ const RIDE_HAILING_HOME_JS: string = `
       postAction(action);
     });
   }
-  function addRideEstimateConfirmButton(parent, selection, fallbackAction) {
+  function addRideEstimateConfirmButton(parent, selection) {
     var row = add(parent, 'div', 'ride-actions');
     var button = add(row, 'button', 'ride-action-primary');
     button.type = 'button';
-    button.disabled = isBusy;
-    if (isBusy) { button.setAttribute('aria-disabled', 'true'); }
-    add(button, 'span', 'ride-confirm-label', '确认叫车');
+    var label = add(button, 'span', 'ride-confirm-label');
+    selection.syncConfirm = function () {
+      button.disabled = isBusy || selection.action === null;
+      button.setAttribute('aria-disabled', button.disabled ? 'true' : 'false');
+      label.textContent = selection.action === null ? '先选择车型' : '确认叫车';
+    };
+    selection.syncConfirm();
     button.addEventListener('click', function (event) {
       event.stopPropagation();
-      if (isBusy) { return; }
-      postAction(selection.action || fallbackAction);
+      if (isBusy || selection.action === null) { return; }
+      postAction(selection.action);
     });
   }
   function addRideActions(parent, actions, selection) {
@@ -1149,7 +1149,7 @@ const RIDE_HAILING_HOME_JS: string = `
     kept.forEach(function (action) {
       if (isRideHandoffAction(action)) {
         links.push(action);
-      } else if (selection !== null && text(action && action.id) === 'ride.order.confirm') {
+      } else if (text(action && action.id) === 'ride.order.confirm') {
         return;
       } else if (primary === null && isRidePrimaryAction(action)) {
         primary = action;
@@ -1158,7 +1158,7 @@ const RIDE_HAILING_HOME_JS: string = `
       }
     });
     if (selection !== null && confirmActions.length > 0) {
-      addRideEstimateConfirmButton(parent, selection, confirmActions[0]);
+      addRideEstimateConfirmButton(parent, selection);
     } else
     if (primary !== null || secondary.length > 0) {
       var row = add(parent, 'div', 'ride-actions');
@@ -1176,7 +1176,7 @@ const RIDE_HAILING_HOME_JS: string = `
   }
   function renderRideEstimates(parent, block, estimates) {
     if (estimates.length === 0) { return null; }
-    var selection = { action: null };
+    var selection = { action: null, syncConfirm: null };
     var buttons = [];
     var grid = add(parent, 'div', 'ride-estimates');
     function setSelectedEstimate(selectedIndex) {
@@ -1185,7 +1185,8 @@ const RIDE_HAILING_HOME_JS: string = `
         button.setAttribute('data-selected', selected ? 'true' : 'false');
         button.setAttribute('aria-pressed', selected ? 'true' : 'false');
       });
-      selection.action = rideActionForEstimate(block.actions, estimates[selectedIndex]) || rideConfirmActions(block.actions)[0] || null;
+      selection.action = rideActionForEstimate(block.actions, estimates[selectedIndex]);
+      if (selection.syncConfirm) { selection.syncConfirm(); }
     }
     estimates.forEach(function (item, index) {
       var estimate = add(grid, 'button', 'ride-estimate ride-estimate-action ride-estimate-enter');
@@ -1209,7 +1210,6 @@ const RIDE_HAILING_HOME_JS: string = `
       });
       buttons.push(estimate);
     });
-    setSelectedEstimate(0);
     return selection;
   }
   function addRideDetail(parent, label, value) {

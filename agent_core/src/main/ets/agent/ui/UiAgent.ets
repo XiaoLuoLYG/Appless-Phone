@@ -66,6 +66,8 @@ interface PendingDataEntry {
   errorMessage?: string;
   invalidCode: string;
   invalidMessage: string;
+  partialRendered?: boolean;
+  terminalDataReceived: boolean;
 }
 
 interface UiTurnContext {
@@ -143,6 +145,7 @@ export class UiAgent extends MessageDrivenAgent {
     return message.type === AgentMessageType.TASK_CREATE_UI ||
       message.type === AgentMessageType.TASK_CREATE_DATA ||
       message.type === AgentMessageType.TASK_RESULT_DATA ||
+      message.type === AgentMessageType.TASK_RESULT_DATA_PARTIAL ||
       message.type === AgentMessageType.ACTION_OFFERS_READY ||
       message.type === AgentMessageType.TASK_ERROR ||
       message.type === AgentMessageType.ACTION_PLAN_READY ||
@@ -185,6 +188,7 @@ export class UiAgent extends MessageDrivenAgent {
       return;
     }
     if (message.type === AgentMessageType.TASK_RESULT_DATA ||
+      message.type === AgentMessageType.TASK_RESULT_DATA_PARTIAL ||
       message.type === AgentMessageType.ACTION_OFFERS_READY ||
       message.type === AgentMessageType.TASK_ERROR) {
       const current: UiTurnContext | undefined = this.contexts.get(key);
@@ -235,7 +239,8 @@ export class UiAgent extends MessageDrivenAgent {
       }
       return;
     }
-    if (message.type === AgentMessageType.TASK_RESULT_DATA) {
+    if (message.type === AgentMessageType.TASK_RESULT_DATA ||
+      message.type === AgentMessageType.TASK_RESULT_DATA_PARTIAL) {
       await this.handleDataResult(message, key, context);
       return;
     }
@@ -388,7 +393,12 @@ export class UiAgent extends MessageDrivenAgent {
       );
       return;
     }
-    this.rememberPendingData(context, message.taskId, data);
+    this.rememberPendingData(
+      context,
+      message.taskId,
+      data,
+      message.type === AgentMessageType.TASK_RESULT_DATA
+    );
     await this.maybeRenderData(context, key);
   }
 
@@ -418,13 +428,18 @@ export class UiAgent extends MessageDrivenAgent {
     if (task === undefined || !context.skeletonWritten) {
       return;
     }
+    await this.renderPendingPartials(context, key);
+    if (!this.isActive(key, context)) {
+      return;
+    }
     let terminalCount: number = 0;
     while (terminalCount < task.dataTaskIds.length) {
       const pending = context.pendingDataByTaskId.get(task.dataTaskIds[terminalCount]);
       if (pending === undefined ||
         (pending.errorMessage === undefined &&
           (pending.data === undefined || pending.offers === undefined ||
-            pending.offerSourceToolId !== pending.data.toolId))) {
+            pending.offerSourceToolId !== pending.data.toolId ||
+            !pending.terminalDataReceived))) {
         break;
       }
       terminalCount++;
@@ -481,6 +496,31 @@ export class UiAgent extends MessageDrivenAgent {
       readyTaskIds,
       context.finalUiTaskReceived && allTerminal
     );
+  }
+
+  private async renderPendingPartials(context: UiTurnContext, key: string): Promise<void> {
+    const task = context.uiTask;
+    if (task === undefined) {
+      return;
+    }
+    for (let index = 0; index < task.dataTaskIds.length; index++) {
+      const taskId = task.dataTaskIds[index];
+      const pending = context.pendingDataByTaskId.get(taskId);
+      if (pending === undefined || pending.data === undefined ||
+        pending.data.toolId !== 'media.aggregate.search' || pending.data.status !== 'partial' ||
+        pending.terminalDataReceived || pending.partialRendered === true) {
+        continue;
+      }
+      const data = pending.data;
+      await this.renderData(context, key, [data], [], [], false);
+      if (!this.isActive(key, context)) {
+        return;
+      }
+      const current = context.pendingDataByTaskId.get(taskId);
+      if (current === pending) {
+        current.partialRendered = true;
+      }
+    }
   }
 
   private dataTaskRound(taskId: string): number {
@@ -626,10 +666,15 @@ export class UiAgent extends MessageDrivenAgent {
     this.publishUiResult(context, 'action');
   }
 
-  private rememberPendingData(context: UiTurnContext, taskId: string, data: DataResult): void {
+  private rememberPendingData(
+    context: UiTurnContext,
+    taskId: string,
+    data: DataResult,
+    terminalDataReceived: boolean
+  ): void {
     const current: PendingDataEntry | undefined = context.pendingDataByTaskId.get(taskId);
     if (current !== undefined &&
-      (current.data !== undefined || current.errorMessage !== undefined)) {
+      (current.terminalDataReceived || current.errorMessage !== undefined)) {
       return;
     }
     const entry: PendingDataEntry = {
@@ -638,7 +683,10 @@ export class UiAgent extends MessageDrivenAgent {
       offerSourceToolId: current === undefined ? undefined : current.offerSourceToolId,
       errorMessage: current === undefined ? undefined : current.errorMessage,
       invalidCode: '',
-      invalidMessage: ''
+      invalidMessage: '',
+      partialRendered: data.status === 'partial' ? false :
+        current === undefined ? undefined : current.partialRendered,
+      terminalDataReceived
     };
     this.rememberPendingEntry(context, taskId, entry);
   }
@@ -659,7 +707,9 @@ export class UiAgent extends MessageDrivenAgent {
       offerSourceToolId: current === undefined ? undefined : current.offerSourceToolId,
       errorMessage: current === undefined ? undefined : current.errorMessage,
       invalidCode: code,
-      invalidMessage: message
+      invalidMessage: message,
+      partialRendered: current === undefined ? undefined : current.partialRendered,
+      terminalDataReceived: current === undefined ? false : current.terminalDataReceived
     };
     this.rememberPendingEntry(context, taskId, entry);
   }
@@ -684,7 +734,9 @@ export class UiAgent extends MessageDrivenAgent {
       offerSourceToolId: sourceToolId,
       errorMessage: current === undefined ? undefined : current.errorMessage,
       invalidCode: current === undefined ? '' : current.invalidCode,
-      invalidMessage: current === undefined ? '' : current.invalidMessage
+      invalidMessage: current === undefined ? '' : current.invalidMessage,
+      partialRendered: current === undefined ? undefined : current.partialRendered,
+      terminalDataReceived: current === undefined ? false : current.terminalDataReceived
     };
     this.rememberPendingEntry(context, taskId, entry);
   }
@@ -692,13 +744,14 @@ export class UiAgent extends MessageDrivenAgent {
   private rememberPendingError(context: UiTurnContext, taskId: string, message: string): void {
     const current = context.pendingDataByTaskId.get(taskId);
     if (current !== undefined &&
-      (current.data !== undefined || current.errorMessage !== undefined)) {
+      (current.terminalDataReceived || current.errorMessage !== undefined)) {
       return;
     }
     this.rememberPendingEntry(context, taskId, {
       errorMessage: message,
       invalidCode: '',
-      invalidMessage: ''
+      invalidMessage: '',
+      terminalDataReceived: false
     });
   }
 

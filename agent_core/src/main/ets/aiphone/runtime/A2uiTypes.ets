@@ -98,6 +98,13 @@ export interface A2uiTravelOptionData {
   availability: string;
   status: string;
   detail: string;
+  bookingUrl?: string;
+  trainCode?: string;
+  travelDate?: string;
+  saleState?: string;
+  saleAt?: string;
+  fromCode?: string;
+  toCode?: string;
 }
 
 export interface A2uiFoodData {

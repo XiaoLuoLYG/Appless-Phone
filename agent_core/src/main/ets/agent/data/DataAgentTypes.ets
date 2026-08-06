@@ -24,7 +24,10 @@ export type DataTaskAuthorizer = (
 ) => DataTaskAuthorizationResult;
 
 export interface DataTaskExecutor {
-  execute(task: CreateDataTaskPayload): Promise<DataResult>;
+  execute(
+    task: CreateDataTaskPayload,
+    onPartial?: (result: DataResult) => void
+  ): Promise<DataResult>;
 }
 
 export type DataStepKind = 'call' | 'finish';

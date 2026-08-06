@@ -664,15 +664,16 @@ const FOOD_HOME_JS: string = `
       if (button) { button.textContent = expanded ? '收起' : '展开'; }
     });
   }
-  function matchesFilter(node) {
+  function matchesFilter(node, filter) {
+    var activeFilter = filter || state.filter;
     var haystack = text(node.getAttribute('data-search')).toLowerCase();
-    if (state.filter === 'featured') { return node.getAttribute('data-featured') === 'true'; }
-    if (state.filter === 'within_1km') { return distanceMeters(node.getAttribute('data-distance')) <= 1000; }
-    if (state.filter === 'source') { return text(node.getAttribute('data-sources')).length > 0; }
-    if (state.filter === 'coffee') { return haystack.indexOf('咖啡') >= 0 || haystack.indexOf('coffee') >= 0 || haystack.indexOf('瑞幸') >= 0 || haystack.indexOf('luckin') >= 0; }
-    if (state.filter === 'late') { return haystack.indexOf('深夜') >= 0 || haystack.indexOf('夜') >= 0 || haystack.indexOf('宵夜') >= 0; }
-    if (state.filter === 'group') { return haystack.indexOf('聚餐') >= 0 || haystack.indexOf('火锅') >= 0 || haystack.indexOf('烧烤') >= 0; }
-    if (state.filter === 'light') { return haystack.indexOf('轻食') >= 0 || haystack.indexOf('沙拉') >= 0 || haystack.indexOf('简餐') >= 0; }
+    if (activeFilter === 'featured') { return node.getAttribute('data-featured') === 'true'; }
+    if (activeFilter === 'within_1km') { return distanceMeters(node.getAttribute('data-distance')) <= 1000; }
+    if (activeFilter === 'source') { return text(node.getAttribute('data-sources')).length > 0; }
+    if (activeFilter === 'coffee') { return haystack.indexOf('咖啡') >= 0 || haystack.indexOf('coffee') >= 0 || haystack.indexOf('瑞幸') >= 0 || haystack.indexOf('luckin') >= 0; }
+    if (activeFilter === 'late') { return haystack.indexOf('深夜') >= 0 || haystack.indexOf('夜') >= 0 || haystack.indexOf('宵夜') >= 0; }
+    if (activeFilter === 'group') { return haystack.indexOf('聚餐') >= 0 || haystack.indexOf('火锅') >= 0 || haystack.indexOf('烧烤') >= 0; }
+    if (activeFilter === 'light') { return haystack.indexOf('轻食') >= 0 || haystack.indexOf('沙拉') >= 0 || haystack.indexOf('简餐') >= 0; }
     return true;
   }
   function applyFilter() {
@@ -758,7 +759,7 @@ const FOOD_HOME_JS: string = `
   count.id = 'editorial-count';
   add(stats, 'span', 'cover-stat', String(blocks.filter(hasLocation).length) + ' 家可导航');
   var tabs = add(shell, 'nav', 'editorial-tabs');
-  [
+  var filterItems = [
     ['food_show_all', '全部', 'all'],
     ['food_filter_featured', '精选', 'featured'],
     ['food_filter_1km', '1公里内', 'within_1km'],
@@ -767,14 +768,7 @@ const FOOD_HOME_JS: string = `
     ['food_filter_late', '深夜', 'late'],
     ['food_filter_group', '聚餐', 'group'],
     ['food_filter_light', '轻食', 'light']
-  ].forEach(function (item) {
-    var button = add(tabs, 'button', 'editorial-tab', item[1]);
-    button.type = 'button';
-    button.disabled = isBusy;
-    button.setAttribute('data-action', item[0]);
-    button.setAttribute('data-filter', item[2]);
-    button.addEventListener('click', function () { handleFilter({ id: item[0], label: item[1] }); });
-  });
+  ];
   if (blocks.length > 0) {
     var featureBlock = blocks[0];
     var feature = add(shell, 'section', 'editorial-feature');
@@ -843,6 +837,18 @@ const FOOD_HOME_JS: string = `
         button.addEventListener('click', function (event) { event.stopPropagation(); postAction(action); });
       });
     }
+  });
+  var cards = Array.prototype.slice.call(document.querySelectorAll('.editorial-card'));
+  filterItems.filter(function (item) {
+    var matches = cards.filter(function (card) { return matchesFilter(card, item[2]); }).length;
+    return item[2] === 'all' || (matches > 0 && (item[2] === 'within_1km' || matches < cards.length));
+  }).forEach(function (item) {
+    var button = add(tabs, 'button', 'editorial-tab', item[1]);
+    button.type = 'button';
+    button.disabled = isBusy;
+    button.setAttribute('data-action', item[0]);
+    button.setAttribute('data-filter', item[2]);
+    button.addEventListener('click', function () { handleFilter({ id: item[0], label: item[1] }); });
   });
   applyFilter();
 })();
