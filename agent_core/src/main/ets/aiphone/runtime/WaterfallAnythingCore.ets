@@ -504,7 +504,16 @@ function sortTail(state: WaterfallFeedState, incoming: WaterfallCandidate[], now
     }
     return fixedUrls.indexOf(normalizedHttpUrl(candidate.url)) < 0;
   });
-  const candidates: WaterfallCandidate[] = rankedToCandidates(state.tail).concat(filteredIncoming);
+  const occupied: WaterfallRankedCandidate[] = state.shown.slice();
+  if (state.current !== null) {
+    occupied.push(state.current);
+  }
+  state.stable.forEach((item: WaterfallRankedCandidate): void => {
+    occupied.push(item);
+  });
+  const candidates: WaterfallCandidate[] = rankedToCandidates(occupied)
+    .concat(rankedToCandidates(state.tail))
+    .concat(filteredIncoming);
   return rankWaterfallCandidates({
     query: state.query,
     candidates: candidates,
