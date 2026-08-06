@@ -100,6 +100,13 @@ documentListeners.click({
 reasonButton.emit('click');
 assert.equal(reasonPanel.hidden, false);
 assert.equal(reasonPanel.textContent, '推荐理由：标题命中查询');
+assert.equal(reasonPanel.classList.contains('active'), true);
+reasonButton.emit('click');
+assert.equal(reasonPanel.hidden, true);
+assert.equal(reasonPanel.classList.contains('active'), false);
+reasonButton.emit('click');
+assert.equal(reasonPanel.hidden, false);
+assert.equal(reasonPanel.classList.contains('active'), true);
 
 track.scrollTop = 600;
 track.emit('scroll');
