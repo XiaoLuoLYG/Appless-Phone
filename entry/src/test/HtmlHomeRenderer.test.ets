@@ -1855,7 +1855,7 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf("if (feature) { feature.style.display = matchesFilter(feature) ? '' : 'none'; }")).assertLarger(-1);
       expect(html.indexOf("feature.setAttribute('data-search'")).assertLarger(-1);
       expect(html.indexOf("var matches = cards.filter(function (card) { return matchesFilter(card, item[2]); }).length;")).assertLarger(-1);
-      expect(html.indexOf("return item[2] === 'all' || (matches > 0 && matches < cards.length);")).assertLarger(-1);
+      expect(html.indexOf("return item[2] === 'all' || (matches > 0 && (item[2] === 'within_1km' || matches < cards.length));")).assertLarger(-1);
       expect(html.indexOf("['food_show_more', '展示更多'")).assertEqual(-1);
       expect(html.indexOf("id === 'food_show_more'")).assertEqual(-1);
       expect(html.indexOf('state.showMore')).assertEqual(-1);
@@ -1873,6 +1873,14 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('window.AMap')).assertEqual(-1);
       expect(html.indexOf('webapi.amap.com')).assertEqual(-1);
       expect(html.indexOf('ReactDOM')).assertEqual(-1);
+    });
+
+    it('keeps the real one-kilometre filter when every card is nearby', 0, () => {
+      const html = renderHtmlHomeDocument(foodDocumentFixture());
+
+      expect(html.indexOf("['food_filter_1km', '1公里内', 'within_1km']")).assertLarger(-1);
+      expect(html.indexOf("if (id === 'food_filter_1km') { state.filter = 'within_1km'; applyFilter(); return true; }")).assertLarger(-1);
+      expect(html.indexOf("return item[2] === 'all' || (matches > 0 && (item[2] === 'within_1km' || matches < cards.length));")).assertLarger(-1);
     });
 
     it('renders payment documents with the app payment workspace and saved payee form', 0, () => {

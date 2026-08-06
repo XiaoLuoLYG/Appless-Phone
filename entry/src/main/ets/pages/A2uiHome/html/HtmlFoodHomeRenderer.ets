@@ -841,7 +841,7 @@ const FOOD_HOME_JS: string = `
   var cards = Array.prototype.slice.call(document.querySelectorAll('.editorial-card'));
   filterItems.filter(function (item) {
     var matches = cards.filter(function (card) { return matchesFilter(card, item[2]); }).length;
-    return item[2] === 'all' || (matches > 0 && matches < cards.length);
+    return item[2] === 'all' || (matches > 0 && (item[2] === 'within_1km' || matches < cards.length));
   }).forEach(function (item) {
     var button = add(tabs, 'button', 'editorial-tab', item[1]);
     button.type = 'button';
