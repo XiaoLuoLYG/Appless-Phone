@@ -714,6 +714,7 @@ struct Index {
   @State waterfallPayloadJson: string = '';
   @State waterfallPayloadTick: number = 0;
   private waterfallShellHtml: string = '';
+  private waterfallShellSurfaceId: string = '';
   private waterfallFeedState: WaterfallFeedState | null = null;
   private waterfallFeedSurfaceId: string = '';
   private multiTaskActiveSectionId: string = '';
@@ -1151,9 +1152,12 @@ struct Index {
   }
 
   private ensureWaterfallShellHtml(document: HtmlHomeDocument): void {
-    if (this.waterfallShellHtml.length === 0) {
-      this.waterfallShellHtml = renderHtmlHomeDocument(document, false);
+    const surfaceId = document.surfaceId ?? '';
+    if (this.waterfallShellHtml.length > 0 && this.waterfallShellSurfaceId === surfaceId) {
+      return;
     }
+    this.waterfallShellHtml = renderHtmlHomeDocument(document, false);
+    this.waterfallShellSurfaceId = surfaceId;
   }
 
   private publishWaterfallPayload(document: HtmlHomeDocument): void {
@@ -1257,6 +1261,7 @@ struct Index {
     }
     this.multiTaskShellHtml = '';
     this.waterfallShellHtml = '';
+    this.waterfallShellSurfaceId = '';
     this.waterfallPayloadJson = '';
     this.waterfallFeedState = null;
     this.waterfallFeedSurfaceId = '';

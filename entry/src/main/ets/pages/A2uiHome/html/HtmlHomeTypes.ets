@@ -89,6 +89,7 @@ export interface HtmlHomePersonaMemory {
 export interface WaterfallHomePayload {
   surfaceId: string;
   query: string;
+  aggregateHtml: string;
   candidates: WaterfallRankedCandidate[];
   enabledSources: string[];
   sources: WaterfallSourceState[];
