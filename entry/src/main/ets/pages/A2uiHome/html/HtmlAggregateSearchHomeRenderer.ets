@@ -650,6 +650,8 @@ const WATERFALL_CSS: string = `
 .waterfall-card p { color: var(--ink-soft); line-height: 1.45; }
 .waterfall-meta { color: var(--muted); font-size: 13px; }
 .waterfall-reason { color: var(--accent); font-size: 13px; }
+.waterfall-reason-panel { position: fixed; z-index: 2; top: 68px; left: 22px; right: 22px;
+  padding: 10px 12px; border-radius: 12px; background: var(--panel-strong); color: var(--accent); }
 .waterfall-toolbar { position: fixed; z-index: 2; top: 14px; left: 14px; right: 14px; display: flex; justify-content: space-between; }
 .waterfall-preferences { position: fixed; z-index: 3; inset: 0; display: none; padding: 84px 22px 30px; background: var(--paper); }
 .waterfall-preferences.active { display: block; }
@@ -663,6 +665,7 @@ const WATERFALL_JS: string = `
   var overlay = document.getElementById('waterfall-discovery');
   var track = document.getElementById('waterfall-track');
   var preferences = document.getElementById('waterfall-preferences');
+  var reasonPanel = document.getElementById('waterfall-reason-panel');
   var state = window.__aiphoneWaterfallInitial || null;
   var mode = 'entry';
   var enabledSources = state && state.enabledSources ? state.enabledSources.slice() : [];
@@ -754,6 +757,10 @@ const WATERFALL_JS: string = `
     var status = state.replenishing ? '<div class="waterfall-status">\\u6b63\\u5728\\u8865\\u5145\\u5185\\u5bb9</div>' : (state.exhausted ? '<div class="waterfall-status">\\u672c\\u8f6e\\u5185\\u5bb9\\u5df2\\u7ed3\\u675f</div>' : '');
     track.innerHTML = status + empty + items.map(renderCandidate).join('');
     track.scrollTop = 0;
+    if (reasonPanel) {
+      reasonPanel.textContent = items.length === 0 ? '' : '推荐理由：' + text(items[0].reason);
+      if (items.length === 0) reasonPanel.hidden = true;
+    }
   }
   track.addEventListener('scroll', function () {
     clearTimeout(scrollTimer);
@@ -767,13 +774,19 @@ const WATERFALL_JS: string = `
     render();
   });
   document.querySelectorAll('[data-waterfall-back]').forEach(function (button) {
-    button.addEventListener('click', function () { mode = 'entry'; overlay.classList.remove('active'); });
+    button.addEventListener('click', function () {
+      mode = 'entry';
+      overlay.classList.remove('active');
+      if (reasonPanel) reasonPanel.hidden = true;
+    });
   });
   document.querySelectorAll('[data-waterfall-preferences]').forEach(function (button) {
     button.addEventListener('click', renderPreferences);
   });
   document.querySelectorAll('[data-waterfall-reason]').forEach(function (button) {
-    button.addEventListener('click', function () { mode = 'reason_open'; track.classList.toggle('reason-open'); });
+    button.addEventListener('click', function () {
+      if (reasonPanel && reasonPanel.textContent) reasonPanel.hidden = !reasonPanel.hidden;
+    });
   });
   window.__aiphoneApplyWaterfallUpdate = function (payload) {
     mergePayload(payload);
@@ -920,7 +933,7 @@ export function renderAggregateSearchHomeDocument(document: HtmlHomeDocument, is
     '<style>', AGGREGATE_CSS, WATERFALL_CSS, '</style></head><body>',
     '<main class="aggregate-shell">',
     waterfall === null ? renderAggregateMainContent(document, isBusy, false) : waterfall.aggregateHtml,
-    '</main>', waterfall !== null ? '<section id="waterfall-discovery" class="waterfall-overlay"><div class="waterfall-toolbar"><button type="button" data-waterfall-back>返回</button><button type="button" data-waterfall-preferences>来源偏好</button><button type="button" data-waterfall-reason>推荐理由</button></div><div id="waterfall-track" class="waterfall-track">' + waterfallStatus + '</div><div id="waterfall-preferences" class="waterfall-preferences"></div></section>' : '',
+    '</main>', waterfall !== null ? '<section id="waterfall-discovery" class="waterfall-overlay"><div class="waterfall-toolbar"><button type="button" data-waterfall-back>返回</button><button type="button" data-waterfall-preferences>来源偏好</button><button type="button" data-waterfall-reason>推荐理由</button></div><div id="waterfall-reason-panel" class="waterfall-reason-panel" hidden></div><div id="waterfall-track" class="waterfall-track">' + waterfallStatus + '</div><div id="waterfall-preferences" class="waterfall-preferences"></div></section>' : '',
     '<script>', AGGREGATE_JS, waterfall !== null ? 'window.__aiphoneWaterfallInitial=' + waterfallJson + ';' + WATERFALL_JS : '', '</script></body></html>'
   ].join('');
 }
