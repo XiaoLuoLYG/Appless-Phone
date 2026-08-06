@@ -162,10 +162,47 @@ window.__aiphoneApplyWaterfallUpdate({
   enabledSources: ['youtube'],
   aggregateHtml: '',
   candidates: [],
-  sources: [],
+  sources: [{
+    source: 'youtube',
+    phase: 'error',
+    continuation: { kind: 'cursor', value: 'next' },
+    inFlight: false
+  }],
   replenishing: false,
   exhausted: false
 });
 assert.match(track.innerHTML, /\\u6b63\\u5728\\u6c47\\u96c6\\u5185\\u5bb9\\u2026/);
 assert.doesNotMatch(track.innerHTML, /至少开启一个来源/);
+assert.doesNotMatch(track.innerHTML, /\\u672c\\u8f6e\\u5185\\u5bb9\\u5df2\\u7ed3\\u675f/);
+
+const disabledCandidate = candidate('disabled-x');
+disabledCandidate.source = 'x';
+window.__aiphoneApplyWaterfallUpdate({
+  surfaceId: 'surface-1',
+  enabledSources: ['youtube'],
+  aggregateHtml: '',
+  candidates: [disabledCandidate],
+  sources: [
+    { source: 'youtube', phase: 'exhausted', continuation: null, inFlight: false },
+    { source: 'x', phase: 'loading', continuation: null, inFlight: true }
+  ],
+  replenishing: false,
+  exhausted: true
+});
+assert.match(track.innerHTML, /\\u672c\\u8f6e\\u5185\\u5bb9\\u5df2\\u7ed3\\u675f/);
+assert.doesNotMatch(track.innerHTML, /disabled-x/);
+
+window.__aiphoneApplyWaterfallUpdate({
+  surfaceId: 'surface-1',
+  enabledSources: ['x'],
+  aggregateHtml: '',
+  candidates: [disabledCandidate],
+  sources: [
+    { source: 'youtube', phase: 'exhausted', continuation: null, inFlight: false },
+    { source: 'x', phase: 'success', continuation: null, inFlight: false }
+  ],
+  replenishing: false,
+  exhausted: false
+});
+assert.match(track.innerHTML, /disabled-x/);
 assert.doesNotMatch(track.innerHTML, /\\u672c\\u8f6e\\u5185\\u5bb9\\u5df2\\u7ed3\\u675f/);

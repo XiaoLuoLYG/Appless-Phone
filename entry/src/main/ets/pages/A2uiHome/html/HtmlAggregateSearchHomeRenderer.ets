@@ -970,13 +970,16 @@ export function buildWaterfallHomePayload(
   append(state.current);
   state.stable.forEach(append);
   state.tail.forEach(append);
-  const replenishing = isBusy || state.sources.some((source: WaterfallSourceState): boolean => source.inFlight || source.phase === 'loading');
+  const activeCandidates = candidates.filter((candidate: WaterfallRankedCandidate): boolean =>
+    state.enabledSources.indexOf(candidate.source) >= 0);
   const relevantSources = state.sources.filter((source: WaterfallSourceState): boolean =>
     state.enabledSources.indexOf(source.source) >= 0);
-  const exhausted = candidates.length === 0 && state.enabledSources.length > 0 &&
+  const replenishing = isBusy || relevantSources.some((source: WaterfallSourceState): boolean =>
+    source.inFlight || source.phase === 'loading');
+  const exhausted = activeCandidates.length === 0 && state.enabledSources.length > 0 &&
     relevantSources.length === state.enabledSources.length && relevantSources.every((source: WaterfallSourceState): boolean =>
-    source.phase === 'empty' || source.phase === 'needs_auth' || source.phase === 'error' || source.phase === 'exhausted' ||
-    (source.phase === 'success' && source.continuation === null));
+    source.continuation === null && (source.phase === 'empty' || source.phase === 'needs_auth' ||
+    source.phase === 'error' || source.phase === 'exhausted' || source.phase === 'success'));
   return {
     surfaceId: document.surfaceId ?? '',
     query: state.query,
