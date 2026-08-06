@@ -8,7 +8,10 @@ import {
   parseHotelSearchRequest
 } from '@loop/agent-core';
 import { renderHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeRenderer';
-import { buildWaterfallHomePayload } from '../main/ets/pages/A2uiHome/html/HtmlAggregateSearchHomeRenderer';
+import {
+  buildWaterfallHomePayload,
+  waterfallEnabledSourcesFromAction
+} from '../main/ets/pages/A2uiHome/html/HtmlAggregateSearchHomeRenderer';
 import { buildMultiTaskHomePayload } from '../main/ets/pages/A2uiHome/html/HtmlMultiTaskHomeRenderer';
 import { createFirecrawlPendingDocument } from '../main/ets/pages/A2uiHome/html/HtmlFirecrawlHomeRenderer';
 import { createHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeSnapshot';
@@ -2524,6 +2527,19 @@ export default function htmlHomeRendererTest() {
 
       const replenishingHtml = renderHtmlHomeDocument(doc, true);
       expect(replenishingHtml.indexOf('正在补充内容')).assertLarger(-1);
+    });
+
+    it('keeps an explicit empty Waterfall source selection in the posted client action', 0, () => {
+      const doc = waterfallRendererFixture();
+      const surfaceId = doc.surfaceId ?? '';
+      const action = parseHtmlHomeAction(
+        '{"id":"waterfall.sources.select","label":"来源偏好","prompt":"","variant":"secondary",' +
+        '"kind":"client","args":{"surfaceId":"' + surfaceId + '","enabledSources":[]}}'
+      );
+
+      expect(action === null).assertFalse();
+      expect(waterfallEnabledSourcesFromAction(action as A2uiAction, surfaceId)?.length).assertEqual(0);
+      expect(waterfallEnabledSourcesFromAction(action as A2uiAction, 'other-surface')).assertEqual(null);
     });
 
     it('keeps the Waterfall entry hidden when no candidate is valid', 0, () => {

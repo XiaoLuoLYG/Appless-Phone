@@ -1,4 +1,9 @@
-import { WaterfallRankedCandidate, WaterfallSourceState } from '@loop/agent-core';
+import {
+  A2uiAction,
+  WaterfallFeedState,
+  WaterfallRankedCandidate,
+  WaterfallSourceState
+} from '@loop/agent-core';
 import { HtmlHomeBlock, HtmlHomeDocument, HtmlHomeMetric, WaterfallHomePayload } from './HtmlHomeTypes';
 import {
   APP_LOGO_BILIBILI,
@@ -688,7 +693,14 @@ const WATERFALL_JS: string = `
     });
     state = payload;
     state.candidates = merged;
-    if (enabledSources.length === 0 && payload.enabledSources) enabledSources = payload.enabledSources.slice();
+    enabledSources = payload.enabledSources ? payload.enabledSources.slice() : [];
+  }
+  function postSourceSelection() {
+    if (!state || !window.AIPhoneHome || typeof window.AIPhoneHome.postAction !== 'function') return;
+    window.AIPhoneHome.postAction(JSON.stringify({
+      id: 'waterfall.sources.select', label: '来源偏好', prompt: '', variant: 'secondary', kind: 'client',
+      args: { surfaceId: state.surfaceId || '', enabledSources: enabledSources }
+    }));
   }
   function renderCandidate(item) {
     var cover = item.coverUrl ? '<img src="' + escapeHtml(item.coverUrl) + '" alt="' + escapeHtml(item.title) + '" loading="lazy" />' : '';
@@ -710,6 +722,7 @@ const WATERFALL_JS: string = `
     preferences.querySelectorAll('[data-waterfall-source]').forEach(function (input) {
       input.addEventListener('change', function () {
         enabledSources = Array.prototype.slice.call(preferences.querySelectorAll('[data-waterfall-source]:checked')).map(function (node) { return node.getAttribute('data-waterfall-source'); });
+        postSourceSelection();
         render();
       });
     });
@@ -749,11 +762,43 @@ export function shouldRenderAggregateSearchHomeDocument(document: HtmlHomeDocume
   return document.kind === 'aggregate-search';
 }
 
-export function buildWaterfallHomePayload(document: HtmlHomeDocument, isBusy: boolean): WaterfallHomePayload | null {
-  if (document.waterfall === undefined) {
+type WaterfallActionValue = Object | string | number | boolean | null | undefined;
+
+export function waterfallEnabledSourcesFromAction(action: A2uiAction, surfaceId: string): string[] | null {
+  if (action.id !== 'waterfall.sources.select' || action.kind !== 'client' || action.args === undefined) {
     return null;
   }
-  const state = document.waterfall;
+  const args = action.args as Record<string, WaterfallActionValue>;
+  if (typeof args['surfaceId'] !== 'string' || args['surfaceId'] !== surfaceId ||
+    !Array.isArray(args['enabledSources'])) {
+    return null;
+  }
+  const rawSources = args['enabledSources'] as WaterfallActionValue[];
+  const enabledSources: string[] = [];
+  for (let index = 0; index < rawSources.length; index += 1) {
+    if (typeof rawSources[index] !== 'string') {
+      return null;
+    }
+    const source = (rawSources[index] as string).trim();
+    if (source.length === 0) {
+      return null;
+    }
+    if (enabledSources.indexOf(source) < 0) {
+      enabledSources.push(source);
+    }
+  }
+  return enabledSources;
+}
+
+export function buildWaterfallHomePayload(
+  document: HtmlHomeDocument,
+  isBusy: boolean,
+  waterfallState: WaterfallFeedState | null = null
+): WaterfallHomePayload | null {
+  const state = waterfallState ?? document.waterfall;
+  if (state === undefined) {
+    return null;
+  }
   const candidates: WaterfallRankedCandidate[] = [];
   const seen: string[] = [];
   const append = (candidate: WaterfallRankedCandidate | null): void => {

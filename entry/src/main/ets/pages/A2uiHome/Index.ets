@@ -14,6 +14,11 @@ import {
   defaultLocalModelSettings
 } from '@loop/agent-core';
 import { isRollingGoHotelBookingUrl } from '@loop/agent-core';
+import {
+  applyWaterfallSourceSelection,
+  mergeWaterfallFeedSnapshot,
+  WaterfallFeedState
+} from '@loop/agent-core';
 import router from '@ohos.router';
 import { abilityAccessCtrl, bundleManager, common, Permissions } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
@@ -188,7 +193,10 @@ import { RegisteredPageActionContext } from './agent/AiphoneRegisteredActionExec
 import { socialHubComposioToolkitCandidates } from './components/SocialHubViewData';
 import { createHtmlHomeDocument } from './html/HtmlHomeSnapshot';
 import { buildMultiTaskHomePayload, renderHtmlHomeDocument } from './html/HtmlHomeRenderer';
-import { buildWaterfallHomePayload } from './html/HtmlAggregateSearchHomeRenderer';
+import {
+  buildWaterfallHomePayload,
+  waterfallEnabledSourcesFromAction
+} from './html/HtmlAggregateSearchHomeRenderer';
 import { createFirecrawlPendingDocument, isFirecrawlToolId } from './html/HtmlFirecrawlHomeRenderer';
 import { isHtmlHomeActionAllowed } from './html/HtmlHomeActionPolicy';
 import { HtmlHomeAction, HtmlHomeBlock, HtmlHomeDocument } from './html/HtmlHomeTypes';
@@ -704,6 +712,8 @@ struct Index {
   @State waterfallPayloadJson: string = '';
   @State waterfallPayloadTick: number = 0;
   private waterfallShellHtml: string = '';
+  private waterfallFeedState: WaterfallFeedState | null = null;
+  private waterfallFeedSurfaceId: string = '';
   private multiTaskActiveSectionId: string = '';
   private multiTaskUserPinnedSection: boolean = false;
   private multiTaskLastMergedRawBySlot: Record<string, string> = {};
@@ -1147,11 +1157,54 @@ struct Index {
   private syncWaterfallPayloadUpdate(document: HtmlHomeDocument): void {
     if (document.kind !== 'aggregate-search' || document.waterfall === undefined) {
       this.waterfallPayloadJson = '';
+      this.waterfallFeedState = null;
+      this.waterfallFeedSurfaceId = '';
       return;
     }
-    const payload = buildWaterfallHomePayload(document, this.isBusy);
+    const surfaceId = document.surfaceId ?? '';
+    if (this.waterfallFeedState === null || this.waterfallFeedSurfaceId !== surfaceId) {
+      this.waterfallFeedState = document.waterfall;
+      this.waterfallFeedSurfaceId = surfaceId;
+    } else {
+      this.waterfallFeedState = mergeWaterfallFeedSnapshot(
+        this.waterfallFeedState,
+        document.waterfall,
+        Date.now()
+      ).state;
+    }
+    const payload = buildWaterfallHomePayload(document, this.isBusy, this.waterfallFeedState);
     this.waterfallPayloadJson = payload === null ? '' : JSON.stringify(payload);
     this.waterfallPayloadTick = this.waterfallPayloadTick + 1;
+  }
+
+  private handleWaterfallClientAction(action: A2uiAction): boolean {
+    if (action.id !== 'waterfall.sources.select') {
+      return false;
+    }
+    const document = this.currentHtmlHomeDocument();
+    if (document.kind !== 'aggregate-search' || document.waterfall === undefined) {
+      this.logHtmlHomeActionError(action, 'waterfall_surface_required');
+      return true;
+    }
+    const surfaceId = document.surfaceId ?? '';
+    const enabledSources = waterfallEnabledSourcesFromAction(action, surfaceId);
+    if (enabledSources === null) {
+      this.logHtmlHomeActionError(action, 'invalid_waterfall_source_selection');
+      return true;
+    }
+    if (this.waterfallFeedState === null || this.waterfallFeedSurfaceId !== surfaceId) {
+      this.waterfallFeedState = document.waterfall;
+      this.waterfallFeedSurfaceId = surfaceId;
+    }
+    this.waterfallFeedState = applyWaterfallSourceSelection(
+      this.waterfallFeedState,
+      enabledSources,
+      Date.now()
+    ).state;
+    const payload = buildWaterfallHomePayload(document, this.isBusy, this.waterfallFeedState);
+    this.waterfallPayloadJson = payload === null ? '' : JSON.stringify(payload);
+    this.waterfallPayloadTick = this.waterfallPayloadTick + 1;
+    return true;
   }
 
   private scheduleMultiTaskPayloadRefresh(): void {
@@ -1190,6 +1243,8 @@ struct Index {
     this.multiTaskShellHtml = '';
     this.waterfallShellHtml = '';
     this.waterfallPayloadJson = '';
+    this.waterfallFeedState = null;
+    this.waterfallFeedSurfaceId = '';
     this.htmlHomeStableHtml = this.currentHtmlHomeHtml();
   }
 
@@ -5008,6 +5063,9 @@ struct Index {
     this.mailDetailSuggestionGuard.invalidateForPageAction(action.id);
     if (action.id === 'multi_task.section.activate') {
       this.activateMultiTaskSection(action.prompt);
+      return;
+    }
+    if (this.handleWaterfallClientAction(action)) {
       return;
     }
     if (this.isLuckinPaymentActionId(action.id)) {
