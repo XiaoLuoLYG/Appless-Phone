@@ -253,6 +253,7 @@ const STRIPE_RECEIVING_PROFILE_KEY: string = 'stripe_receiving_profile';
 const COMPOSIO_AUTH_STORE_NAME: string = 'aiphone_composio_auth_store';
 const COMPOSIO_USER_ID_KEY: string = 'composio_user_id';
 const ANYTHING_DEMO_ROUTE_URL: string = 'pages/A2uiHome/AnythingDemo';
+const MOVIE_DEMO_ROUTE_URL: string = 'pages/A2uiHome/MovieDemo';
 const READ_CALENDAR_PERMISSION: Permissions = 'ohos.permission.READ_CALENDAR';
 const WRITE_CALENDAR_PERMISSION: Permissions = 'ohos.permission.WRITE_CALENDAR';
 const APPROX_LOCATION_PERMISSION: Permissions = 'ohos.permission.APPROXIMATELY_LOCATION';
@@ -2738,6 +2739,19 @@ struct Index {
       router.pushUrl({ url: ANYTHING_DEMO_ROUTE_URL }, (error) => {
         if (error) {
           aiLogError('[AIPhone][AnythingDemoRouteFailed] ' + JSON.stringify(error));
+          resolve(false);
+          return;
+        }
+        resolve(true);
+      });
+    });
+  }
+
+  private openMovieDemo(): Promise<boolean> {
+    return new Promise<boolean>((resolve: (value: boolean) => void): void => {
+      router.pushUrl({ url: MOVIE_DEMO_ROUTE_URL }, (error) => {
+        if (error) {
+          aiLogError('[AIPhone][MovieDemoRouteFailed] ' + JSON.stringify(error));
           resolve(false);
           return;
         }
@@ -5393,6 +5407,38 @@ struct Index {
         error: ''
       }));
       this.appendMessage('assistant', '已打开世界杯界面。');
+      return true;
+    }
+    if (toolId === 'movie.open') {
+      aiLogInfo('[AIPhone][MovieDemoRouteByTool] actionId=' + actionId +
+        ' promptChars=' + prompt.length.toString());
+      this.markChecking('正在打开电影界面...');
+      const opened = await this.openMovieDemo();
+      if (!runtimeCallbackIsCurrent(
+        this.activeRuntimeOwner, this.runtimeGeneration, runtimeOwner, toolGeneration
+      )) {
+        return false;
+      }
+      if (!opened) {
+        this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+          ok: false,
+          status: 'error',
+          message: '无法打开电影界面。',
+          requestDebug: this.lastModelRequest,
+          assistantDebug: this.lastModelOutput,
+          error: 'Movie demo route could not be opened.'
+        }));
+        return false;
+      }
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: true,
+        status: 'ready',
+        message: '已打开电影界面。',
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: ''
+      }));
+      this.appendMessage('assistant', '已打开电影界面。');
       return true;
     }
     configureDidiMcpSandboxForRuntime(this.didiMcpSandboxEnabled);

@@ -1196,7 +1196,7 @@ function verifySourceContracts() {
     'public compatibility module derives the runtime registry'
   );
   assert(runtimeIds.length === runtimeUniqueIds.size, 'runtime tool ids are unique');
-  assert(runtimeIds.length === 53, 'AIPhone runtime tool registry has expected fixed count', `found ${runtimeIds.length}`);
+  assert(runtimeIds.length === 54, 'AIPhone runtime tool registry has expected fixed count', `found ${runtimeIds.length}`);
   for (const id of [
     'travel.search',
     'time',
@@ -1615,7 +1615,7 @@ function verifySourceContracts() {
       'maps.place.search', 'maps.place.details'
     ]],
     ['media search', mediaSearchSkill, [
-      'media.video.search', 'media.aggregate.search', 'youtube.video.search',
+      'movie.open', 'media.video.search', 'media.aggregate.search', 'youtube.video.search',
       'youtube.mine.playlists', 'youtube.mine.subscriptions', 'worldcup.open', 'memory.update'
     ]],
     ['travel planning', travelPlanningSkill, [

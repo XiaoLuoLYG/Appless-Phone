@@ -53,6 +53,14 @@ export default function personaStoreTest() {
       expect(pack.skills.indexOf('dynamic.search')).assertEqual(-1);
     });
 
+    it('routes first-party movie discovery through movie.open', 0, () => {
+      configureDefaultPersonaStoreForTests();
+      const pack = personaPackForId('entertainment_companion');
+
+      expect(pack.skills.indexOf('movie.open')).assertLarger(-1);
+      expect(pack.skills.indexOf('不要把电影专页请求交给 dynamic.search')).assertLarger(-1);
+    });
+
     it('falls back to default persona when requested pack is missing', 0, () => {
       configureDefaultPersonaStoreForTests();
       const pack = personaPackForId('missing_persona');
