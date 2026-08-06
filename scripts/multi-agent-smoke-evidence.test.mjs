@@ -1006,6 +1006,24 @@ test('requires one strictly correlated successful multi-agent turn', () => {
   }).complete, false);
 });
 
+test('counts only the final data phase as terminal after streaming partials', () => {
+  const evidence = multiAgentTurnEvidence(`
+[AIPhone][MultiAgentInput] conversation=c1 turn=t1 task=input-1
+[AIPhone][MultiAgentDataTask] conversation=c1 turn=t1 task=data-1 round=1 tool=media.aggregate.search predecessor=none path=none target=none binding=false
+[AIPhone][MultiAgentUiTask] conversation=c1 turn=t1 task=ui-1 dataTasks=data-1
+[AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 tool=media.aggregate.search phase=stream status=partial sources=4 error=false
+[AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 tool=media.aggregate.search phase=final status=partial sources=6 error=false
+[AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=ui-1 surface=surface-1 state=result
+[AIPhone][MultiAgentTurnResult] conversation=c1 turn=t1 task=input-1 status=partial surface=surface-1 roundCount=1 messageChars=12
+`, {
+    expectedToolIds: ['media.aggregate.search']
+  });
+
+  assert.equal(evidence.complete, true);
+  assert.equal(evidence.status, 'partial');
+  assert.deepEqual(evidence.failures, []);
+});
+
 test('collapses adjacent identical lifecycle copies from the two HiLog channels', () => {
   const evidence = multiAgentTurnEvidence(dualChannelTurn, {
     expectedToolIds: ['travel.search', 'travel.search']

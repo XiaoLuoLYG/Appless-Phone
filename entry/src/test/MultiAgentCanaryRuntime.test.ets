@@ -29,6 +29,7 @@ import {
   ObservationDigest,
   TaskErrorPayload,
   TurnResultPayload,
+  UiRenderResultPayload,
   UiSurfaceWriteLease,
   UiSurfaceWriter,
   composioDynamicResultFromObservation,
@@ -2365,7 +2366,7 @@ export default function multiAgentCanaryRuntimeTest() {
           publish(waterfallMediaResult('partial', 'late-source', 'first-source', true));
         }
         await finalGate.promise;
-        return waterfallMediaResult('success', 'final-result');
+        return waterfallMediaResult('partial', 'final-result', '', true);
       };
       const runtime = new MultiAgentCanaryRuntime(options);
 
@@ -2389,7 +2390,18 @@ export default function multiAgentCanaryRuntimeTest() {
         finalGate.open();
       }
       const outcome = await pending as MultiAgentSettledOutcome;
-      expect(outcome.status).assertEqual('success');
+      expect(outcome.status).assertEqual('partial');
+      const finalMessages = bus.messages.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TASK_RESULT_DATA
+      );
+      const resultMessages = bus.messages.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TASK_RESULT_UI &&
+          (message.payload as UiRenderResultPayload).state === 'result'
+      );
+      expect(finalMessages.length).assertEqual(1);
+      expect((finalMessages[0].payload as DataResult).status).assertEqual('partial');
+      expect(resultMessages.length).assertEqual(1);
+      expect((resultMessages[0].payload as UiRenderResultPayload).surfaceId.length).assertLarger(0);
       let firstPartialIndex: number = -1;
       let finalResultIndex: number = -1;
       bus.messages.forEach((message: AgentMessage, index: number): void => {

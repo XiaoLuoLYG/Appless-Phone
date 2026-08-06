@@ -67,6 +67,7 @@ interface PendingDataEntry {
   invalidCode: string;
   invalidMessage: string;
   partialRendered?: boolean;
+  terminalDataReceived: boolean;
 }
 
 interface UiTurnContext {
@@ -392,7 +393,12 @@ export class UiAgent extends MessageDrivenAgent {
       );
       return;
     }
-    this.rememberPendingData(context, message.taskId, data);
+    this.rememberPendingData(
+      context,
+      message.taskId,
+      data,
+      message.type === AgentMessageType.TASK_RESULT_DATA
+    );
     await this.maybeRenderData(context, key);
   }
 
@@ -433,7 +439,7 @@ export class UiAgent extends MessageDrivenAgent {
         (pending.errorMessage === undefined &&
           (pending.data === undefined || pending.offers === undefined ||
             pending.offerSourceToolId !== pending.data.toolId ||
-            (pending.data.toolId === 'media.aggregate.search' && pending.data.status === 'partial')))) {
+            !pending.terminalDataReceived))) {
         break;
       }
       terminalCount++;
@@ -502,7 +508,7 @@ export class UiAgent extends MessageDrivenAgent {
       const pending = context.pendingDataByTaskId.get(taskId);
       if (pending === undefined || pending.data === undefined ||
         pending.data.toolId !== 'media.aggregate.search' || pending.data.status !== 'partial' ||
-        pending.partialRendered === true) {
+        pending.terminalDataReceived || pending.partialRendered === true) {
         continue;
       }
       const data = pending.data;
@@ -660,11 +666,15 @@ export class UiAgent extends MessageDrivenAgent {
     this.publishUiResult(context, 'action');
   }
 
-  private rememberPendingData(context: UiTurnContext, taskId: string, data: DataResult): void {
+  private rememberPendingData(
+    context: UiTurnContext,
+    taskId: string,
+    data: DataResult,
+    terminalDataReceived: boolean
+  ): void {
     const current: PendingDataEntry | undefined = context.pendingDataByTaskId.get(taskId);
     if (current !== undefined &&
-      ((current.data !== undefined && current.data.status !== 'partial') ||
-        current.errorMessage !== undefined)) {
+      (current.terminalDataReceived || current.errorMessage !== undefined)) {
       return;
     }
     const entry: PendingDataEntry = {
@@ -675,7 +685,8 @@ export class UiAgent extends MessageDrivenAgent {
       invalidCode: '',
       invalidMessage: '',
       partialRendered: data.status === 'partial' ? false :
-        current === undefined ? undefined : current.partialRendered
+        current === undefined ? undefined : current.partialRendered,
+      terminalDataReceived
     };
     this.rememberPendingEntry(context, taskId, entry);
   }
@@ -697,7 +708,8 @@ export class UiAgent extends MessageDrivenAgent {
       errorMessage: current === undefined ? undefined : current.errorMessage,
       invalidCode: code,
       invalidMessage: message,
-      partialRendered: current === undefined ? undefined : current.partialRendered
+      partialRendered: current === undefined ? undefined : current.partialRendered,
+      terminalDataReceived: current === undefined ? false : current.terminalDataReceived
     };
     this.rememberPendingEntry(context, taskId, entry);
   }
@@ -723,7 +735,8 @@ export class UiAgent extends MessageDrivenAgent {
       errorMessage: current === undefined ? undefined : current.errorMessage,
       invalidCode: current === undefined ? '' : current.invalidCode,
       invalidMessage: current === undefined ? '' : current.invalidMessage,
-      partialRendered: current === undefined ? undefined : current.partialRendered
+      partialRendered: current === undefined ? undefined : current.partialRendered,
+      terminalDataReceived: current === undefined ? false : current.terminalDataReceived
     };
     this.rememberPendingEntry(context, taskId, entry);
   }
@@ -737,7 +750,8 @@ export class UiAgent extends MessageDrivenAgent {
     this.rememberPendingEntry(context, taskId, {
       errorMessage: message,
       invalidCode: '',
-      invalidMessage: ''
+      invalidMessage: '',
+      terminalDataReceived: false
     });
   }
 

@@ -215,6 +215,7 @@ export class MultiAgentEvidenceFormatter {
         const payload = message.payload as DataResult;
         this.rememberEntities(payload.data, this.token('k', message.taskId));
         return '[AIPhone][MultiAgentDataResult]' + identity + ' tool=' + evidenceAllowed(payload.toolId) +
+          ' phase=' + (message.type === AgentMessageType.TASK_RESULT_DATA ? 'final' : 'stream') +
           ' status=' + evidenceAllowed(payload.status, ['success', 'partial', 'empty', 'error']) +
           ' sources=' + payload.sources.length.toString() + ' error=' + (payload.error === undefined ? 'false' : 'true') +
           mailEvidenceSuffix(payload.toolId, payload.data);
