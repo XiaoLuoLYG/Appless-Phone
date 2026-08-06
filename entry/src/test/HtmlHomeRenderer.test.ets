@@ -2582,6 +2582,29 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('至少开启一个来源')).assertLarger(-1);
     });
 
+    it('lets a late cumulative Waterfall payload fill an initially empty aggregate shell', 0, () => {
+      const empty = aggregateSearchDocumentFixture();
+      empty.blocks = empty.blocks.filter((block: HtmlHomeBlock): boolean =>
+        block.kind === 'aggregate-source-status' && block.source === 'zhihu');
+      empty.waterfall = {
+        query: 'codex', enabledSources: ['youtube', 'zhihu'], preferenceDescription: '', shown: [],
+        current: null, stable: [], tail: [], sources: [{
+          source: 'zhihu', phase: 'needs_auth', continuation: null, inFlight: false,
+          reservedCount: 0, message: '需要授权'
+        }]
+      };
+      const first = buildWaterfallHomePayload(empty, false);
+      const late = buildWaterfallHomePayload(waterfallRendererFixture(), false);
+
+      expect(first?.aggregateHtml.indexOf('进入发现流')).assertEqual(-1);
+      expect(first?.aggregateHtml.indexOf('Codex demo')).assertEqual(-1);
+      expect(late?.aggregateHtml.indexOf('进入发现流')).assertLarger(-1);
+      expect(late?.aggregateHtml.indexOf('Codex demo')).assertLarger(-1);
+      expect(late?.aggregateHtml.indexOf('OpenAI Codex discussion')).assertLarger(-1);
+      expect(late?.aggregateHtml.indexOf('状态摘要')).assertLarger(-1);
+      expect(late?.aggregateHtml.indexOf('未配置 ZHIHU_API_KEY')).assertLarger(-1);
+    });
+
     it('normalizes generic dynamic media titles in the H5 document', 0, () => {
       const doc = mediaAggregateDocumentFixture();
       doc.title = '动态工具结果';
