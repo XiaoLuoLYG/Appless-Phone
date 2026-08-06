@@ -368,6 +368,18 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     actions: []
   },
   {
+    toolId: 'movie.open',
+    domain: 'media',
+    intent: 'movie.open',
+    riskLevel: 'read',
+    backendPriority: ['system_intent'],
+    authModes: ['system'],
+    inputSchema: 'movieExperienceRequest',
+    outputSchema: 'movieExperience',
+    a2uiComponent: 'MovieDemo',
+    actions: []
+  },
+  {
     toolId: 'youtube.mine.playlists',
     domain: 'youtube',
     intent: 'youtube.mine.playlists',
@@ -658,7 +670,8 @@ const DYNAMIC_SEARCH_PLANNING_DESCRIPTION: string =
   'Gmail, Google Calendar, YouTube account tools, and X public post search have fixed Composio-backed tools; use ' +
   'those fixed tool IDs instead of dynamic.search. Use dynamic.search for Outlook only when the user explicitly ' +
   'names Outlook or Composio Outlook; ordinary mailbox aggregation uses mail.search. World Cup page, schedule, ' +
-  'next-match, preview, team, or player-card requests are covered by worldcup.open, not dynamic.search. For ' +
+  'next-match, preview, team, or player-card requests are covered by worldcup.open. First-party movie discovery, ' +
+  'now-showing, box-office, trailer, or star-update page requests are covered by movie.open, not dynamic.search. For ' +
   'Composio, first call with the full user task to discover candidate tools; only call again with ' +
   '{"operation":"execute","toolSlug":"returned slug","arguments":{...}} for read/search/list/get actions. Do not ' +
   'use Composio for payment, Gmail, Calendar, SocialHub, Maps, Food, Travel, World Cup page/schedule requests, or ' +
@@ -736,6 +749,8 @@ export function toolPlanningDescriptionForToolId(toolId: string): string {
     description += '. Use only for mixed-content topic research where the user asks for videos plus news, discussions, posts, or public reactions around one topic; use media.video.search for video-only requests. It aggregates YouTube, Bilibili, X public posts, Hacker News and Reddit via Composio, and Zhihu via its official REST API. Never fabricate media or posts.';
   } else if (definition.toolId === 'worldcup.open') {
     description += '. Use when the user wants to open the World Cup experience, view World Cup schedules, next match time, previews, highlights, teams, players, or matchup cards. Use media tools instead for explicit YouTube-only, Bilibili-only, or mixed-content search requests.';
+  } else if (definition.toolId === 'movie.open') {
+    description += '. Use when the user wants the first-party movie experience with current theatrical movies, box-office snapshot, trailers, or movie-star updates. Use media tools instead for explicit YouTube-only, Bilibili-only, or mixed-content search requests.';
   } else if (definition.toolId === 'youtube.video.search') {
     description += '. Use only for explicit YouTube-only public video search; use media.video.search for Bilibili or multi-source video requests.';
   } else if (definition.toolId === 'calendar.events.search') {

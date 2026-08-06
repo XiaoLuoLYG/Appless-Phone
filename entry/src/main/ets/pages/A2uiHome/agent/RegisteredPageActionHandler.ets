@@ -24,7 +24,7 @@ export interface RegisteredPageToolInvoker {
   ): Promise<RegisteredPageToolInvocation>;
 }
 
-interface WorldCupPageActionOutput {
+interface ExperiencePageActionOutput {
   actionId: string;
   route: string;
   status: string;
@@ -346,7 +346,7 @@ export class RegisteredPageActionHandler {
         message: 'Registered page operation identity is missing.'
       };
     }
-    if (actionId !== 'worldcup.open' && !pageRoute(actionId)) {
+    if (actionId !== 'worldcup.open' && actionId !== 'movie.open' && !pageRoute(actionId)) {
       return {
         status: 'error',
         errorCode: 'ACTION_PAGE_ROUTE_UNSUPPORTED',
@@ -361,6 +361,17 @@ export class RegisteredPageActionHandler {
           status: 'error',
           errorCode: 'ACTION_PAGE_ARGS_INVALID',
           message: 'World Cup page action arguments are invalid.'
+        };
+      }
+    }
+    if (actionId === 'movie.open') {
+      const values = args as HandlerArgRecord;
+      if (context.pageActionId !== 'movie.open' ||
+        values['route'] !== 'pages/A2uiHome/MovieDemo') {
+        return {
+          status: 'error',
+          errorCode: 'ACTION_PAGE_ARGS_INVALID',
+          message: 'Movie page action arguments are invalid.'
         };
       }
     }
@@ -379,9 +390,17 @@ export class RegisteredPageActionHandler {
       };
     }
     if (actionId === 'worldcup.open') {
-      const output: WorldCupPageActionOutput = {
+      const output: ExperiencePageActionOutput = {
         actionId,
         route: 'pages/A2uiHome/AnythingDemo',
+        status: 'opened'
+      };
+      return { status: 'success', output };
+    }
+    if (actionId === 'movie.open') {
+      const output: ExperiencePageActionOutput = {
+        actionId,
+        route: 'pages/A2uiHome/MovieDemo',
         status: 'opened'
       };
       return { status: 'success', output };

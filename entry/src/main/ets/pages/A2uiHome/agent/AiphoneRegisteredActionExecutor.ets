@@ -231,6 +231,12 @@ export function validateRegisteredPageActionArgs(
       'WORLDCUP_ARGS_INVALID', 'World Cup requires the exact registered page route.'
     );
   }
+  if (actionId === 'movie.open') {
+    return validation(
+      argText(values, ['route']) === 'pages/A2uiHome/MovieDemo',
+      'MOVIE_ARGS_INVALID', 'Movie requires the exact registered page route.'
+    );
+  }
   if (actionId === 'calendar.event.create' || actionId === 'calendar.event.update') {
     return validation(
       calendarEventRequiredFields(actionId, args as CalendarEventArgs).length === 0,
