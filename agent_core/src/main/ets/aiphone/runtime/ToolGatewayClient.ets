@@ -6383,7 +6383,19 @@ function extractFlightCityCodes(source: string): FlightRoute {
 
 function extractFlightNumber(source: string): string {
   const match = /\b[A-Z0-9]{2,3}\d{1,4}\b/.exec(source.toUpperCase());
-  return match === null ? '' : match[0];
+  return match === null || !/[A-Z]/.test(match[0]) ? '' : match[0];
+}
+
+function flightPriceRequested(source: string): boolean {
+  return /票价|价格|多少钱|最低价/.test(source);
+}
+
+function flightRequestOperation(flightNumber: string, wantsPrice: boolean): string {
+  return flightNumber.length > 0 ? 'flight' : (wantsPrice ? 'getFlightPriceByCities' : 'flights');
+}
+
+export function flightRequestOperationForTest(source: string): string {
+  return flightRequestOperation(extractFlightNumber(source), flightPriceRequested(source));
 }
 
 function firstFlightArrayFromData(data: FlightProviderData | FlightProviderItem[] | undefined): FlightProviderItem[] {
@@ -6927,7 +6939,8 @@ async function callStructuredFlightTool(prompt: string): Promise<DataResult> {
   const date = calendarDateFromPrompt(source);
   const flightNumber = extractFlightNumber(source);
   const flightRoute = extractFlightCityCodes(source);
-  const wantsPrice = /票价|价格|多少钱|最低价|机票/.test(source);
+  const wantsPrice = flightPriceRequested(source);
+  const operationForRequest = flightRequestOperation(flightNumber, wantsPrice);
   if (date.length === 0 || (flightNumber.length === 0 && (flightRoute.depCode.length === 0 || flightRoute.arrCode.length === 0))) {
     const message = '飞常准查询需要明确的日期，并提供航班号，或提供出发城市和到达城市。';
     return structuredErrorWithData(
@@ -6941,12 +6954,12 @@ async function callStructuredFlightTool(prompt: string): Promise<DataResult> {
   let requestBody = '';
   let routeText = '';
   let operation = '';
-  if (flightNumber.length > 0) {
+  if (operationForRequest === 'flight') {
     operation = 'flight';
     requestBody = '{"endpoint":"flight","params":{"fnum":' + JSON.stringify(flightNumber) +
       ',"date":' + JSON.stringify(date) + '}}';
     routeText = flightNumber + ' ' + date;
-  } else if (wantsPrice) {
+  } else if (operationForRequest === 'getFlightPriceByCities') {
     operation = 'getFlightPriceByCities';
     requestBody = '{"endpoint":"getFlightPriceByCities","params":{"dep_city":' + JSON.stringify(flightRoute.depCode) +
       ',"arr_city":' + JSON.stringify(flightRoute.arrCode) +

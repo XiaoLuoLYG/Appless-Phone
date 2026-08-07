@@ -54,6 +54,7 @@ import {
   errorDataResult,
   flightDataResultA2ui,
   flightDataResultFromProviderResponse,
+  flightRequestOperationForTest,
   flightStructuredDataA2ui,
   flightStructuredDataResult,
   foodA2uiRenderState,
@@ -1570,6 +1571,18 @@ export default function toolGatewayClientTest() {
       expect(result.sources[0].operation).assertEqual('flights');
       expect((result.data as FlightStructuredData).flights.length).assertEqual(0);
       expect(JSON.stringify(result.data).indexOf('updateComponents')).assertEqual(-1);
+    });
+
+    it('routes a dated city ticket query to the flights list operation', 0, () => {
+      expect(flightRequestOperationForTest('从深圳到杭州，出发日期 2026-08-30，查询机票')).assertEqual('flights');
+    });
+
+    it('keeps explicit flight numbers on the flight operation', 0, () => {
+      expect(flightRequestOperationForTest('请查询 MU2157，日期 2026-08-30')).assertEqual('flight');
+    });
+
+    it('uses the price operation only for explicit price intent', 0, () => {
+      expect(flightRequestOperationForTest('2026-08-30 深圳到杭州最低价')).assertEqual('getFlightPriceByCities');
     });
 
     it('dedupes food operation provenance and preserves empty partial and error states', 0, () => {
