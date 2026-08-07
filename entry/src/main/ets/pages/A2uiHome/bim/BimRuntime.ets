@@ -17,6 +17,7 @@ import {
   calendarDateFromPrompt,
   emptyA2uiSurface,
   extractJsonObjects,
+  mapsRouteInputFromPrompt,
   summarizeAppliedA2uiSurface
 } from '@loop/agent-core';
 import {
@@ -567,11 +568,9 @@ export function bimTravelQueryNeedsDetails(query: string): boolean {
 
 export function bimTravelQueryIsComplete(query: string, now: Date = new Date()): boolean {
   const value = query.trim();
-  const from = value.indexOf('从');
-  const to = value.indexOf('到');
   const flightNumber = /\b[A-Z0-9]{2,3}\d{1,4}\b/i.exec(value);
   const hasFlightNumber = flightNumber !== null && /[A-Z]/i.test(flightNumber[0]);
-  return ((from >= 0 && to > from) || hasFlightNumber) &&
+  return (mapsRouteInputFromPrompt(value) !== null || hasFlightNumber) &&
     calendarDateFromPrompt(value, now).length > 0;
 }
 

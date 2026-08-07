@@ -707,6 +707,7 @@ export default function bimRuntimeTest() {
       expect(bimTravelQueryNeedsDetails('帮我查从北京到上海 2026年8月的航班')).assertTrue();
       expect(bimTravelQueryNeedsDetails('帮我查从深圳到杭州 2026年8月30日的机票')).assertFalse();
       expect(bimTravelQueryNeedsDetails('帮我查明天从北京到上海的航班')).assertFalse();
+      expect(bimTravelQueryNeedsDetails('帮我查明天北京到上海航班')).assertFalse();
       expect(bimTravelQueryNeedsDetails('帮我查明天 MU2157 航班')).assertFalse();
       expect(bimTravelQueryNeedsDetails('机票已经确认，把状态更新一下')).assertFalse();
       expect(bimTravelQueryNeedsDetails('把展会计划的下一步改成确认展位')).assertFalse();
