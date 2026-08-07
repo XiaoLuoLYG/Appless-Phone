@@ -80,7 +80,7 @@ export default function capabilityRuntimeTest() {
       wrongTurn.context.turnId = 'turn-b';
       expect(broker.validateAndConsume(wrongTurn, grant, 1200).code).assertEqual('APPROVAL_MISMATCH');
       expect(broker.validateAndConsume(call, grant, 1200).ok).assertTrue();
-      expect(broker.validateAndConsume(call, grant, 1200).code).assertEqual('APPROVAL_UNKNOWN');
+      expect(broker.validateAndConsume(call, grant, 1200).code).assertEqual('APPROVAL_REPLAYED');
       expect(approvalArgsDigest(new Object())).assertEqual(
         '44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a'
       );

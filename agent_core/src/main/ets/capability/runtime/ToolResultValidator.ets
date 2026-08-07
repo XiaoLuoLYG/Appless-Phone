@@ -19,6 +19,13 @@ export class ToolResultValidator {
     if (result.toolId !== spec.id || result.toolVersion !== spec.version) {
       return { ok: false, code: 'RESULT_IDENTITY_MISMATCH', message: 'Backend returned a result for another tool.' };
     }
+    if (result.outputSchemaRef !== spec.outputSchemaRef.id) {
+      return {
+        ok: false,
+        code: 'RESULT_SCHEMA_MISMATCH',
+        message: 'Backend returned a result for another output schema.'
+      };
+    }
     const schemaResult = this.schemas.validate(spec.outputSchemaRef, result.data);
     if (!schemaResult.ok) {
       return { ok: false, code: schemaResult.code, message: schemaResult.message };

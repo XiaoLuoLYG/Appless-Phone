@@ -21,7 +21,12 @@ export class LegacyDataResultAdapter {
       data: result.data,
       sources,
       warnings: result.warnings.slice(),
-      observedEffects: spec.declaredEffects.slice(),
+      // Legacy DataResult has no effect evidence. Do not promote declared
+      // effects to observed effects: a failed or partial call must not be
+      // reported as a completed external write or financial transaction.
+      // Backends that can prove a side effect must populate ToolResult
+      // directly with the corresponding observed effect.
+      observedEffects: [],
       artifacts: [],
       metadata: {
         backendId: sources.length > 0 ? sources[0].backendId : spec.backendCandidates[0].backendId,
