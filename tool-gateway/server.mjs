@@ -45,6 +45,8 @@ const MAX_BODY_BYTES = 1024 * 1024;
 const STRIPE_CHECKOUT_ENDPOINT = 'https://api.stripe.com/v1/checkout/sessions';
 const A2UI_VERSION = 'v0.9.1';
 const A2UI_MIME = 'application/a2ui+json';
+const EXECUTION_EVENT_MIME = 'application/x-ndjson';
+const TOOL_CALL_WIRE_VERSION = '1.0';
 const TRAIN_RESULT_LIMIT = Math.min(Math.max(Number.parseInt(process.env.TRAIN_RESULT_LIMIT || '30', 10) || 30, 6), 50);
 const TRAIN_INITIAL_VISIBLE = 6;
 const TRAIN_CLIENT_ACTIONS = [
@@ -175,6 +177,21 @@ function writeA2uiHeaders(res, statusCode = 200) {
     'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-API-Key'
   });
+}
+
+function writeExecutionHeaders(res, statusCode = 200) {
+  res.writeHead(statusCode, {
+    'Content-Type': `${EXECUTION_EVENT_MIME}; charset=utf-8`,
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-API-Key'
+  });
+}
+
+function writeExecutionEvent(res, event) {
+  res.write(`${JSON.stringify(event)}\n`);
 }
 
 function a2uiLine(envelope) {
@@ -2936,6 +2953,154 @@ async function handleMcpCall(req, res) {
   });
 }
 
+function outputSchemaForGatewayTool(toolId) {
+  if (toolId === 'travel.search') return 'travelOptions';
+  if (toolId === 'train.search') return 'trains';
+  if (toolId === 'flight.search') return 'flights';
+  if (toolId === 'food.search') return 'foodChoices';
+  return 'genericToolResults';
+}
+
+function normalizedCapabilityData(a2uiJsonl) {
+  const data = {};
+  let errorMessage = '';
+  for (const line of textOf(a2uiJsonl).split('\n')) {
+    if (line.trim().length === 0) continue;
+    const envelope = JSON.parse(line);
+    if (envelope.updateDataModel) {
+      const pathKey = textOf(envelope.updateDataModel.path).replace(/^\//, '') || 'result';
+      data[pathKey] = envelope.updateDataModel.value;
+    }
+    if (Array.isArray(envelope.updateComponents?.components)) {
+      const error = envelope.updateComponents.components.find(component => component.component === 'ErrorNotice');
+      if (error) errorMessage = `${textOf(error.title)} ${textOf(error.body)}`.trim();
+    }
+    if (envelope.createSurface?.status === 'needs_input' && errorMessage.length === 0) {
+      errorMessage = textOf(envelope.createSurface.title) || 'Remote provider requires input or configuration.';
+    }
+  }
+  return { data, errorMessage };
+}
+
+function gatewayToolResult(call, a2uiJsonl, startedAtMs) {
+  const normalized = normalizedCapabilityData(a2uiJsonl);
+  const arrays = Object.values(normalized.data).filter(value => Array.isArray(value));
+  const empty = arrays.length > 0 && arrays.every(value => value.length === 0);
+  const status = normalized.errorMessage.length > 0 ? 'error' : (empty ? 'empty' : 'success');
+  const result = {
+    toolId: call.toolId,
+    toolVersion: call.toolVersion,
+    outputSchemaRef: outputSchemaForGatewayTool(call.toolId),
+    status,
+    data: normalized.data,
+    sources: [{
+      provider: 'AIPhone Tool Gateway',
+      backendId: 'remote_gateway',
+      operation: call.toolId,
+      fetchedAt: new Date().toISOString()
+    }],
+    warnings: [],
+    observedEffects: [
+      { kind: 'read_data', target: call.toolId, reversible: true },
+      { kind: 'network_access', target: call.toolId, reversible: true }
+    ],
+    artifacts: [],
+    metadata: {
+      backendId: 'remote_gateway',
+      startedAtMs,
+      completedAtMs: Date.now(),
+      retryCount: 0
+    }
+  };
+  if (normalized.errorMessage.length > 0) {
+    result.error = {
+      code: 'REMOTE_PROVIDER_FAILED',
+      message: normalized.errorMessage.slice(0, 1000),
+      retryable: true
+    };
+  }
+  return result;
+}
+
+function executionEvent(call, kind, message, result) {
+  const event = {
+    kind,
+    traceId: call.traceId,
+    callId: call.callId,
+    capabilityId: 'remote_gateway',
+    toolId: call.toolId,
+    toolVersion: call.toolVersion,
+    backendId: 'remote_gateway',
+    timestampMs: Date.now(),
+    message
+  };
+  if (result !== undefined) event.result = result;
+  return event;
+}
+
+function invalidWireResult(body, code, message) {
+  return {
+    toolId: textOf(body?.toolId),
+    toolVersion: textOf(body?.toolVersion) || '1.0.0',
+    outputSchemaRef: '',
+    status: 'error',
+    data: {},
+    sources: [],
+    warnings: [],
+    observedEffects: [],
+    artifacts: [],
+    metadata: { backendId: 'remote_gateway', startedAtMs: Date.now(), completedAtMs: Date.now(), retryCount: 0 },
+    error: { code, message, retryable: false }
+  };
+}
+
+async function handleCapabilityToolCall(req, res) {
+  const body = await readJson(req);
+  const call = {
+    wireVersion: textOf(body.wireVersion),
+    traceId: textOf(body.traceId).trim(),
+    callId: textOf(body.callId).trim(),
+    toolId: textOf(body.toolId).trim(),
+    toolVersion: textOf(body.toolVersion).trim(),
+    args: body.args && typeof body.args === 'object' ? body.args : {},
+    context: body.context && typeof body.context === 'object' ? body.context : {}
+  };
+  const invalid = call.wireVersion !== TOOL_CALL_WIRE_VERSION ? ['WIRE_VERSION_UNSUPPORTED', 'wireVersion must be 1.0.'] :
+    (call.traceId.length === 0 || call.callId.length === 0 ? ['TOOL_CALL_IDENTITY_MISSING', 'traceId and callId are required.'] :
+      (call.toolVersion !== '1.0.0' ? ['TOOL_VERSION_UNSUPPORTED', 'toolVersion must be 1.0.0.'] :
+        (!TOOL_DEFS[call.toolId] ? ['TOOL_NOT_AVAILABLE', 'Remote gateway does not expose this Tool ID.'] : null)));
+  if (invalid !== null) {
+    writeExecutionHeaders(res, 400);
+    const result = invalidWireResult(body, invalid[0], invalid[1]);
+    writeExecutionEvent(res, executionEvent(call, 'failed', invalid[1], result));
+    res.end();
+    return;
+  }
+
+  writeExecutionHeaders(res, 200);
+  writeExecutionEvent(res, executionEvent(call, 'queued', 'Remote backend call queued.'));
+  writeExecutionEvent(res, executionEvent(call, 'started', 'Remote backend execution started.'));
+  const startedAtMs = Date.now();
+  try {
+    const a2uiJsonl = await callTool(call.toolId, {
+      prompt: textOf(call.context.inputText),
+      items: Array.isArray(call.args.items) ? call.args.items : [],
+      arguments: call.args
+    });
+    const result = gatewayToolResult(call, a2uiJsonl, startedAtMs);
+    writeExecutionEvent(res, executionEvent(call, result.status === 'error' ? 'failed' : 'completed',
+      result.status === 'error' ? 'Remote backend execution failed.' : 'Remote backend execution completed.', result));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const result = invalidWireResult(call, 'REMOTE_BACKEND_EXCEPTION', message.slice(0, 1000));
+    result.metadata.startedAtMs = startedAtMs;
+    result.metadata.completedAtMs = Date.now();
+    result.error.retryable = true;
+    writeExecutionEvent(res, executionEvent(call, 'failed', 'Remote backend execution failed.', result));
+  }
+  res.end();
+}
+
 function handleTools(res) {
   sendJson(res, 200, {
     tools: Object.entries(TOOL_DEFS).map(([name, def]) => ({
@@ -3051,6 +3216,14 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       await handleMcpCall(req, res);
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/v1/tool/call') {
+      if (!isGatewayAuthorized(req)) {
+        rejectUnauthorized(res);
+        return;
+      }
+      await handleCapabilityToolCall(req, res);
       return;
     }
     if (req.method === 'POST' && url.pathname === '/api/aiphone/tool') {

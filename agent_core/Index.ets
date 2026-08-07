@@ -1,4 +1,32 @@
 export { ChatMessage, ConversationContext, ConversationRole } from './src/main/ets/agent/ConversationContext';
+export {
+  ApplessCapabilityEnvironment,
+  ApplessCapabilityRuntimeFactory,
+  approvalArgsDigest,
+  ApprovalBroker,
+  CalendarCapabilityModule,
+  CapabilityPolicyEngine,
+  CapabilityRegistry,
+  CapabilityRuntime,
+  ExecutionEventBus,
+  HotelCapabilityModule
+} from './src/main/ets/capability/Index';
+export {
+  ApprovalGrant,
+  ApprovalRequest,
+  CapabilityManifest,
+  CapabilityModule,
+  ExecutionEvent,
+  ExecutionEventSink,
+  PolicyDecision,
+  ToolCall,
+  ToolContext,
+  ToolEffect,
+  ToolInvocationOutcome,
+  ToolInvocationOutcomeKind,
+  ToolResult,
+  ToolSpec
+} from './src/main/ets/capability/Index';
 export { TimeTool } from './src/main/ets/agent/TimeTool';
 export * from './src/main/ets/agent/message/AgentMessage';
 export * from './src/main/ets/agent/message/DataResult';
