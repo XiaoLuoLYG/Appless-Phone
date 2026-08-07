@@ -91,6 +91,7 @@ export interface WaterfallHomePayload {
   query: string;
   aggregateHtml: string;
   candidates: WaterfallRankedCandidate[];
+  mediaEmbeds: Record<string, string>;
   enabledSources: string[];
   sources: WaterfallSourceState[];
   replenishing: boolean;

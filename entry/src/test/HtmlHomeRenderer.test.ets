@@ -22,7 +22,11 @@ import {
   HtmlHomeDocument,
   HtmlHomeMetric
 } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
-import { parseHtmlHomeAction } from '../main/ets/pages/A2uiHome/components/HtmlHomeSurfaceView';
+import {
+  parseHtmlHomeAction,
+  popupSubtitleFromTitle,
+  popupTitleFromUrl
+} from '../main/ets/pages/A2uiHome/components/HtmlHomeSurfaceView';
 import { shouldShowHomeChrome } from '../main/ets/pages/A2uiHome/components/HomePage';
 import { renderRideDriverMapHtml } from '../main/ets/pages/A2uiHome/html/RideDriverMapHtmlRenderer';
 import {
@@ -505,9 +509,12 @@ function aggregateSearchDocumentFixture(): HtmlHomeDocument {
 function waterfallRendererFixture(): HtmlHomeDocument {
   const doc = aggregateSearchDocumentFixture();
   const candidate = (id: string, mediaType: 'video' | 'image_text' | 'post', source: string, coverUrl: string): WaterfallRankedCandidate => ({
-    id: id, source: source, mediaType: mediaType, title: id + ' title', summary: id + ' summary',
-    url: 'https://example.com/' + id, coverUrl: coverUrl, publishedAt: id === 'post-3' ? '' : '2026-08-05T00:00:00.000Z',
-    originalIndex: 0, normalizedUrl: 'https://example.com/' + id,
+    id: id, source: source, mediaType: mediaType, title: id + ' title',
+    summary: id === 'video-1' ? '搜索结果：video-1 summary' : id + ' summary',
+    url: id === 'video-1' ? 'https://www.youtube.com/watch?v=abc123' : 'https://example.com/' + id,
+    coverUrl: coverUrl, publishedAt: id === 'post-3' ? '' : '2026-08-05T00:00:00.000Z',
+    originalIndex: 0, normalizedUrl: id === 'video-1' ?
+      'https://www.youtube.com/watch?v=abc123' : 'https://example.com/' + id,
     signals: { relevanceTier: 3, titleHits: 1, summaryHits: 0, freshnessTier: id === 'post-3' ? 0 : 4 },
     reason: id === 'post-3' ? '标题命中查询' : '标题命中查询 · 24 小时内发布'
   });
@@ -2529,6 +2536,22 @@ export default function htmlHomeRendererTest() {
 
     it('renders the Waterfall discovery stream inside aggregate search', 0, () => {
       const doc = waterfallRendererFixture();
+      doc.blocks.push({
+        id: 'video-bilibili',
+        kind: 'aggregate-video',
+        title: 'Bilibili demo',
+        status: 'success',
+        source: 'bilibili',
+        metrics: [],
+        rows: [],
+        actions: [],
+        mediaEmbed: {
+          provider: 'Bilibili',
+          title: 'Bilibili demo',
+          embedUrl: 'https://player.bilibili.com/player.html?bvid=BV1&p=1&autoplay=0&poster=true',
+          pageUrl: 'https://www.bilibili.com/video/BV1'
+        }
+      });
       const html = renderHtmlHomeDocument(doc);
       const payload = buildWaterfallHomePayload(doc, false);
 
@@ -2542,7 +2565,14 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('waterfall-entry-floating')).assertLarger(-1);
       expect(html.indexOf('waterfall-cinema-card')).assertLarger(-1);
       expect(html.indexOf('来源偏好')).assertLarger(-1);
-      expect(html.indexOf('waterfall-recommendation')).assertLarger(-1);
+      expect(html.indexOf('waterfall-media-frame')).assertLarger(-1);
+      expect(html.indexOf('autoplay=1')).assertLarger(-1);
+      expect(html.indexOf('mute=1')).assertLarger(-1);
+      expect(html.indexOf('waterfall-recommendation')).assertEqual(-1);
+      expect(payload?.mediaEmbeds['https://www.youtube.com/watch?v=abc123'].indexOf('autoplay=1')).assertLarger(-1);
+      expect(payload?.mediaEmbeds['https://www.bilibili.com/video/BV1'].indexOf('autoplay=1')).assertLarger(-1);
+      expect(payload?.mediaEmbeds['https://www.bilibili.com/video/BV1'].indexOf('muted=1')).assertLarger(-1);
+      expect(payload?.mediaEmbeds['https://www.bilibili.com/video/BV1'].indexOf('poster=false')).assertLarger(-1);
       expect(html.indexOf('waterfall-toolbar-primary')).assertLarger(-1);
       expect(html.indexOf('waterfall-toolbar-secondary')).assertLarger(-1);
       expect(html.indexOf('aria-label="来源偏好"')).assertLarger(-1);
@@ -2572,6 +2602,13 @@ export default function htmlHomeRendererTest() {
       const busyHtml = renderHtmlHomeDocument(doc, true);
       expect(busyHtml.indexOf('正在更新')).assertLarger(-1);
       expect(busyHtml.indexOf('正在补充内容')).assertEqual(-1);
+    });
+
+    it('labels ordinary source windows as content instead of payment', 0, () => {
+      expect(popupTitleFromUrl('https://www.bilibili.com/video/BV1')).assertEqual('内容详情');
+      expect(popupSubtitleFromTitle('内容详情')).assertEqual('来自原始来源');
+      expect(popupTitleFromUrl('https://checkout.stripe.com/pay/session')).assertEqual('支付确认');
+      expect(popupSubtitleFromTitle('支付确认')).assertEqual('安全确认页面');
     });
 
     it('keeps long source diagnostics compact without changing filter or discovery controls', 0, () => {

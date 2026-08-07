@@ -6,6 +6,10 @@ const renderer = readFileSync(
   new URL('../entry/src/main/ets/pages/A2uiHome/html/HtmlAggregateSearchHomeRenderer.ets', import.meta.url),
   'utf8'
 );
+const surfaceView = readFileSync(
+  new URL('../entry/src/main/ets/pages/A2uiHome/components/HtmlHomeSurfaceView.ets', import.meta.url),
+  'utf8'
+);
 
 function template(name) {
   const marker = `const ${name}: string = \``;
@@ -29,7 +33,10 @@ assert.match(waterfallCss, /\.waterfall-toolbar-primary/);
 assert.match(waterfallCss, /\.waterfall-toolbar-tools/);
 assert.match(waterfallCss, /\.waterfall-source-logo/);
 assert.match(waterfallCss, /\.waterfall-media-cover/);
+assert.match(waterfallCss, /\.waterfall-media-frame/);
+assert.match(waterfallCss, /\.waterfall-card\s*\{[^}]*background:\s*#f4f6f8/s);
 assert.doesNotMatch(waterfallCss, /\.waterfall-cinema-stage img\s*\{/);
+assert.match(surfaceView, /\.mediaPlayGestureAccess\(false\)/);
 
 function element() {
   const classes = new Set();
@@ -82,8 +89,8 @@ const candidate = (id) => ({
   source: 'youtube',
   mediaType: 'video',
   title: id,
-  summary: id,
-  url: `https://example.test/${id}`,
+  summary: id === 'current' ? 'B 站视频搜索结果：current summary' : id,
+  url: id === 'current' ? 'https://www.youtube.com/watch?v=abc123' : `https://example.test/${id}`,
   coverUrl: id === 'current' ? 'https://example.test/broken-cover.jpg' : '',
   publishedAt: '',
   reason: '标题命中查询'
@@ -94,6 +101,9 @@ const window = {
     enabledSources: ['youtube'],
     aggregateHtml: '',
     candidates: [candidate('current'), candidate('next')],
+    mediaEmbeds: {
+      'https://www.youtube.com/watch?v=abc123': 'https://www.youtube.com/embed/abc123?playsinline=1&autoplay=1&mute=1'
+    },
     sources: [{ source: 'youtube', phase: 'success' }]
   },
   __aiphoneWaterfallSourceLogos: { youtube: 'data:image/png;base64,logo' },
@@ -115,13 +125,25 @@ documentListeners.click({
   }
 });
 assert.deepEqual(fullscreenStates, ['true']);
-assert.match(track.innerHTML, /waterfall-recommendation/);
+assert.match(track.innerHTML, /class="waterfall-media-frame"/);
+assert.match(track.innerHTML, /autoplay=1/);
+assert.match(track.innerHTML, /mute=1/);
+assert.equal((track.innerHTML.match(/<iframe/g) ?? []).length, 1);
+assert.match(track.innerHTML, /current summary/);
+assert.doesNotMatch(track.innerHTML, /B 站视频搜索结果：/);
+assert.doesNotMatch(track.innerHTML, /waterfall-recommendation/);
+assert.doesNotMatch(track.innerHTML, /标题命中查询/);
 assert.doesNotMatch(track.innerHTML, /data-waterfall-reason/);
 assert.match(track.innerHTML, /data-waterfall-media-fallback/);
 
 track.scrollTop = 600;
+window.__aiphoneApplyWaterfallUpdate({
+  ...window.__aiphoneWaterfallInitial,
+  candidates: [candidate('current'), candidate('next'), candidate('late')]
+});
+assert.equal(track.scrollTop, 600);
 track.emit('scroll');
-await new Promise((resolve) => setTimeout(resolve, 120));
+await new Promise((resolve) => setTimeout(resolve, 220));
 assert.equal(actions.at(-1)?.id, 'waterfall.feed.advance');
 preferencesButton.emit('click');
 assert.equal(preferences.classList.contains('active'), true);

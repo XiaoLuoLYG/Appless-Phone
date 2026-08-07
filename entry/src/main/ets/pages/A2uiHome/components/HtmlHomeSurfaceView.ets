@@ -303,6 +303,7 @@ export struct HtmlHomeSurfaceView {
       Web({ src: 'data:text/html;charset=utf-8,<body style="margin:0;background:%23F5F2EE"></body>', controller: this.controller })
         .javaScriptAccess(true)
         .domStorageAccess(true)
+        .mediaPlayGestureAccess(false)
         .multiWindowAccess(true)
         .allowWindowOpenMethod(true)
         .javaScriptProxy({
@@ -453,7 +454,7 @@ function actionObject(value: HtmlHomeActionValue): Object | undefined {
   return value;
 }
 
-function popupTitleFromUrl(url: string): string {
+export function popupTitleFromUrl(url: string): string {
   const lower = url.toLowerCase();
   if (lower.indexOf('google.com/maps/') >= 0 || lower.indexOf('maps.google.com/') >= 0) {
     return 'Google Maps 路线';
@@ -464,9 +465,15 @@ function popupTitleFromUrl(url: string): string {
   if (lower.indexOf('paypal') >= 0) {
     return 'PayPal 确认';
   }
-  return '支付确认';
+  if (lower.indexOf('checkout.stripe.com/') >= 0 || lower.indexOf('alipay') >= 0) {
+    return '支付确认';
+  }
+  return '内容详情';
 }
 
-function popupSubtitleFromTitle(title: string): string {
-  return title === 'Google Maps 路线' ? '路线由 Google Maps 实时提供' : '安全确认页面';
+export function popupSubtitleFromTitle(title: string): string {
+  if (title === 'Google Maps 路线') {
+    return '路线由 Google Maps 实时提供';
+  }
+  return title === '内容详情' ? '来自原始来源' : '安全确认页面';
 }
