@@ -780,6 +780,7 @@ function missingFixedWriteArgs(fixedToolId: string, fixedArgs: Object | null): s
 }
 
 export function composioExactToolSlugForFixedTool(fixedToolId: string): string {
+  if (fixedToolId === 'x.post.search') return 'TWITTER_RECENT_SEARCH';
   if (fixedToolId === 'social.x.profile') return 'TWITTER_USER_LOOKUP_ME';
   if (fixedToolId === 'social.x.dm.list') return 'TWITTER_GET_RECENT_DM_EVENTS';
   if (fixedToolId === 'social.slack.message.search') return 'SLACK_SEARCH_MESSAGES';
@@ -2091,6 +2092,9 @@ function selectedSlugAuthorizationMessage(
 ): string {
   const lowerSlug = toolSlug.trim().toLowerCase();
   const exactFixed = composioExactToolSlugForFixedTool(fixedToolId).toLowerCase();
+  if (fixedToolId === 'x.post.search' && lowerSlug === exactFixed) {
+    return '';
+  }
   if (allowFixedContract && ((exactFixed.length > 0 && lowerSlug === exactFixed) ||
     fixedToolAllowsSideEffectSlug(fixedToolId, lowerSlug))) {
     return '';
@@ -2115,10 +2119,13 @@ function blockedSelectedSlugResult(toolSlug: string, message: string): DynamicGe
 }
 
 function isXPostReadSlug(toolSlug: string): boolean {
+  const compact = normalizedDynamicToolTokens(toolSlug).join('');
+  if (compact === 'twitterrecentsearch') {
+    return true;
+  }
   if (selectedSlugGrammarMessage(toolSlug).length > 0) {
     return false;
   }
-  const compact = normalizedDynamicToolTokens(toolSlug).join('');
   return compact.indexOf('tweet') >= 0 || compact.indexOf('posts') >= 0 || compact.indexOf('status') >= 0;
 }
 

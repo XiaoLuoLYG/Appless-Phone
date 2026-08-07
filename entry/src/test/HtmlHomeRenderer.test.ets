@@ -92,6 +92,21 @@ function documentFixture(): HtmlHomeDocument {
   };
 }
 
+function plainChatDocumentFixture(): HtmlHomeDocument {
+  const document = documentFixture();
+  document.source = 'model';
+  document.kind = 'generic';
+  document.title = 'A2UI';
+  document.subtitle = '';
+  document.blocks = [];
+  document.timeline = [];
+  document.history = [
+    { id: 'm1', role: 'user', content: '解释普通回复的展示方式' },
+    { id: 'm2', role: 'assistant', content: '普通回复应该直接出现在首页主区域。' }
+  ];
+  return document;
+}
+
 function dynamicCredentialDocumentFixture(): HtmlHomeDocument {
   const doc = documentFixture();
   doc.kind = 'dynamic-tools';
@@ -1487,6 +1502,26 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('AIPhoneHome.postAction')).assertLarger(-1);
     });
 
+    it('renders a plain model reply as a reading page with collapsed timeline context', 0, () => {
+      const html = renderHtmlHomeDocument(plainChatDocumentFixture());
+
+      expect(html.indexOf('plain-chat')).assertLarger(-1);
+      expect(html.indexOf('plain-chat-response')).assertLarger(-1);
+      expect(html.indexOf('plain-chat-context')).assertLarger(-1);
+      expect(html.indexOf('plain-chat-timeline')).assertLarger(-1);
+      expect(html.indexOf('details')).assertLarger(-1);
+      expect(html.indexOf('plain-chat-role-user')).assertLarger(-1);
+      expect(html.indexOf('plain-chat-role-assistant')).assertLarger(-1);
+    });
+
+    it('keeps task result wording for a generic tool document', 0, () => {
+      const html = renderHtmlHomeDocument(documentFixture());
+
+      expect(html.indexOf('任务结果')).assertLarger(-1);
+      expect(html.indexOf('"source":"tool"')).assertLarger(-1);
+      expect(html.indexOf('"role":"assistant"')).assertEqual(-1);
+    });
+
     it('binds an embedded multi-task click to its exact section', 0, () => {
       const embedded = documentFixture();
       const document = documentFixture();
@@ -1723,6 +1758,17 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('状态摘要')).assertLarger(-1);
       expect(html.indexOf('ZHIHU_API_KEY')).assertLarger(-1);
       expect(html.indexOf('异常或提示')).assertEqual(-1);
+    });
+
+    it('does not expose generated result labels as aggregate post titles', 0, () => {
+      const doc = aggregateSearchDocumentFixture();
+      doc.blocks[1].source = 'x';
+      doc.blocks[1].title = 'result 1';
+      doc.blocks[1].subtitle = 'Real X post';
+      const html = renderHtmlHomeDocument(doc, false);
+
+      expect(html.indexOf('<h3>result 1</h3>')).assertEqual(-1);
+      expect(html.indexOf('Real X post')).assertLarger(-1);
     });
 
     it('keeps travel and food card details collapsed behind source aware expansion hooks', 0, () => {

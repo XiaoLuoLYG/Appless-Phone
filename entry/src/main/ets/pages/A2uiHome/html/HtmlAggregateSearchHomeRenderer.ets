@@ -690,11 +690,12 @@ function renderPostBlock(block: HtmlHomeBlock): string {
   const media = renderPostMedia(block);
   const link = renderPostLink(block);
   const meta = renderPostMeta(block);
+  const title = /^result\s+\d+$/i.test(block.title.trim()) ? '' : block.title;
   return [
     '<details class="aggregate-card aggregate-result-card aggregate-post-card" data-kind="', escapeHtml(block.kind), '" data-source="', escapeAttribute(sourceCssValue(text(block.source))), '" data-status="', escapeAttribute(text(block.status)), '">',
     '<summary>',
     renderCardTop(block),
-    '<div class="aggregate-post-title-row"><h3>', escapeHtml(block.title), '</h3><span class="aggregate-expand-cue"></span></div>',
+    '<div class="aggregate-post-title-row">', title.length > 0 ? '<h3>' + escapeHtml(title) + '</h3>' : '', '<span class="aggregate-expand-cue"></span></div>',
     body.length > 0 ? '<p class="aggregate-summary-snippet">' + escapeHtml(body) + '</p>' : '',
     '</summary>',
     '<div class="aggregate-post-expanded">',

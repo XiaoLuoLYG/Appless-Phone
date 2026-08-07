@@ -966,6 +966,80 @@ h3, .subtitle, .kind-tag, .status, .action, .chip, .label, .meta {
   padding: 10px 11px;
   margin-top: 8px;
 }
+.plain-chat-response {
+  margin-top: 8px;
+  padding: 2px 0 8px 14px;
+  border-left: 2px solid var(--accent);
+}
+.plain-chat-response-copy {
+  color: var(--ink);
+  font-size: 17px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+.plain-chat-context {
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.plain-chat-context > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  color: var(--ink-soft);
+  cursor: pointer;
+  list-style: none;
+}
+.plain-chat-context > summary::-webkit-details-marker { display: none; }
+.plain-chat-context > summary::after {
+  content: '+';
+  color: var(--accent);
+  font-size: 17px;
+  line-height: 1;
+}
+.plain-chat-context[open] > summary::after { content: '-'; }
+.plain-chat-timeline {
+  position: relative;
+  margin-left: 5px;
+  padding: 2px 0 2px 18px;
+  border-left: 1px solid var(--line);
+}
+.plain-chat-turn {
+  position: relative;
+  margin: 0 0 12px;
+  padding: 0 0 2px;
+}
+.plain-chat-turn:last-child { margin-bottom: 0; }
+.plain-chat-turn::before {
+  content: '';
+  position: absolute;
+  left: -23px;
+  top: 4px;
+  width: 7px;
+  height: 7px;
+  border: 2px solid var(--muted);
+  border-radius: 50%;
+  background: var(--paper);
+}
+.plain-chat-role-assistant::before { border-color: var(--accent); }
+.plain-chat-role {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.25;
+}
+.plain-chat-role-assistant .plain-chat-role { color: var(--accent); }
+.plain-chat-turn-copy {
+  margin-top: 3px;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.plain-chat-hero h1 { font-size: 24px; }
+.plain-chat-hero .subtitle {
+  margin-top: 5px;
+  font-size: 12px;
+}
 body[data-scene] {
   --scene-accent: #995f4c;
   --scene-accent-2: #476f9f;
@@ -3273,8 +3347,54 @@ const HTML_HOME_JS: string = `
   function isEnhancedScene() {
     return scene === 'gmail' || scene === 'social' || scene === 'luckin';
   }
+  function latestAssistant(history) {
+    for (var index = history.length - 1; index >= 0; index -= 1) {
+      var item = history[index];
+      if (text(item && item.role) === 'assistant' && text(item && item.content).trim().length > 0) {
+        return item;
+      }
+    }
+    return null;
+  }
+  function isPlainChatScene(blocks, timeline, history) {
+    return scene === 'generic' &&
+      text(data.source) === 'model' &&
+      blocks.length === 0 &&
+      timeline.length === 0 &&
+      latestAssistant(history) !== null;
+  }
+  function addPlainChat(parent, history) {
+    var assistant = latestAssistant(history);
+    if (!assistant) { return; }
+    var section = add(parent, 'section', 'section plain-chat');
+    var response = add(section, 'article', 'plain-chat-response');
+    add(response, 'p', 'plain-chat-response-copy', text(assistant.content));
+    var contextItems = [];
+    history.forEach(function (item) {
+      if (item !== assistant) { contextItems.push(item); }
+    });
+    if (contextItems.length === 0) { return; }
+    var disclosure = add(section, 'details', 'plain-chat-context');
+    var summary = add(disclosure, 'summary');
+    add(summary, 'span', '', '上下文');
+    add(summary, 'span', 'meta', String(contextItems.length) + ' 条');
+    var timelineWrap = add(disclosure, 'div', 'plain-chat-timeline');
+    contextItems.forEach(function (item) {
+      var role = text(item && item.role) === 'assistant' ? 'assistant' : 'user';
+      var roleClass = role === 'assistant' ? 'plain-chat-role-assistant' : 'plain-chat-role-user';
+      var turn = add(timelineWrap, 'article', 'plain-chat-turn ' + roleClass);
+      add(turn, 'div', 'plain-chat-role', role === 'assistant' ? 'Appless' : '你');
+      add(turn, 'p', 'plain-chat-turn-copy', text(item && item.content));
+    });
+  }
   function addLegacyHero(parent) {
-    var hero = add(parent, 'header', 'hero');
+    var plainChat = isPlainChatScene(list(data.blocks), list(data.timeline), list(data.history));
+    var hero = add(parent, 'header', plainChat ? 'hero plain-chat-hero' : 'hero');
+    if (plainChat) {
+      add(hero, 'h1', '', '和 Appless 聊聊');
+      add(hero, 'p', 'subtitle', '普通对话会直接显示在这里。');
+      return;
+    }
     var eyebrow = text(data.kind) === 'welcome' ? '' : kindLabel(data.kind);
     if (eyebrow.length > 0) { add(hero, 'div', 'eyebrow', eyebrow); }
     add(hero, 'h1', '', heroTitle());
@@ -5154,7 +5274,12 @@ const HTML_HOME_JS: string = `
     });
   }
   var blocks = list(data.blocks);
-  if (blocks.length > 0) {
+  var timeline = list(data.timeline);
+  var history = list(data.history);
+  var plainChat = isPlainChatScene(blocks, timeline, history);
+  if (plainChat) {
+    addPlainChat(shell, history);
+  } else if (blocks.length > 0) {
     var sectionClass = isEnhancedScene() ? 'section blocks-' + scene : 'section';
     if (scene === 'luckin' && hasLuckinConfirmBlock(blocks)) {
       sectionClass += ' blocks-luckin-confirm';
@@ -5300,7 +5425,6 @@ const HTML_HOME_JS: string = `
   } else {
     add(shell, 'section', 'empty', emptyCopy());
   }
-  var timeline = list(data.timeline);
   if (scene !== 'luckin' && timeline.length > 0 && (blocks.length === 0 || isBusy)) {
     var timelineSection = add(shell, 'section', 'section');
     var timelineHead = add(timelineSection, 'div', 'section-head');
@@ -5313,8 +5437,7 @@ const HTML_HOME_JS: string = `
       add(node, 'div', 'meta', statusLabel(item.status));
     });
   }
-  var history = list(data.history);
-  if (scene !== 'luckin' && history.length > 0) {
+  if (scene !== 'luckin' && history.length > 0 && !plainChat) {
     var historySection = add(shell, 'section', 'section');
     var historyHead = add(historySection, 'div', 'section-head');
     add(historyHead, 'h2', '', '上下文');

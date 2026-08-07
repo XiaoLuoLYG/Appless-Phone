@@ -339,7 +339,7 @@ function nestedRecordText(record: DynamicPostRecord, key: string, names: string[
 function dynamicPostText(value: string): string {
   const record = dynamicPostRecord(value);
   if (record !== null) {
-    const text = recordText(record, ['full_text', 'selftext', 'text', 'body', 'content', 'excerpt', 'summary', 'description', 'title', 'question']);
+    const text = recordText(record, ['full_text', 'selftext', 'text', 'messageText', 'body', 'content', 'excerpt', 'summary', 'description', 'title', 'question']);
     if (text.length > 0) {
       return plainPostText(text);
     }
@@ -480,7 +480,7 @@ function objectArrayFrom(value: DynamicPostValue): Object[] {
 
 function looksLikeDynamicPostObject(item: Object): boolean {
   const record = item as DynamicPostRecord;
-  if (recordText(record, ['title', 'name', 'full_text', 'selftext', 'text', 'body', 'content', 'excerpt', 'summary', 'description', 'question']).length > 0) {
+  if (recordText(record, ['title', 'name', 'full_text', 'selftext', 'text', 'messageText', 'body', 'content', 'excerpt', 'summary', 'description', 'question']).length > 0) {
     return true;
   }
   const data = record.data;

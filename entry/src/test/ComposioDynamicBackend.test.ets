@@ -289,7 +289,7 @@ export default function composioDynamicBackendTest() {
         '"id":"tweet-1","text":"payload-secret","token":"sk-live-secret",' +
         '"url":"https://x.com/openai/status/1"}]}}';
       const client = new RecordingComposioSearchExecuteClient(
-        searchObservationForTool('TWITTER_SEARCH_TWEETS', inputSchema, outputSchema), observation
+        searchObservationForTool('TWITTER_RECENT_SEARCH', inputSchema, outputSchema), observation
       );
       const result = await callComposioSearchAndExecute(
         client, 'search Twitter posts', looseObject('{"operation":"search","fixedToolId":"x.post.search"}')
@@ -339,6 +339,27 @@ export default function composioDynamicBackendTest() {
     });
 
     it('does not relabel X discovery or fallback responses as post data', 0, async () => {
+      const currentPostsClient = new RecordingComposioSearchExecuteClient(
+        '{"source":"Composio","authorizedToolkits":["twitter"],"tools":[' +
+          '{"toolSlug":"TWITTER_SEARCH_RECENT_COUNTS","description":"Count recent posts",' +
+            '"inputSchema":"{}","outputSchema":"{}"},' +
+          '{"toolSlug":"TWITTER_RECENT_SEARCH","description":"Search recent posts",' +
+            '"inputSchema":"{\\"type\\":\\"object\\",\\"required\\":[\\"query\\"],' +
+              '\\"properties\\":{\\"query\\":{\\"type\\":\\"string\\"},' +
+              '\\"max_results\\":{\\"type\\":\\"integer\\"}}}","outputSchema":"{}"}' +
+        '],"instruction":"execute selected tool"}',
+        '{"data":{"posts":[{"id":"tweet-current-1","text":"real post",' +
+          '"url":"https://x.com/openai/status/tweet-current-1"}]}}'
+      );
+      const currentPosts = await callComposioSearchAndExecute(
+        currentPostsClient, 'search Twitter public posts',
+        looseObject('{"operation":"search","fixedToolId":"x.post.search",' +
+          '"fixedArgs":{"query":"OpenAI Codex","pageSize":5}}')
+      );
+      expect(currentPosts.status).assertEqual('success');
+      expect(currentPostsClient.executedSlugs.length).assertEqual(1);
+      expect(currentPostsClient.executedSlugs[0]).assertEqual('TWITTER_RECENT_SEARCH');
+
       const noMatchClient = new RecordingComposioSearchExecuteClient(
         searchObservationForTool('TWITTER_USER_LOOKUP_ME'), successfulExecutionObservation()
       );
@@ -365,7 +386,7 @@ export default function composioDynamicBackendTest() {
       expect(xPostStructuredDataResult(fallback).status).assertEqual('error');
 
       const postsClient = new RecordingComposioSearchExecuteClient(
-        searchObservationForTool('TWITTER_SEARCH_TWEETS'),
+        searchObservationForTool('TWITTER_RECENT_SEARCH'),
         '{"data":{"posts":[{"id":"tweet-real-1","text":"real post",' +
           '"url":"https://x.com/openai/status/tweet-real-1"}]}}'
       );

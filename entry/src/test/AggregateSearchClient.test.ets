@@ -197,6 +197,22 @@ export default function aggregateSearchClientTest() {
       expect(posts[0].publishedAt).assertEqual('2026-07-20T01:00:00.000Z');
     });
 
+    it('maps compact X Composio messageText into the card body', 0, () => {
+      const posts = xPostsFromComposioResult({
+        sourceTag: 'Composio',
+        toolName: 'TWITTER_RECENT_SEARCH',
+        title: 'Composio X 结果',
+        status: 'success',
+        summary: '返回 1 条',
+        rows: [],
+        rawPreview: '{"posts":[{"id":"tweet-current-1","messageText":"real post","url":"https://x.com/user/status/tweet-current-1"}]}'
+      });
+
+      expect(posts.length).assertEqual(1);
+      expect(posts[0].text).assertEqual('real post');
+      expect(posts[0].url).assertEqual('https://x.com/user/status/tweet-current-1');
+    });
+
     it('skips non-success Hacker News rows', 0, () => {
       const posts = hackerNewsPostsFromComposioResult({
         sourceTag: 'Composio',
