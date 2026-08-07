@@ -791,7 +791,9 @@ function normalizeCanaryTaskInput(
     const isBimTurn = input.text.indexOf('[BIM_CONTEXT]') === 0;
     let query = originalInput.text;
     if (isBimTurn) {
-      if (fieldQuery.length > 0 && validBimTravelQuery(fieldQuery, currentLocalDate)) {
+      if (validBimTravelQuery(originalInput.text, currentLocalDate)) {
+        query = originalInput.text;
+      } else if (fieldQuery.length > 0 && validBimTravelQuery(fieldQuery, currentLocalDate)) {
         query = fieldQuery;
       } else if (typeof taskQuery === 'string' && validBimTravelQuery(taskQuery, currentLocalDate)) {
         query = taskQuery.trim();

@@ -2027,6 +2027,42 @@ export default function multiAgentCanaryRuntimeTest() {
       runtime.dispose();
     });
 
+    it('keeps a complete current BIM travel query ahead of resolved matter fields', 0, async () => {
+      const calls: StructuredToolCallRecord[] = [];
+      const options: MultiAgentCanaryOptions = canaryOptions(
+        new QueueModel([BIM_FLIGHT_FIELDS_ONLY_DECISION]),
+        new CanaryHotelExecutor(),
+        new RecordingOpener(),
+        [],
+        []
+      );
+      options.dataExecutor = undefined;
+      options.structuredToolCall = async (
+        toolId: string,
+        prompt: string,
+        args: Object
+      ): Promise<DataResult> => {
+        calls.push({ toolId, prompt, args });
+        return canaryStructuredResult(toolId, 'flights');
+      };
+      const runtime = new MultiAgentCanaryRuntime(options);
+      const originalQuery = F01_QUERY;
+      const bimPrompt = '[BIM_CONTEXT]\nContinue the primary matter.\n' +
+        '{"primary":{"id":"bim-trip","title":"东京旅行","contextJson":"{}",' +
+        '"appliedSurfaceDigest":{}},"secondary":[],"query":"' + originalQuery + '"}';
+
+      const outcome = await runtime.submit(
+        bimPrompt, { text: originalQuery }
+      ) as MultiAgentSettledOutcome;
+
+      expect(outcome.status).assertEqual('success');
+      expect(calls.length).assertEqual(1);
+      expect(calls[0].prompt).assertEqual(originalQuery);
+      expect((calls[0].args as Record<string, Object | string | number | boolean>)['query'])
+        .assertEqual(originalQuery);
+      runtime.dispose();
+    });
+
     it('builds a provider query when BIM flight fields omit query text', 0, async () => {
       const calls: StructuredToolCallRecord[] = [];
       const options: MultiAgentCanaryOptions = canaryOptions(
