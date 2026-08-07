@@ -9,6 +9,7 @@ type HtmlHomePostedAction = Record<string, HtmlHomeActionValue>;
 
 class HtmlHomeActionBridge {
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
+  onWaterfallFullscreenChange: (active: boolean) => void = (_active: boolean) => {};
 
   postAction(raw: string): void {
     const action = parseHtmlHomeAction(raw);
@@ -30,6 +31,10 @@ class HtmlHomeActionBridge {
     }
     aiLogError('[AIPhone][HtmlHomePostActionParseError] rawChars=' + raw.length.toString());
   }
+
+  setWaterfallFullscreen(raw: string): void {
+    this.onWaterfallFullscreenChange(raw === 'true');
+  }
 }
 
 @Component
@@ -47,6 +52,7 @@ export struct HtmlHomeSurfaceView {
   @Prop luckinInlinePatchJson: string = '';
   @Prop @Watch('onLuckinPatchTickChange') luckinInlinePatchTick: number = 0;
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
+  onWaterfallFullscreenChange: (active: boolean) => void = (_active: boolean) => {};
   private controller: webview.WebviewController = new webview.WebviewController();
   private popupController: webview.WebviewController = new webview.WebviewController();
   private bridge: HtmlHomeActionBridge = new HtmlHomeActionBridge();
@@ -67,6 +73,13 @@ export struct HtmlHomeSurfaceView {
     this.bridge.onAction = (action: A2uiAction): void => {
       this.onAction(action);
     };
+    this.bridge.onWaterfallFullscreenChange = (active: boolean): void => {
+      this.onWaterfallFullscreenChange(active);
+    };
+  }
+
+  aboutToDisappear(): void {
+    this.onWaterfallFullscreenChange(false);
   }
 
   private loadHtmlIfNeeded(): void {
@@ -83,6 +96,7 @@ export struct HtmlHomeSurfaceView {
     }
     try {
       this.webReady = false;
+      this.onWaterfallFullscreenChange(false);
       this.controller.loadData(this.html, 'text/html', 'UTF-8', 'https://aiphone.local/');
       this.loadedKey = this.html;
       this.lastMailDetailEventJson = '';
@@ -294,7 +308,7 @@ export struct HtmlHomeSurfaceView {
         .javaScriptProxy({
           object: this.bridge,
           name: 'AIPhoneHome',
-          methodList: ['postAction'],
+          methodList: ['postAction', 'setWaterfallFullscreen'],
           controller: this.controller
         })
         .width('100%')

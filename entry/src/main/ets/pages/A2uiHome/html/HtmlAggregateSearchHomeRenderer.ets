@@ -783,73 +783,81 @@ const WATERFALL_CSS: string = `
 }
 .waterfall-entry button {
   display: inline-flex; width: auto; min-height: 44px; align-items: center; justify-content: center;
-  border: 1px solid rgba(24, 32, 27, 0.26); border-radius: 999px;
-  background: rgba(24, 32, 27, 0.94); box-shadow: 0 10px 24px rgba(44, 34, 26, 0.15);
-  color: #fff; padding: 0 16px; font-size: 13px; font-weight: 760; cursor: pointer;
+  border: 1px solid rgba(153, 95, 76, 0.28); border-radius: 999px;
+  background: rgba(255, 252, 249, 0.96); box-shadow: 0 10px 28px rgba(75, 50, 38, 0.14);
+  color: var(--accent); padding: 0 16px; font-size: 13px; font-weight: 760; cursor: pointer;
   pointer-events: auto; backdrop-filter: blur(16px);
-  transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), opacity 160ms ease-out;
+  transition: transform 150ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 180ms ease-out;
 }
 .waterfall-overlay {
   position: fixed; inset: 0; z-index: 20; display: none; overflow: hidden;
-  background:
-    radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.96), rgba(245, 242, 238, 0.72) 42%, var(--paper) 78%);
+  background: #f7f4f0;
 }
 .waterfall-overlay.active { display: block; }
-.waterfall-track { height: 100dvh; overflow-y: auto; overscroll-behavior-y: contain; scroll-snap-type: y mandatory; }
+.waterfall-track {
+  height: 100dvh; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: none;
+  scroll-snap-type: y mandatory; scrollbar-width: none; background: #f7f4f0;
+}
+.waterfall-track::-webkit-scrollbar { display: none; }
 .waterfall-card {
-  position: relative; width: min(100%, 820px); min-height: 100dvh; margin: 0 auto; scroll-snap-align: start;
+  position: relative; width: min(100%, 720px); height: 100dvh; min-height: 100dvh; margin: 0 auto;
+  scroll-snap-align: start; scroll-snap-stop: always; overflow: hidden;
   display: flex; flex-direction: column; justify-content: flex-start;
-  padding: calc(68px + env(safe-area-inset-top)) 18px calc(48px + env(safe-area-inset-bottom));
+  padding: calc(66px + env(safe-area-inset-top)) 18px calc(20px + env(safe-area-inset-bottom));
+  background: #f7f4f0;
 }
 .waterfall-cinema-stage {
-  position: relative; min-height: 54dvh; margin: 0 -18px; overflow: hidden;
-  border-radius: 0 0 28px 28px; background: var(--accent-soft);
-  box-shadow: 0 18px 46px rgba(44, 34, 26, 0.1);
+  position: relative; height: clamp(280px, 52dvh, 540px); min-height: 280px; overflow: hidden;
+  border: 1px solid rgba(33, 27, 23, 0.08); border-radius: 26px;
+  background: linear-gradient(145deg, #efe5df, #e9edf0);
+  box-shadow: 0 16px 42px rgba(64, 44, 34, 0.1);
 }
 .waterfall-cinema-stage img {
-  display: block; width: 100%; height: 58dvh; min-height: 360px; object-fit: cover;
+  position: absolute; z-index: 1; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover;
 }
 .waterfall-cinema-stage::after {
-  content: ''; position: absolute; inset: auto 0 0; height: 32%;
-  background: linear-gradient(180deg, rgba(245, 242, 238, 0), rgba(245, 242, 238, 0.62));
+  content: ''; position: absolute; z-index: 2; inset: auto 0 0; height: 26%;
+  background: linear-gradient(180deg, rgba(33, 27, 23, 0), rgba(33, 27, 23, 0.18));
   pointer-events: none;
 }
+.waterfall-media-fallback {
+  position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: 12px;
+  color: var(--ink-soft); font-size: 13px; font-weight: 700; text-align: center;
+}
+.waterfall-media-fallback .waterfall-source-logo { width: 54px; height: 54px; border-radius: 16px; }
 .waterfall-cinema-meta {
-  position: absolute; z-index: 1; left: 16px; bottom: 16px;
+  position: absolute; z-index: 3; left: 14px; bottom: 14px;
   display: inline-flex; min-height: 36px; align-items: center; gap: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.68); border-radius: 999px;
-  background: rgba(255, 255, 255, 0.86); color: var(--ink);
-  padding: 5px 10px 5px 7px; box-shadow: 0 8px 24px rgba(44, 34, 26, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.72); border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92); color: var(--ink);
+  padding: 4px 10px 4px 6px; box-shadow: 0 8px 22px rgba(44, 34, 26, 0.1);
   font-size: 12px; font-weight: 720; backdrop-filter: blur(14px);
 }
 .waterfall-cinema-copy {
-  position: relative; z-index: 1; margin: -28px -2px 0; padding: 26px 4px 0;
-  border-radius: 26px 26px 0 0;
-  background: linear-gradient(180deg, rgba(245, 242, 238, 0.98), rgba(245, 242, 238, 0) 72%);
+  position: relative; min-height: 0; padding: 18px 3px 0;
 }
 .waterfall-cinema-card h2 {
-  max-width: 24ch; font-size: clamp(27px, 7.2vw, 42px); line-height: 1.08; letter-spacing: -0.026em;
-  font-weight: 820; overflow-wrap: anywhere; text-wrap: balance;
+  display: -webkit-box; max-width: 30ch; overflow: hidden;
+  font-size: clamp(23px, 6vw, 34px); line-height: 1.12; letter-spacing: -0.022em;
+  font-weight: 800; overflow-wrap: anywhere; text-wrap: balance;
+  -webkit-box-orient: vertical; -webkit-line-clamp: 3;
 }
 .waterfall-cinema-card p {
-  display: -webkit-box; max-width: 62ch; margin-top: 12px; overflow: hidden;
-  color: var(--ink-soft); font-size: 15px; line-height: 1.55; overflow-wrap: anywhere;
-  -webkit-box-orient: vertical; -webkit-line-clamp: 4;
+  display: -webkit-box; max-width: 62ch; margin-top: 10px; overflow: hidden;
+  color: var(--ink-soft); font-size: 14px; line-height: 1.48; overflow-wrap: anywhere;
+  -webkit-box-orient: vertical; -webkit-line-clamp: 3;
 }
-.waterfall-card--text { justify-content: center; padding-top: calc(96px + env(safe-area-inset-top)); }
-.waterfall-card--text .waterfall-cinema-copy {
-  margin: 0; padding: 30px 6px; background: transparent;
-}
-.waterfall-card--text .waterfall-cinema-meta {
-  position: static; width: fit-content; margin-bottom: 18px; background: var(--panel);
-}
-.waterfall-card--text h2 { max-width: 18ch; font-size: clamp(32px, 9vw, 50px); }
+.waterfall-card--text .waterfall-cinema-stage { height: clamp(240px, 42dvh, 420px); }
 .waterfall-cinema-card a {
   display: inline-flex; min-height: 44px; align-items: center; width: fit-content; color: var(--accent);
-  margin-top: 14px; font-size: 14px; font-weight: 760; text-decoration: none;
+  margin-top: 8px; font-size: 13px; font-weight: 760; text-decoration: none;
 }
-.waterfall-meta { margin-top: 12px; color: var(--muted); font-size: 12px; line-height: 1.35; }
-.waterfall-reason { display: none; }
+.waterfall-meta { margin-top: 8px; color: var(--muted); font-size: 12px; line-height: 1.35; }
+.waterfall-recommendation {
+  display: -webkit-box; margin-top: 10px; overflow: hidden; color: var(--accent);
+  font-size: 12px; font-weight: 680; line-height: 1.4;
+  -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+}
 .waterfall-source-logo {
   display: inline-flex; width: 28px; height: 28px; flex: 0 0 28px;
   align-items: center; justify-content: center; overflow: hidden; border-radius: 9px;
@@ -869,10 +877,10 @@ const WATERFALL_CSS: string = `
   border: 1px solid rgba(33, 27, 23, 0.14); border-radius: 999px; background: rgba(255, 255, 255, 0.9);
   color: var(--ink); padding: 0 13px; font-size: 13px; font-weight: 720; cursor: pointer;
   pointer-events: auto;
-  transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), opacity 160ms ease-out;
+  transition: transform 150ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 180ms ease-out;
 }
 .waterfall-toolbar-primary {
-  min-width: 72px; box-shadow: 0 8px 22px rgba(44, 34, 26, 0.1);
+  min-width: 74px; box-shadow: 0 8px 22px rgba(44, 34, 26, 0.09);
   color: var(--ink) !important; font-weight: 780 !important;
 }
 .waterfall-toolbar-tools {
@@ -880,28 +888,22 @@ const WATERFALL_CSS: string = `
   pointer-events: auto;
 }
 .waterfall-toolbar-secondary {
-  width: 44px; min-width: 44px; padding: 0 !important;
+  width: 52px; min-width: 52px; padding: 0 8px !important;
   box-shadow: 0 8px 22px rgba(44, 34, 26, 0.08);
-  font-size: 13px !important;
 }
+.waterfall-source-control-logos { display: flex; align-items: center; justify-content: center; }
+.waterfall-source-control-logos .waterfall-source-logo {
+  width: 22px; height: 22px; min-width: 22px; flex-basis: 22px; border: 2px solid #fff; border-radius: 8px;
+}
+.waterfall-source-control-logos .waterfall-source-logo + .waterfall-source-logo { margin-left: -7px; }
 .waterfall-toolbar button:active, .waterfall-entry button:active, .waterfall-preferences button:active {
-  transform: scale(0.98); opacity: 0.9;
+  transform: scale(0.96);
 }
 .waterfall-toolbar button:focus-visible, .waterfall-entry button:focus-visible,
 .waterfall-preferences button:focus-visible, .waterfall-preferences input:focus-visible,
 .waterfall-empty button:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 3px;
 }
-.waterfall-reason-panel {
-  position: fixed; z-index: 2; left: 14px; right: 14px; bottom: calc(18px + env(safe-area-inset-bottom));
-  width: min(calc(100% - 28px), 480px); margin: 0 auto;
-  display: block; padding: 14px 16px; border: 1px solid var(--line); border-radius: 18px;
-  background: rgba(255, 255, 255, 0.94); box-shadow: var(--shadow); color: var(--accent); font-size: 14px;
-  line-height: 1.45; opacity: 0; pointer-events: none; transform: translateY(10px);
-  transform-origin: bottom center;
-  transition: transform 180ms cubic-bezier(0.23, 1, 0.32, 1), opacity 180ms ease-out;
-}
-.waterfall-reason-panel.active { opacity: 1; pointer-events: auto; transform: translateY(0); }
 .waterfall-preferences {
   position: fixed; z-index: 3; inset: auto 14px calc(14px + env(safe-area-inset-bottom)) 14px;
   display: block; max-height: min(72dvh, 560px); overflow-y: auto; padding: 18px 18px 20px;
@@ -922,14 +924,14 @@ const WATERFALL_CSS: string = `
 .waterfall-preferences label {
   display: grid; min-width: 0; min-height: 60px; grid-template-columns: 32px minmax(0, 1fr) 20px;
   align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 16px;
-  background: rgba(245, 242, 238, 0.7); color: var(--ink); padding: 9px 10px; font-size: 14px;
-  transition: transform 140ms cubic-bezier(0.23, 1, 0.32, 1), opacity 140ms ease-out;
+  background: #faf8f5; color: var(--ink); padding: 9px 10px; font-size: 14px;
+  transition: transform 140ms cubic-bezier(0.23, 1, 0.32, 1), border-color 180ms ease-out;
 }
 .waterfall-source-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 720; }
 .waterfall-preferences input { width: 20px; height: 20px; margin: 0; accent-color: var(--accent); }
 .waterfall-preferences > div:last-child > button {
-  width: 100%; min-height: 48px; margin-top: 16px; border-color: var(--line-strong); background: var(--ink);
-  color: var(--paper);
+  width: 100%; min-height: 48px; margin-top: 16px; border-color: rgba(153, 95, 76, 0.34);
+  background: var(--accent); color: #fff;
 }
 .waterfall-empty {
   min-height: calc(100dvh - 150px); display: grid; place-items: center; align-content: center; gap: 14px;
@@ -938,9 +940,9 @@ const WATERFALL_CSS: string = `
 .waterfall-empty button {
   min-height: 48px; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--panel);
   color: var(--ink); padding: 0 16px; font-size: 14px; font-weight: 720; cursor: pointer;
-  transition: transform 140ms ease-out, opacity 140ms ease-out;
+  transition: transform 140ms ease-out, box-shadow 180ms ease-out;
 }
-.waterfall-empty button:active { transform: scale(0.98); opacity: 0.9; }
+.waterfall-empty button:active { transform: scale(0.97); }
 .waterfall-status { color: var(--muted); font-size: 14px; line-height: 1.5; padding: 18px 20px 0; text-align: center; }
 @media (hover: hover) and (pointer: fine) {
   .waterfall-entry button:hover, .waterfall-toolbar button:hover, .waterfall-preferences label:hover {
@@ -949,8 +951,8 @@ const WATERFALL_CSS: string = `
 }
 @media (prefers-reduced-motion: reduce) {
   .waterfall-entry button, .waterfall-toolbar button, .waterfall-preferences button,
-  .waterfall-preferences label, .waterfall-empty button { transition: opacity 140ms ease-out; }
-  .waterfall-preferences, .waterfall-reason-panel { transition: opacity 160ms ease-out; transform: none; }
+  .waterfall-preferences label, .waterfall-empty button { transition: none; }
+  .waterfall-preferences { transition: none; transform: none; }
   .waterfall-entry button:active, .waterfall-toolbar button:active, .waterfall-preferences button:active,
   .waterfall-preferences label:active, .waterfall-empty button:active { transform: none; }
 }
@@ -961,7 +963,6 @@ const WATERFALL_JS: string = `
   var overlay = document.getElementById('waterfall-discovery');
   var track = document.getElementById('waterfall-track');
   var preferences = document.getElementById('waterfall-preferences');
-  var reasonPanel = document.getElementById('waterfall-reason-panel');
   var state = window.__aiphoneWaterfallInitial || null;
   var mode = 'entry';
   var enabledSources = state && state.enabledSources ? state.enabledSources.slice() : [];
@@ -980,6 +981,11 @@ const WATERFALL_JS: string = `
     var fallback = escapeHtml(sourceLabel(source).slice(0, 2));
     return '<span class="waterfall-source-logo" aria-hidden="true">' +
       (logo ? '<img src="' + escapeHtml(logo) + '" alt="" />' : fallback) + '</span>';
+  }
+  function setFullscreen(active) {
+    if (window.AIPhoneHome && typeof window.AIPhoneHome.setWaterfallFullscreen === 'function') {
+      window.AIPhoneHome.setWaterfallFullscreen(active ? 'true' : 'false');
+    }
   }
   function candidates(payload) {
     if (!payload) return [];
@@ -1024,16 +1030,19 @@ const WATERFALL_JS: string = `
       args: { surfaceId: state.surfaceId || '', currentId: items[0].id }
     }));
   }
-  function renderCandidate(item) {
-    var cover = item.coverUrl ? '<img src="' + escapeHtml(item.coverUrl) + '" alt="' + escapeHtml(item.title) + '" loading="lazy" />' : '';
+  function renderCandidate(item, index) {
+    var cover = item.coverUrl ? '<img src="' + escapeHtml(item.coverUrl) + '" alt="' + escapeHtml(item.title) +
+      '" loading="' + (index === 0 ? 'eager' : 'lazy') + '" decoding="async" onerror="this.hidden=true" />' : '';
     var link = item.url ? '<a href="' + escapeHtml(item.url) + '" target="_blank" rel="noopener noreferrer">打开原文</a>' : '';
     var cardClass = item.coverUrl ? 'waterfall-card waterfall-cinema-card' : 'waterfall-card waterfall-cinema-card waterfall-card--text';
     var meta = '<div class="waterfall-cinema-meta">' + sourceLogoMarkup(item.source) + '<span>' +
       escapeHtml(sourceLabel(item.source)) + ' · ' + escapeHtml(item.mediaType) + '</span></div>';
-    var stage = cover ? '<div class="waterfall-cinema-stage">' + cover + meta + '</div>' : meta;
+    var fallback = '<div class="waterfall-media-fallback" data-waterfall-media-fallback>' +
+      sourceLogoMarkup(item.source) + '<span>' + escapeHtml(sourceLabel(item.source)) + ' 内容</span></div>';
+    var stage = '<div class="waterfall-cinema-stage">' + fallback + cover + meta + '</div>';
     return '<article class="' + cardClass + '" data-waterfall-id="' + escapeHtml(item.id) + '">' + stage +
       '<div class="waterfall-cinema-copy"><h2>' + escapeHtml(item.title) + '</h2><p>' + escapeHtml(item.summary) + '</p>' +
-      '<div class="waterfall-reason">推荐理由：' + escapeHtml(item.reason) + '</div>' +
+      '<div class="waterfall-recommendation">' + escapeHtml(item.reason) + '</div>' +
       (item.publishedAt ? '<div class="waterfall-meta">' + escapeHtml(item.publishedAt) + '</div>' : '') + link + '</div></article>';
   }
   function renderPreferences() {
@@ -1073,12 +1082,9 @@ const WATERFALL_JS: string = `
     }
     track.innerHTML = status + empty + items.map(renderCandidate).join('');
     track.scrollTop = 0;
-    if (reasonPanel) {
-      reasonPanel.textContent = items.length === 0 ? '' : '推荐理由：' + text(items[0].reason);
-      if (items.length === 0) {
-        reasonPanel.hidden = true;
-        reasonPanel.classList.remove('active');
-      }
+    var sourceControl = document.querySelector('.waterfall-source-control-logos');
+    if (sourceControl) {
+      sourceControl.innerHTML = enabledSources.slice(0, 3).map(sourceLogoMarkup).join('');
     }
   }
   track.addEventListener('scroll', function () {
@@ -1095,28 +1101,19 @@ const WATERFALL_JS: string = `
     if (!target || typeof target.closest !== 'function' || !target.closest('[data-waterfall-enter]')) return;
     mode = 'discovering';
     overlay.classList.add('active');
+    setFullscreen(true);
     render();
   });
   document.querySelectorAll('[data-waterfall-back]').forEach(function (button) {
     button.addEventListener('click', function () {
       mode = 'entry';
       overlay.classList.remove('active');
-      if (reasonPanel) {
-        reasonPanel.hidden = true;
-        reasonPanel.classList.remove('active');
-      }
+      if (preferences) preferences.classList.remove('active');
+      setFullscreen(false);
     });
   });
   document.querySelectorAll('[data-waterfall-preferences]').forEach(function (button) {
     button.addEventListener('click', renderPreferences);
-  });
-  document.querySelectorAll('[data-waterfall-reason]').forEach(function (button) {
-    button.addEventListener('click', function () {
-      if (reasonPanel && reasonPanel.textContent) {
-        reasonPanel.hidden = !reasonPanel.hidden;
-        reasonPanel.classList.toggle('active', !reasonPanel.hidden);
-      }
-    });
   });
   window.__aiphoneApplyWaterfallUpdate = function (payload) {
     mergePayload(payload);
@@ -1277,7 +1274,7 @@ export function renderAggregateSearchHomeDocument(document: HtmlHomeDocument, is
     '<style>', AGGREGATE_CSS, WATERFALL_CSS, '</style></head><body>',
     '<main class="aggregate-shell">',
     waterfall === null ? renderAggregateMainContent(document, isBusy, false) : waterfall.aggregateHtml,
-    '</main>', waterfall !== null ? '<section id="waterfall-discovery" class="waterfall-overlay"><div class="waterfall-toolbar"><button type="button" class="waterfall-toolbar-primary" aria-label="返回聚合搜索" data-waterfall-back><span aria-hidden="true">‹</span>&nbsp;返回</button><div class="waterfall-toolbar-tools"><button type="button" class="waterfall-toolbar-secondary" aria-label="来源偏好" title="来源偏好" data-waterfall-preferences>源</button><button type="button" class="waterfall-toolbar-secondary" aria-label="推荐理由" title="推荐理由" data-waterfall-reason>荐</button></div></div><div id="waterfall-reason-panel" class="waterfall-reason-panel" hidden></div><div id="waterfall-track" class="waterfall-track">' + waterfallStatus + '</div><div id="waterfall-preferences" class="waterfall-preferences"></div></section>' : '',
+    '</main>', waterfall !== null ? '<section id="waterfall-discovery" class="waterfall-overlay"><div class="waterfall-toolbar"><button type="button" class="waterfall-toolbar-primary" aria-label="返回聚合搜索" data-waterfall-back><span aria-hidden="true">‹</span>&nbsp;返回</button><div class="waterfall-toolbar-tools"><button type="button" class="waterfall-toolbar-secondary" aria-label="来源偏好" title="来源偏好" data-waterfall-preferences><span class="waterfall-source-control-logos" aria-hidden="true"></span></button></div></div><div id="waterfall-track" class="waterfall-track">' + waterfallStatus + '</div><div id="waterfall-preferences" class="waterfall-preferences"></div></section>' : '',
     '<script>', AGGREGATE_JS, waterfall !== null ? 'window.__aiphoneWaterfallSourceLogos=' + sourceLogosJson +
       ';window.__aiphoneWaterfallInitial=' + waterfallJson + ';' + WATERFALL_JS : '', '</script></body></html>'
   ].join('');

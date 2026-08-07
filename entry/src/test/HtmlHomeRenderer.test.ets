@@ -23,6 +23,7 @@ import {
   HtmlHomeMetric
 } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
 import { parseHtmlHomeAction } from '../main/ets/pages/A2uiHome/components/HtmlHomeSurfaceView';
+import { shouldShowHomeChrome } from '../main/ets/pages/A2uiHome/components/HomePage';
 import { renderRideDriverMapHtml } from '../main/ets/pages/A2uiHome/html/RideDriverMapHtmlRenderer';
 import {
   advanceWaterfallFeed,
@@ -2541,11 +2542,11 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('waterfall-entry-floating')).assertLarger(-1);
       expect(html.indexOf('waterfall-cinema-card')).assertLarger(-1);
       expect(html.indexOf('来源偏好')).assertLarger(-1);
-      expect(html.indexOf('推荐理由')).assertLarger(-1);
+      expect(html.indexOf('waterfall-recommendation')).assertLarger(-1);
       expect(html.indexOf('waterfall-toolbar-primary')).assertLarger(-1);
       expect(html.indexOf('waterfall-toolbar-secondary')).assertLarger(-1);
       expect(html.indexOf('aria-label="来源偏好"')).assertLarger(-1);
-      expect(html.indexOf('aria-label="推荐理由"')).assertLarger(-1);
+      expect(html.indexOf('aria-label="推荐理由"')).assertEqual(-1);
       expect(html.indexOf('window.__aiphoneApplyWaterfallUpdate')).assertLarger(-1);
       expect(html.indexOf('scroll-snap-type: y mandatory')).assertLarger(-1);
       expect(html.indexOf('min-height: 44px')).assertLarger(-1);
@@ -2555,7 +2556,10 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('data-waterfall-preferences')).assertLarger(-1);
       expect(html.indexOf('data-waterfall-empty-sources')).assertLarger(-1);
       expect(html.indexOf('打开来源偏好')).assertLarger(-1);
-      expect(html.indexOf('data-waterfall-reason')).assertLarger(-1);
+      expect(html.indexOf('data-waterfall-reason')).assertEqual(-1);
+      expect(html.indexOf('data-waterfall-media-fallback')).assertLarger(-1);
+      expect(shouldShowHomeChrome(false)).assertTrue();
+      expect(shouldShowHomeChrome(true)).assertFalse();
       expect(html.indexOf('聚合搜索')).assertLarger(-1);
       expect(html.indexOf('aggregate-filter')).assertLarger(-1);
       expect(html.indexOf('Codex demo')).assertLarger(-1);

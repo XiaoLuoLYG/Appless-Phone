@@ -55,21 +55,22 @@ function element() {
 const overlay = element();
 const track = element();
 const preferences = element();
-const reasonPanel = element();
-reasonPanel.hidden = true;
-reasonPanel.textContent = '';
-const reasonButton = element();
+const backButton = element();
+const preferencesButton = element();
 const documentListeners = {};
 const actions = [];
+const fullscreenStates = [];
 const document = {
   getElementById: (id) => ({
     'waterfall-discovery': overlay,
     'waterfall-track': track,
-    'waterfall-preferences': preferences,
-    'waterfall-reason-panel': reasonPanel
+    'waterfall-preferences': preferences
   })[id] ?? null,
   querySelector: () => null,
-  querySelectorAll: (selector) => selector === '[data-waterfall-reason]' ? [reasonButton] : [],
+  querySelectorAll: (selector) => ({
+    '[data-waterfall-back]': [backButton],
+    '[data-waterfall-preferences]': [preferencesButton]
+  })[selector] ?? [],
   addEventListener: (type, listener) => {
     documentListeners[type] = listener;
   }
@@ -81,7 +82,7 @@ const candidate = (id) => ({
   title: id,
   summary: id,
   url: `https://example.test/${id}`,
-  coverUrl: '',
+  coverUrl: id === 'current' ? 'https://example.test/broken-cover.jpg' : '',
   publishedAt: '',
   reason: '标题命中查询'
 });
@@ -95,7 +96,8 @@ const window = {
   },
   __aiphoneWaterfallSourceLogos: { youtube: 'data:image/png;base64,logo' },
   AIPhoneHome: {
-    postAction: (value) => actions.push(JSON.parse(value))
+    postAction: (value) => actions.push(JSON.parse(value)),
+    setWaterfallFullscreen: (value) => fullscreenStates.push(value)
   }
 };
 
@@ -110,21 +112,20 @@ documentListeners.click({
     closest: (selector) => selector === '[data-waterfall-enter]' ? {} : null
   }
 });
-reasonButton.emit('click');
-assert.equal(reasonPanel.hidden, false);
-assert.equal(reasonPanel.textContent, '推荐理由：标题命中查询');
-assert.equal(reasonPanel.classList.contains('active'), true);
-reasonButton.emit('click');
-assert.equal(reasonPanel.hidden, true);
-assert.equal(reasonPanel.classList.contains('active'), false);
-reasonButton.emit('click');
-assert.equal(reasonPanel.hidden, false);
-assert.equal(reasonPanel.classList.contains('active'), true);
+assert.deepEqual(fullscreenStates, ['true']);
+assert.match(track.innerHTML, /waterfall-recommendation/);
+assert.doesNotMatch(track.innerHTML, /data-waterfall-reason/);
+assert.match(track.innerHTML, /data-waterfall-media-fallback/);
 
 track.scrollTop = 600;
 track.emit('scroll');
 await new Promise((resolve) => setTimeout(resolve, 120));
 assert.equal(actions.at(-1)?.id, 'waterfall.feed.advance');
+preferencesButton.emit('click');
+assert.equal(preferences.classList.contains('active'), true);
+backButton.emit('click');
+assert.deepEqual(fullscreenStates, ['true', 'false']);
+assert.equal(preferences.classList.contains('active'), false);
 
 window.__aiphoneApplyWaterfallUpdate({
   surfaceId: 'surface-1',

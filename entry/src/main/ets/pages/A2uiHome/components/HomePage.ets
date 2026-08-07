@@ -60,6 +60,10 @@ const A2UI_HEADER_TITLE_FONT_SIZE: number = 17;
 const A2UI_VOICE_DOCK_HEIGHT: number = 72;
 const A2UI_VOICE_PULSE_STEPS: number = 12;
 
+export function shouldShowHomeChrome(waterfallFullscreen: boolean): boolean {
+  return !waterfallFullscreen;
+}
+
 @Component
 export struct HomePage {
   @Link inputText: string;
@@ -96,6 +100,7 @@ export struct HomePage {
   @Prop isDebugBuild: boolean = false;
   @State sendSpinnerRotation: number = 0;
   @State voicePulseTick: number = 0;
+  @State waterfallFullscreen: boolean = false;
   private sendSpinnerTimerId: number = -1;
   private previousKeyboardAvoidMode: KeyboardAvoidMode = KeyboardAvoidMode.OFFSET;
   onToggleHistory: () => void = () => {};
@@ -289,6 +294,7 @@ export struct HomePage {
   build() {
     Stack({ alignContent: Alignment.Center }) {
       Column() {
+        if (shouldShowHomeChrome(this.waterfallFullscreen)) {
         Row() {
           Image($r('app.media.logo_appless'))
             .width(A2UI_HEADER_LOGO_SIZE)
@@ -376,20 +382,21 @@ export struct HomePage {
         .padding({ left: 0, right: 0 })
         .margin({ bottom: A2UI_HOME_SECTION_GAP })
 
-      Column() {
-        if (this.showHistory) {
-          HistoryPanelView({
-            messages: this.messages
-          })
-          .height('100%')
+        Column() {
+          if (this.showHistory) {
+            HistoryPanelView({
+              messages: this.messages
+            })
+            .height('100%')
+          }
         }
+        .width('100%')
+        .height(this.historyPanelHeight())
+        .opacity(this.showHistory ? 1 : 0)
+        .clip(true)
+        .margin({ top: this.showHistory ? A2UI_HOME_SECTION_GAP : 0 })
+        .animation({ duration: A2UI_MOTION_NORMAL_MS, curve: A2UI_MOTION_MOVE_CURVE })
       }
-      .width('100%')
-      .height(this.historyPanelHeight())
-      .opacity(this.showHistory ? 1 : 0)
-      .clip(true)
-      .margin({ top: this.showHistory ? A2UI_HOME_SECTION_GAP : 0 })
-      .animation({ duration: A2UI_MOTION_NORMAL_MS, curve: A2UI_MOTION_MOVE_CURVE })
 
       if (this.showTrainPresalePanel) {
         TrainPresalePanel({
@@ -441,12 +448,16 @@ export struct HomePage {
           renderTick: this.surfaceRenderTick,
           luckinInlinePatchJson: this.luckinInlinePatchJson,
           luckinInlinePatchTick: this.luckinInlinePatchTick,
-          onAction: this.onAction
+          onAction: this.onAction,
+          onWaterfallFullscreenChange: (active: boolean): void => {
+            this.waterfallFullscreen = active;
+          }
         })
         .layoutWeight(1)
-        .margin({ top: this.surfaceTopGap() })
+        .margin({ top: this.waterfallFullscreen ? 0 : this.surfaceTopGap() })
       }
 
+      if (shouldShowHomeChrome(this.waterfallFullscreen)) {
       Column() {
         Row() {
           if (this.isVoiceListening) {
@@ -549,14 +560,15 @@ export struct HomePage {
       .alignItems(HorizontalAlign.Start)
       .padding({ top: A2UI_HOME_SECTION_GAP, left: 0, right: 0 })
       }
+      }
       .width('100%')
-      .constraintSize({ maxWidth: A2UI_HOME_MAX_WIDTH })
+      .constraintSize({ maxWidth: this.waterfallFullscreen ? '100%' : A2UI_HOME_MAX_WIDTH })
       .height('100%')
       .padding({
-        left: A2UI_HOME_PAGE_PADDING_X,
-        right: A2UI_HOME_PAGE_PADDING_X,
-        top: A2UI_HOME_PAGE_PADDING_TOP,
-        bottom: A2UI_HOME_PAGE_PADDING_BOTTOM
+        left: this.waterfallFullscreen ? 0 : A2UI_HOME_PAGE_PADDING_X,
+        right: this.waterfallFullscreen ? 0 : A2UI_HOME_PAGE_PADDING_X,
+        top: this.waterfallFullscreen ? 0 : A2UI_HOME_PAGE_PADDING_TOP,
+        bottom: this.waterfallFullscreen ? 0 : A2UI_HOME_PAGE_PADDING_BOTTOM
       })
       .backgroundColor(COLOR_PAGE)
 
