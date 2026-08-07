@@ -331,6 +331,41 @@ async function runComposioAuthCases() {
   }
 }
 
+async function smokeCapabilityWireProtocol() {
+  const response = await fetch(`${gatewayUrl}/v1/tool/call`, {
+    method: 'POST',
+    headers: {
+      ...(gatewayApiKey.length > 0 ? { 'X-API-Key': gatewayApiKey } : {}),
+      'Content-Type': 'application/json',
+      'Accept': 'application/x-ndjson'
+    },
+    body: JSON.stringify({
+      wireVersion: '1.0',
+      traceId: 'gateway-smoke-trace',
+      callId: 'gateway-smoke-call',
+      toolId: 'unknown.tool',
+      toolVersion: '1.0.0',
+      args: {},
+      context: { inputText: 'protocol validation only' }
+    }),
+    signal: AbortSignal.timeout(5000)
+  });
+  const text = await response.text();
+  const contentType = response.headers.get('content-type') || '';
+  if (response.status !== 400 || !contentType.includes('application/x-ndjson')) {
+    throw new Error(`capability wire protocol expected HTTP 400 NDJSON, got ${response.status} ${contentType}`);
+  }
+  const events = text.split('\n').filter(line => line.trim().length > 0).map(line => JSON.parse(line));
+  if (events.length !== 1 || events[0].kind !== 'failed' ||
+    events[0].result?.error?.code !== 'TOOL_NOT_AVAILABLE') {
+    throw new Error(`capability wire protocol returned an invalid terminal event: ${text}`);
+  }
+  if (text.includes('createSurface') || text.includes('updateComponents') || text.includes('updateDataModel')) {
+    throw new Error('capability wire protocol leaked A2UI into the remote backend response');
+  }
+  console.log('PASS host/capability-wire-protocol');
+}
+
 async function runSocialBridgeAuthNegativeCases() {
   if (gatewayApiKey.length === 0) {
     return;
@@ -602,6 +637,7 @@ async function main() {
     await runComposioAuthCases();
     return;
   }
+  await smokeCapabilityWireProtocol();
   await runSocialBridgeAuthNegativeCases();
   await runSocialBridgeCases();
   const beforeLogs = useDevice ? captureHilog(target, 'before') : '';

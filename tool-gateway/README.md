@@ -35,6 +35,7 @@ launchctl remove com.aiphone.toolgateway
 - `GET /mcp/tools`
 - `POST /mcp/call`
 - `POST /api/aiphone/tool`
+- `POST /v1/tool/call`（Capability Runtime 远端 Backend 协议，返回 NDJSON ExecutionEvent，不返回 A2UI）
 - `POST /api/payment/stripe/checkout`
 - `POST /api/payment/paypal/checkout`
 - `POST /api/payment/paypal/capture`
