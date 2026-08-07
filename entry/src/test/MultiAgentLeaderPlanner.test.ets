@@ -134,6 +134,22 @@ const MIXED_MISPLACED_ACTION_DECISION: string = MIXED_DATA_ACTION_DECISION
     '"allowedActionIds":["luckin.order.preview","payment.send"]',
     '"allowedActionIds":["payment.send"]'
   );
+const MIXED_SEQUENCE_WITH_FUTURE_CAPABILITIES_DECISION: string =
+  MIXED_DATA_ACTION_DECISION
+    .replace('"continuationMode":"complete"', '"continuationMode":"sequence"')
+    .replace(
+      ',"actionIntent":{"goal":"预览瑞幸订单，然后打开转账确认",' +
+        '"allowedActionIds":["luckin.order.preview","payment.send"]}',
+      ''
+    );
+const MULTI_DATA_SEQUENCE_WITH_FUTURE_CAPABILITIES_DECISION: string =
+  MIXED_SEQUENCE_WITH_FUTURE_CAPABILITIES_DECISION.replace(
+    '"required":true}],"uiIntent"',
+    '"required":true},{"localId":"travel","goal":"搜索深圳到秋港花园的出行方案",' +
+      '"allowedToolIds":["travel.search"],"toolId":"travel.search",' +
+      '"input":{"origin":"深圳华为坂田基地","destination":"秋港花园","date":"今天"},' +
+      '"required":true}],"uiIntent"'
+  );
 const EXPLICIT_GOOGLE_MAPS_AS_FOOD_DECISION: string =
   '{"personaId":"travel_companion","skillId":"","requestedCapabilityIds":["food.search"],' +
   '"roundAction":"execute","continuationMode":"complete","dataTasks":[{"localId":"places","goal":"在 Google Maps 搜索附近中餐",' +
@@ -3021,6 +3037,62 @@ export default function multiAgentLeaderPlannerTest() {
       expect(decision.actionIntent!.allowedActionIds.join(',')).assertEqual(
         'luckin.order.preview,payment.send'
       );
+    });
+
+    it('scopes sequence capability IDs to the current Data task', 0, async () => {
+      const context = actionOwnerContext();
+      context.tools.push({
+        toolId: 'ride.estimate',
+        domain: 'ride',
+        intent: 'ride.estimate',
+        riskLevel: 'read',
+        registeredBackends: ['local_adapter'],
+        inputSchema: 'rideEstimateQuery',
+        outputSchema: 'genericToolResults',
+        actions: []
+      });
+      const decision = await new MultiAgentLeaderPlanner(new QueueLocalModel([
+        MIXED_SEQUENCE_WITH_FUTURE_CAPABILITIES_DECISION
+      ])).plan(
+        inputMessage(),
+        { text: MIXED_DATA_ACTION_QUERY },
+        context,
+        1
+      );
+
+      expect(decision.requestedCapabilityIds.join(',')).assertEqual('ride.estimate');
+      expect(decision.dataTasks.length).assertEqual(1);
+      expect(decision.dataTasks[0].toolId).assertEqual('ride.estimate');
+      expect(decision.actionIntent === undefined).assertTrue();
+      expect(decision.reasonCode).assertEqual('sequence_requires_next_round');
+    });
+
+    it('scopes sequence capability IDs to all current Data tasks before normalization', 0, async () => {
+      const context = actionOwnerContext();
+      context.tools.push({
+        toolId: 'ride.estimate',
+        domain: 'ride',
+        intent: 'ride.estimate',
+        riskLevel: 'read',
+        registeredBackends: ['local_adapter'],
+        inputSchema: 'rideEstimateQuery',
+        outputSchema: 'genericToolResults',
+        actions: []
+      });
+      const decision = await new MultiAgentLeaderPlanner(new QueueLocalModel([
+        MULTI_DATA_SEQUENCE_WITH_FUTURE_CAPABILITIES_DECISION
+      ])).plan(
+        inputMessage(),
+        { text: MIXED_DATA_ACTION_QUERY },
+        context,
+        1
+      );
+
+      expect(decision.requestedCapabilityIds.join(',')).assertEqual('ride.estimate');
+      expect(decision.dataTasks.length).assertEqual(1);
+      expect(decision.dataTasks[0].toolId).assertEqual('ride.estimate');
+      expect(decision.actionIntent === undefined).assertTrue();
+      expect(decision.reasonCode).assertEqual('sequence_requires_next_round');
     });
 
     it('normalizes one model-selected mixed Action into its declared owner', 0, async () => {

@@ -1633,13 +1633,28 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     }
     const selectedAction: LeaderRoundAction = roundAction as LeaderRoundAction;
     const tasks: LeaderDecisionDataTask[] = this.dataTasks(rawTasks as Object[], context);
-    const requestedCapabilityIds: string[] = this.requestedCapabilities(
+    let requestedCapabilityIds: string[] = this.requestedCapabilities(
       rawRequestedCapabilities as Object[],
       context
     );
     const actionValue = values['actionIntent'];
     const actionIntent: LeaderActionIntent | null = actionValue === undefined ? null :
       this.actionIntent(actionValue, context);
+    if (continuationMode === 'sequence' && selectedAction === 'execute' && tasks.length > 0 &&
+      actionIntent === null) {
+      requestedCapabilityIds = [];
+      for (let taskIndex = 0; taskIndex < tasks.length; taskIndex++) {
+        const task: LeaderDecisionDataTask = tasks[taskIndex];
+        for (let toolIndex = 0; toolIndex < task.allowedToolIds.length; toolIndex++) {
+          if (requestedCapabilityIds.indexOf(task.allowedToolIds[toolIndex]) < 0) {
+            requestedCapabilityIds.push(task.allowedToolIds[toolIndex]);
+          }
+        }
+        if (requestedCapabilityIds.indexOf(task.toolId) < 0) {
+          requestedCapabilityIds.push(task.toolId);
+        }
+      }
+    }
     if ((selectedAction === 'execute' && tasks.length === 0 && actionIntent === null) ||
       (selectedAction !== 'execute' && tasks.length !== 0)) {
       throw new Error('Leader round action does not match its Data tasks.');
