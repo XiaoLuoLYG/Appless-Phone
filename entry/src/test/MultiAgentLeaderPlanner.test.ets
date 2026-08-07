@@ -429,6 +429,7 @@ function manyTravelDecision(count: number): string {
 class QueueLocalModel implements LocalModel {
   prompts: string[] = [];
   systemPrompts: string[] = [];
+  conversations: string[][] = [];
   private readonly outputs: string[];
 
   constructor(outputs: string[]) {
@@ -437,11 +438,13 @@ class QueueLocalModel implements LocalModel {
 
   async complete(
     prompt: string,
-    _conversation?: ConversationContext,
+    conversation?: ConversationContext,
     systemPrompt?: string
   ): Promise<string> {
     this.prompts.push(prompt);
     this.systemPrompts.push(systemPrompt ?? '');
+    this.conversations.push(conversation === undefined ? [] :
+      conversation.toChatMessages().map((message) => message.role + ':' + message.content));
     if (this.outputs.length === 0) {
       throw new Error('No scripted Leader output');
     }
@@ -988,6 +991,22 @@ async function failsAtRound(output: string, round: number): Promise<boolean> {
 
 export default function multiAgentLeaderPlannerTest() {
   describe('multiAgentLeaderPlanner', () => {
+    it('passes prior conversation messages to the Leader model', 0, async () => {
+      const model = new QueueLocalModel([LIVE_ANSWER_WITHOUT_REASON_CODE]);
+      await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        {
+          text: '帮我订7月30日的机票',
+          recentMessages: [{ role: 'user', content: '我现在在深圳，想去上海' }]
+        },
+        planningContext(),
+        1
+      );
+
+      expect(model.conversations.length).assertEqual(1);
+      expect(model.conversations[0].length).assertEqual(1);
+      expect(model.conversations[0][0]).assertEqual('user:我现在在深圳，想去上海');
+    });
     it('rejects an oversized registered tool catalog before calling the model', 0, async () => {
       const model = new QueueLocalModel([LIVE_ANSWER_WITHOUT_REASON_CODE]);
       const context = planningContext();

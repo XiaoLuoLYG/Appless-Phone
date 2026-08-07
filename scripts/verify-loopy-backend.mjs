@@ -483,8 +483,9 @@ function hasBoundedLeaderModelCalls(source) {
     prompt.includes("throw new Error('LEADER_TOOL_CATALOG_LIMIT')") &&
     bounded.includes('prompt.length > MAX_LEADER_PROMPT_CHARS') &&
     bounded.includes("throw new Error('LEADER_PROMPT_LIMIT')") &&
-    bounded.includes('return this.model.complete(prompt, undefined, LEADER_SYSTEM_PROMPT)') &&
-    plan.includes('await this.completeBounded(prompt)') &&
+    bounded.includes('return this.model.complete(prompt, conversation, LEADER_SYSTEM_PROMPT)') &&
+    bounded.includes('ConversationContext.fromMessages(messages)') &&
+    plan.includes('await this.completeBounded(prompt, input)') &&
     plan.includes('await this.completeBounded(prompt +') &&
     plan.includes('correction') &&
     modelCalls.length === 1;
@@ -1407,8 +1408,8 @@ function verifySourceContracts() {
   assert(
     !hasBoundedLeaderModelCalls(
       canaryLeaderPlanner.replace(
-        'await this.completeBounded(prompt + \'\\n\' + correction)',
-        'await this.model.complete(prompt + \'\\n\' + correction)'
+        'await this.completeBounded(prompt + \'\\n\' + correction, input)',
+        'await this.model.complete(prompt + \'\\n\' + correction, input)'
       )
     ),
     'verifier rejects a repair model call that bypasses the prompt bound'
@@ -1416,8 +1417,8 @@ function verifySourceContracts() {
   assert(
     !hasBoundedLeaderModelCalls(
       canaryLeaderPlanner.replace(
-        'await this.completeBounded(prompt)',
-        'await this.model.complete(prompt)'
+        'await this.completeBounded(prompt, input)',
+        'await this.model.complete(prompt, input)'
       )
     ),
     'verifier rejects an initial model call that bypasses the prompt bound'

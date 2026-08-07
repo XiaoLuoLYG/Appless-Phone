@@ -2,6 +2,7 @@ import {
   AgentMessage,
   calendarEventRequiredFields,
   calendarMissingArgsResult,
+  ConversationContext,
   InputUserPayload,
   LeaderActionIntent,
   LeaderDataTaskInputNormalizer,
@@ -260,7 +261,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     const currentLocalDate: string = trustedCurrentLocalDate === undefined ?
       this.currentLocalDate() : trustedCurrentLocalDate;
     const prompt: string = this.prompt(message, input, context, round, currentLocalDate);
-    const output: string = await this.completeBounded(prompt);
+    const output: string = await this.completeBounded(prompt, input);
     let sameRoundProducerTaskToolIds: string[] = [];
     let sameRoundConsumerTaskToolIds: string[] = [];
     let rejectedDecision: LeaderDecision | null = null;
@@ -317,7 +318,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       if (error instanceof Error && error.message === EXPLICIT_MAPS_SELECTION_ERROR) {
         const repaired: string = await this.completeBounded(
           prompt + '\n' + EXPLICIT_MAPS_SELECTION_REPAIR_INSTRUCTION +
-            '\nRejected decision: ' + output
+            '\nRejected decision: ' + output,
+          input
         );
         try {
           const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
@@ -356,7 +358,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         this.prematureCalendarUpdateActionScope(input, output)) {
         const repaired: string = await this.completeBounded(
           prompt + '\n' + PREMATURE_CALENDAR_UPDATE_ACTION_REPAIR_INSTRUCTION +
-            '\nRejected decision: ' + output
+            '\nRejected decision: ' + output,
+          input
         );
         try {
           if (!this.prematureCalendarUpdateActionOnlyRepair(output, repaired)) {
@@ -394,7 +397,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         this.prematureMapsDetailsScope(input, output)) {
         const repaired: string = await this.completeBounded(
           prompt + '\n' + PREMATURE_MAPS_DETAILS_REPAIR_INSTRUCTION +
-            '\nRejected decision: ' + output
+            '\nRejected decision: ' + output,
+          input
         );
         try {
           if (!this.prematureMapsDetailsOnlyRepair(output, repaired)) {
@@ -477,7 +481,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
           'It must preserve requestedCapabilityIds exactly and must not introduce any new Data or Action capability.' :
         '\nThe corrected decision must preserve all three frozen sets exactly and must not move a ' +
           'capability between Data and actionIntent positions.';
-      const repaired: string = await this.completeBounded(prompt + '\n' + correction);
+      const repaired: string = await this.completeBounded(prompt + '\n' + correction, input);
       try {
         const repairedScope: LeaderRepairScope | null = this.repairScope(repaired);
         if (repairedScope === null || (actionOwnedRepair ?
@@ -926,11 +930,17 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     }
   }
 
-  private completeBounded(prompt: string): Promise<string> {
+  private completeBounded(prompt: string, input: InputUserPayload): Promise<string> {
     if (prompt.length > MAX_LEADER_PROMPT_CHARS) {
       throw new Error('LEADER_PROMPT_LIMIT');
     }
-    return this.model.complete(prompt, undefined, LEADER_SYSTEM_PROMPT);
+    const messages = input.recentMessages === undefined ? [] : input.recentMessages.slice();
+    const latest = messages.length === 0 ? undefined : messages[messages.length - 1];
+    if (latest !== undefined && latest.role === 'user' && latest.content.trim() === input.text.trim()) {
+      messages.pop();
+    }
+    const conversation = messages.length === 0 ? undefined : ConversationContext.fromMessages(messages);
+    return this.model.complete(prompt, conversation, LEADER_SYSTEM_PROMPT);
   }
 
   private rejectOverlappingVideoTools(decision: LeaderDecision): void {

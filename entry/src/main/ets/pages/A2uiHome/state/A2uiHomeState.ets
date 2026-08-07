@@ -138,7 +138,7 @@ export function shouldShowWelcome(isBusy: boolean, messageCount: number, surface
 }
 
 export function inputTextAfterPromptSubmit(current: string): string {
-  return current;
+  return '';
 }
 
 export function voiceInputTextAfterRecognition(current: string, recognized: string): string {

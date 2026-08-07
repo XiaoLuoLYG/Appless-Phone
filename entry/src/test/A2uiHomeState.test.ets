@@ -156,10 +156,10 @@ export default function a2uiHomeStateTest() {
       expect(nextSendSpinnerRotation(360 + A2UI_SEND_SPINNER_STEP_DEG, false)).assertEqual(0);
     });
 
-    it('locks prompt input while busy and preserves submitted text', 0, () => {
+    it('locks prompt input while busy and clears submitted text', 0, () => {
       expect(isPromptInputEnabled(false)).assertTrue();
       expect(isPromptInputEnabled(true)).assertFalse();
-      expect(inputTextAfterPromptSubmit('帮我查深圳北站附近餐馆')).assertEqual('帮我查深圳北站附近餐馆');
+      expect(inputTextAfterPromptSubmit('帮我查深圳北站附近餐馆')).assertEqual('');
     });
 
     it('appends recognized voice input to the current draft', 0, () => {
