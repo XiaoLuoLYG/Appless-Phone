@@ -3,11 +3,7 @@ import {
   directModelRequestDebug,
   directModelSystemPrompt
 } from '../main/ets/model/LocalModelClient';
-import {
-  configureLocalModelSettingsFromRawJson,
-  dashScopeModelSettings,
-  defaultLocalModelSettings
-} from '@loop/agent-core';
+import { configureLocalModelSettingsFromRawJson, defaultLocalModelSettings } from '@loop/agent-core';
 
 export default function localModelClientTest() {
   describe('localModelClient', () => {
@@ -27,20 +23,15 @@ export default function localModelClientTest() {
       expect(debug.indexOf('"historyTurns":3')).assertLarger(-1);
     });
 
-    it('defaults to DeepSeek V4 Flash and preserves the DashScope fallback preset', 0, () => {
-      configureLocalModelSettingsFromRawJson('{"DASHSCOPE_API_KEY":"old-key","DEEPSEEK_API_KEY":"new-key"}');
+    it('defaults to DashScope qwen-max and reads its local rawfile key', 0, () => {
+      configureLocalModelSettingsFromRawJson('{"DASHSCOPE_API_KEY":"test-key"}');
       const settings = defaultLocalModelSettings();
-      expect(settings.provider).assertEqual('CSI.AI');
-      expect(settings.baseUrl).assertEqual('http://113.46.219.251:8080/v1/chat/completions');
-      expect(settings.model).assertEqual('Deepseek-V4-Flash-0731');
-      expect(settings.apiKey).assertEqual('new-key');
+      expect(settings.provider).assertEqual('DashScope');
+      expect(settings.baseUrl).assertEqual('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions');
+      expect(settings.model).assertEqual('qwen-max');
+      expect(settings.apiKey).assertEqual('test-key');
       expect(settings.customParametersJson).assertEqual('{"enable_thinking":false}');
       expect(settings.ignoreToolSurfaceUpdates).assertFalse();
-      const qwen = dashScopeModelSettings();
-      expect(qwen.provider).assertEqual('DashScope');
-      expect(qwen.baseUrl).assertEqual('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions');
-      expect(qwen.model).assertEqual('qwen-max');
-      expect(qwen.apiKey).assertEqual('old-key');
       configureLocalModelSettingsFromRawJson('{}');
     });
   });

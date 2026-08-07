@@ -17,13 +17,13 @@ Appless 的默认原则很简单：缺少本地模型、provider key、设备权
 默认模型设置：
 
 ```text
-Base URL: http://113.46.219.251:8080/v1/chat/completions
-Model: Deepseek-V4-Flash-0731
+Base URL: http://127.0.0.1:11434
+Model: Qwen3-8B
 ```
 
 进入 app 设置页，点击连接测试。如果使用 OpenAI-compatible 云端端点，在同一页填写模型、Base URL、API key 和必要的自定义 JSON 参数。
 
-CSI.AI Deepseek V4 Flash preset 已内置；原有 DashScope Qwen preset 也保留在设置页，你仍然需要各自的 API key。
+DashScope-compatible Qwen preset 已内置，但你仍然需要自己的 API key。
 
 ## 3. 不配置 key 也能试
 
@@ -54,8 +54,6 @@ cp .env.example .env.local
 按需填写 key：
 
 ```bash
-DEEPSEEK_API_KEY=
-DASHSCOPE_API_KEY=
 FLIGHT_MCP_KEY=
 VARIFLIGHT_API_KEY=
 ROLLINGGO_HOTEL_MCP_KEY=
