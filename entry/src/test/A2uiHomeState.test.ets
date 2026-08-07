@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { A2uiSurfaceState } from '@loop/agent-core';
+import { A2uiAction, A2uiGenericToolResultData, A2uiSurfaceState } from '@loop/agent-core';
 import {
   A2UI_SEND_SPINNER_STEP_DEG,
   createInitialConnectionPanelState,
@@ -18,6 +18,7 @@ import {
   updateConnectionPanelState,
   voiceInputTextAfterRecognition
 } from '../main/ets/pages/A2uiHome/state/A2uiHomeState';
+import { buildRideToolPanelState } from '../main/ets/pages/A2uiHome/state/RideToolResultsState';
 
 function surface(
   sequence: number,
@@ -215,6 +216,44 @@ export default function a2uiHomeStateTest() {
       expect(shouldShowWelcome(true, 0, welcome)).assertFalse();
       expect(shouldShowWelcome(false, 1, welcome)).assertFalse();
       expect(shouldShowWelcome(false, 0, surface(2, 'ready', 'surface_food'))).assertFalse();
+    });
+
+    it('matches each ride estimate to its exact vehicle confirmation action', 0, () => {
+      const actions: A2uiAction[] = [
+        {
+          id: 'ride.order.confirm',
+          label: '确认叫特惠快车',
+          prompt: '确认下单：特惠快车 10',
+          kind: 'prompt',
+          variant: 'primary'
+        },
+        {
+          id: 'ride.order.confirm',
+          label: '确认叫快车',
+          prompt: '确认下单：快车 15',
+          kind: 'prompt',
+          variant: 'secondary'
+        }
+      ];
+      const result: A2uiGenericToolResultData = {
+        sourceTag: '滴滴',
+        toolName: 'ride.estimate',
+        title: '滴滴价格预估',
+        status: 'success',
+        summary: 'summary',
+        rows: [
+          { label: '特惠快车（discount）', value: '10' },
+          { label: '快车（express）', value: '15' }
+        ],
+        rawPreview: '',
+        actions: actions
+      };
+      const panel = buildRideToolPanelState([result]);
+
+      expect(panel.estimateCards[1].action === null).assertFalse();
+      if (panel.estimateCards[1].action !== null) {
+        expect(panel.estimateCards[1].action?.label).assertEqual('确认叫快车');
+      }
     });
   });
 }

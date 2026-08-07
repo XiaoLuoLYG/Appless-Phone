@@ -26,6 +26,7 @@ const PAGE_ACTION_CANDIDATE_IDS: string[] = [
   'gmail.draft.apply',
   'gmail.open.web',
   'worldcup.open',
+  'movie.open',
   'payment.confirm',
   'payment.send',
   'stripe.account.create',
@@ -72,7 +73,7 @@ export interface RegisteredPageDispatchResult {
 export type RegisteredPageCandidateRunner = (action: A2uiAction) => Promise<boolean>;
 export type LegacyPageActionRunner = (action: A2uiAction) => Promise<void>;
 
-interface WorldCupVirtualArgs {
+interface ExperiencePageVirtualArgs {
   route: string;
 }
 
@@ -501,7 +502,11 @@ export function resolveVirtualRegisteredPageAction(
       virtualAction(actionId, inputText.trim(), args as Object);
   }
   if (actionId === 'worldcup.open' && inputText.trim().length > 0) {
-    const args: WorldCupVirtualArgs = { route: 'pages/A2uiHome/AnythingDemo' };
+    const args: ExperiencePageVirtualArgs = { route: 'pages/A2uiHome/AnythingDemo' };
+    return virtualAction(actionId, inputText.trim(), args as Object);
+  }
+  if (actionId === 'movie.open' && inputText.trim().length > 0) {
+    const args: ExperiencePageVirtualArgs = { route: 'pages/A2uiHome/MovieDemo' };
     return virtualAction(actionId, inputText.trim(), args as Object);
   }
   if (actionId === 'maps.route.open') {

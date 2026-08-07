@@ -127,6 +127,18 @@ export default function toolDefinitionRegistryTest() {
       expect(isMediaToolId('media.aggregate.search')).assertTrue();
     });
 
+    it('registers the movie experience as a read-only system page intent', 0, () => {
+      const movie = toolDefinitionForToolId('movie.open') as ToolDefinition;
+
+      expect(movie.toolId).assertEqual('movie.open');
+      expect(movie.domain).assertEqual('media');
+      expect(movie.riskLevel).assertEqual('read');
+      expect(movie.backendPriority.join(',')).assertEqual('system_intent');
+      expect(movie.authModes.join(',')).assertEqual('system');
+      expect(movie.a2uiComponent).assertEqual('MovieDemo');
+      expect(movie.actions.length).assertEqual(0);
+    });
+
     it('registers SocialHub read and draft tools without send', 0, () => {
       const feed = toolDefinitionForToolId('social.feed.search') as ToolDefinition;
       const draft = toolDefinitionForToolId('social.reply.draft') as ToolDefinition;
@@ -635,10 +647,10 @@ export default function toolDefinitionRegistryTest() {
       const action: ToolDefinition[] = actionAgentToolDefinitions();
       const ids: string[] = data.concat(action).map((item: ToolDefinition): string => item.toolId);
 
-      expect(all.length).assertEqual(53);
+      expect(all.length).assertEqual(54);
       expect(data.length).assertEqual(31);
-      expect(action.length).assertEqual(22);
-      expect(new Set<string>(ids).size).assertEqual(53);
+      expect(action.length).assertEqual(23);
+      expect(new Set<string>(ids).size).assertEqual(54);
       expect(all.filter((item: ToolDefinition): boolean => item.riskLevel === 'blocked').length)
         .assertEqual(0);
       expect(ids.indexOf('hotel.navigate') >= 0).assertTrue();

@@ -244,7 +244,8 @@ export function multiAgentTurnEvidence(logText, options = {}) {
   const terminalResults = [];
   for (const task of dataById.values()) {
     const matches = events.filter((item) => item.fields.task === task.fields.task &&
-      (item.marker === 'MultiAgentDataResult' || item.marker === 'MultiAgentTaskError'));
+      ((item.marker === 'MultiAgentDataResult' && item.fields.phase !== 'stream') ||
+        item.marker === 'MultiAgentTaskError'));
     if (matches.length !== 1 || matches[0].index <= task.index) {
       failures.push('missing_or_duplicate_data_terminal');
       continue;
@@ -261,7 +262,8 @@ export function multiAgentTurnEvidence(logText, options = {}) {
       (status === 'error') !== errorPresent) failures.push('invalid_data_terminal');
     terminalResults.push({ taskId: task.fields.task, toolId: task.fields.tool, status });
   }
-  for (const result of events.filter((item) => item.marker === 'MultiAgentDataResult')) {
+  for (const result of events.filter((item) =>
+    item.marker === 'MultiAgentDataResult' && item.fields.phase !== 'stream')) {
     if (!dataById.has(result.fields.task)) failures.push('unknown_data_terminal');
   }
 

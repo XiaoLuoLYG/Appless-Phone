@@ -392,6 +392,9 @@ function fixedActionArgs(actionId: string): Object {
   if (actionId === 'worldcup.open') {
     return object('{"route":"pages/A2uiHome/AnythingDemo"}');
   }
+  if (actionId === 'movie.open') {
+    return object('{"route":"pages/A2uiHome/MovieDemo"}');
+  }
   if (actionId === 'payment.send') {
     return object('{"provider":"stripe","recipient":"acct-real-1","amountText":"5.00","currency":"USD"}');
   }
@@ -818,6 +821,7 @@ export default function aiphoneRegisteredActionExecutorTest() {
         'gmail.draft.apply',
         'gmail.open.web',
         'worldcup.open',
+        'movie.open',
         'payment.account.setup'
       ];
       for (let index = 0; index < actionIds.length; index++) {
@@ -839,14 +843,14 @@ export default function aiphoneRegisteredActionExecutorTest() {
         'hotel.navigate', 'hotel.booking.open', 'luckin.order.preview', 'luckin.order.create',
         'social.post.preview', 'social.reply.draft', 'mail.draft.create',
         'gmail.draft.create', 'gmail.draft.apply',
-        'gmail.open.web', 'gmail.message.send', 'worldcup.open', 'calendar.event.create',
+        'gmail.open.web', 'gmail.message.send', 'worldcup.open', 'movie.open', 'calendar.event.create',
         'calendar.event.update', 'calendar.event.delete', 'payment.send', 'payment.account.setup',
         'maps.route.open', 'whatsapp.message.send', 'ride.order.create', 'ride.order.cancel',
         'web.monitor.create'
       ];
       const definitions = actionAgentToolDefinitions();
 
-      expect(definitions.length).assertEqual(22);
+      expect(definitions.length).assertEqual(23);
       expect(definitions.map((current: ToolDefinition): string => current.toolId).sort().join(','))
         .assertEqual(expected.slice().sort().join(','));
       for (let index = 0; index < expected.length; index++) {

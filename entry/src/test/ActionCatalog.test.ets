@@ -52,7 +52,7 @@ class FakeToolDefinitionLookup implements ToolDefinitionLookup {
       return definition('hotel.search', 'read', 'local_adapter', this.sourceActions);
     }
     if (toolId === 'hotel.detail' || toolId === 'hotel.navigate' ||
-      toolId === 'hotel.booking.open' || toolId === 'worldcup.open' ||
+      toolId === 'hotel.booking.open' || toolId === 'worldcup.open' || toolId === 'movie.open' ||
       toolId === 'maps.route.open' || toolId === 'calendar.event.create' ||
       toolId === 'luckin.order.preview' || toolId === 'payment.send' ||
       toolId === 'payment.account.setup' || toolId === 'whatsapp.message.send' ||
@@ -318,6 +318,8 @@ export default function actionCatalogTest() {
       );
       const worldCupIntent: ActionCatalogResult =
         actionCatalog.validateActionIntentExecution('worldcup.open', new Object());
+      const movieIntent: ActionCatalogResult =
+        actionCatalog.validateActionIntentExecution('movie.open', new Object());
       const mapsIntent: ActionCatalogResult = actionCatalog.validateActionIntentExecution(
         'maps.route.open',
         args('{"origin":"深圳北","destination":"香港西九龙"}')
@@ -337,6 +339,7 @@ export default function actionCatalogTest() {
       expect(surfaceExecution.ok).assertFalse();
       expect(surface.calls).assertEqual(0);
       expect(worldCupIntent.ok).assertTrue();
+      expect(movieIntent.ok).assertTrue();
       expect(mapsIntent.ok).assertTrue();
       expect(calendarIntent.ok).assertTrue();
       expect(hotelIntent.code).assertEqual('ACTION_INTENT_DENIED');
@@ -352,6 +355,7 @@ export default function actionCatalogTest() {
       );
       const allowed: string[] = [
         'worldcup.open',
+        'movie.open',
         'maps.route.open',
         'calendar.event.create',
         'luckin.order.preview',

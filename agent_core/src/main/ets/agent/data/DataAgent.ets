@@ -132,7 +132,12 @@ export class DataAgent extends MessageDrivenAgent {
   ): void {
     const generation: number = this.generation;
     try {
-      this.executor.execute(task)
+      this.executor.execute(task, (partial: DataResult): void => {
+        if (this.canPublish(key, generation) && this.validResult(task, partial) &&
+          partial.status === 'partial') {
+          this.publishResult(message, partial, AgentMessageType.TASK_RESULT_DATA_PARTIAL);
+        }
+      })
         .then((result: DataResult) => {
           if (this.canPublish(key, generation)) {
             if (this.validResult(task, result)) {
@@ -258,7 +263,12 @@ export class DataAgent extends MessageDrivenAgent {
       calls++;
       let result: DataResult;
       try {
-        result = await this.executor.execute(callTask);
+        result = await this.executor.execute(callTask, (partial: DataResult): void => {
+          if (this.canPublish(key, generation) && this.validResult(callTask, partial) &&
+            partial.status === 'partial') {
+            this.publishResult(message, partial, AgentMessageType.TASK_RESULT_DATA_PARTIAL);
+          }
+        });
       } catch (error) {
         if (this.canPublish(key, generation)) {
           this.publishError(message, error as Object);
@@ -407,9 +417,13 @@ export class DataAgent extends MessageDrivenAgent {
     return this.active && this.generation === generation && !this.canceled.has(key);
   }
 
-  private publishResult(message: AgentMessage, result: DataResult): void {
+  private publishResult(
+    message: AgentMessage,
+    result: DataResult,
+    type: AgentMessageType = AgentMessageType.TASK_RESULT_DATA
+  ): void {
     this.bus.publish({
-      type: AgentMessageType.TASK_RESULT_DATA,
+      type,
       conversationId: message.conversationId,
       turnId: message.turnId,
       taskId: message.taskId,

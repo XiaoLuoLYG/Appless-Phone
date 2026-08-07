@@ -187,7 +187,12 @@ export interface MultiAgentCanaryOptions {
   currentLocalDate?: HotelLocalDateProvider;
   dataPlanner?: DataTaskPlanner;
   dataExecutor?: DataTaskExecutor;
-  structuredToolCall?: (toolId: string, prompt: string, args: Object) => Promise<DataResult>;
+  structuredToolCall?: (
+    toolId: string,
+    prompt: string,
+    args: Object,
+    onPartial?: (result: DataResult) => void
+  ) => Promise<DataResult>;
   bus?: LinkedMessageBus;
   conversationId?: string;
 }
@@ -830,18 +835,23 @@ class CanaryStructuredDataExecutor implements DataTaskExecutor {
   private readonly structuredToolCall: (
     toolId: string,
     prompt: string,
-    args: Object
+    args: Object,
+    onPartial?: (result: DataResult) => void
   ) => Promise<DataResult>;
 
   constructor(structuredToolCall?: (
     toolId: string,
     prompt: string,
-    args: Object
+    args: Object,
+    onPartial?: (result: DataResult) => void
   ) => Promise<DataResult>) {
     this.structuredToolCall = structuredToolCall === undefined ? callStructuredTool : structuredToolCall;
   }
 
-  async execute(task: CreateDataTaskPayload): Promise<DataResult> {
+  async execute(
+    task: CreateDataTaskPayload,
+    onPartial?: (result: DataResult) => void
+  ): Promise<DataResult> {
     if (task.toolId === TIME_TOOL_ID) {
       const now = new Date();
       const localTime = now.toLocaleString();
@@ -886,7 +896,9 @@ class CanaryStructuredDataExecutor implements DataTaskExecutor {
       }
       prompt = query;
     }
-    const result = await this.structuredToolCall(task.toolId, prompt, task.args);
+    const result = task.toolId === 'media.aggregate.search' && onPartial !== undefined ?
+      await this.structuredToolCall(task.toolId, prompt, task.args, onPartial) :
+      await this.structuredToolCall(task.toolId, prompt, task.args);
     if (task.toolId !== 'calendar.events.search' || result.status === 'error') {
       return result;
     }

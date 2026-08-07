@@ -2026,6 +2026,16 @@ export default function registeredPageActionMigrationTest() {
       runtime.dispose();
     });
 
+    it('resolves the fixed movie experience route', 0, () => {
+      const prompt = '看看现在有什么热映电影和票房';
+      const resolved = resolveVirtualRegisteredPageAction('movie.open', prompt);
+
+      expect(JSON.stringify(resolved?.args)).assertEqual(
+        '{"route":"pages/A2uiHome/MovieDemo"}'
+      );
+      expect(resolveVirtualRegisteredPageAction('movie.open', '')).assertNull();
+    });
+
     it('resolves and invokes only bounded safe initial Action requests without write authority', 0, async () => {
       const luckinPrompt = '帮我点一杯瑞幸生椰拿铁，半糖少冰';
       const socialPreviewPrompt = '帮我在 X 发帖：Appless migration ready（只生成预览，不发布）';

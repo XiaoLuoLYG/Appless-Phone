@@ -98,8 +98,10 @@ import trainPresaleConfirmationTest from './TrainPresaleConfirmation.test';
 import trainPresaleExecutionTest from './TrainPresaleExecution.test';
 import trainPresaleWebAutomationTest from './TrainPresaleWebAutomation.test';
 import trainPresaleDebugTest from './TrainPresaleDebug.test';
+import movieDemoContractTest from './MovieDemoContract.test';
 
 export default function testsuite() {
+  movieDemoContractTest();
   localUnitTest();
   conversationContextTest();
   agentCorePublicContractTest();

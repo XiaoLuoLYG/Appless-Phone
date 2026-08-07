@@ -1,0 +1,657 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>电影 Anything OS</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f3ec;
+      --panel: #fffdf8;
+      --panel-2: #eee9df;
+      --panel-3: #e5ded2;
+      --ink: #211f1b;
+      --muted: #706b62;
+      --line: rgba(33, 31, 27, .12);
+      --line-strong: rgba(33, 31, 27, .24);
+      --accent: #e85f49;
+      --accent-soft: #ffebe5;
+      --good: #2e7a50;
+      --ease: cubic-bezier(.2, .8, .2, 1);
+      --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+    }
+    * { box-sizing: border-box; }
+    html { background: var(--bg); scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      overflow-x: hidden;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans SC", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    button, a { font: inherit; -webkit-tap-highlight-color: transparent; }
+    button { color: inherit; }
+    img { display: block; width: 100%; }
+    h1, h2, h3, p { margin: 0; }
+    .shell { width: min(100%, 860px); margin: 0 auto; padding-bottom: 48px; }
+    .hero {
+      position: relative;
+      min-height: 510px;
+      overflow: hidden;
+      border-bottom: 1px solid var(--line);
+      background: #e8e2d8;
+    }
+    .hero-image {
+      position: absolute;
+      inset: 0;
+      height: 100%;
+      object-fit: cover;
+      object-position: center 16%;
+      opacity: .92;
+    }
+    .hero-shade {
+      position: absolute;
+      inset: 54% 0 0;
+      background: rgba(246, 243, 236, .96);
+    }
+    .hero-copy {
+      position: relative;
+      z-index: 1;
+      min-height: 510px;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      padding: 24px 20px 26px;
+    }
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 10px;
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 1.6px;
+      text-transform: uppercase;
+    }
+    .eyebrow::before { content: ""; width: 24px; height: 2px; background: var(--accent); }
+    h1 { max-width: 8em; font-size: clamp(37px, 11vw, 66px); line-height: .98; letter-spacing: -2.2px; }
+    .hero-copy > p { max-width: 31em; margin-top: 14px; color: #5f5a52; font-size: 15px; line-height: 1.7; }
+    .hero-meta { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 17px; color: var(--muted); font-size: 12px; }
+    .hero-meta strong { color: var(--ink); }
+    .hero-actions { display: flex; gap: 10px; margin-top: 20px; }
+    .button {
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding: 0 17px;
+      border: 1px solid var(--line-strong);
+      border-radius: 14px;
+      background: var(--panel-2);
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 720;
+      text-decoration: none;
+      transition: transform 140ms var(--ease-out), background-color 140ms var(--ease-out);
+    }
+    .button.primary { border-color: var(--accent); background: var(--accent); color: #fff; }
+    .button:active { transform: scale(.97); }
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 8;
+      display: flex;
+      gap: 7px;
+      overflow-x: auto;
+      padding: 11px 14px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(246, 243, 236, .94);
+      backdrop-filter: blur(18px);
+      scrollbar-width: none;
+    }
+    .nav::-webkit-scrollbar, .rail::-webkit-scrollbar, .shorts::-webkit-scrollbar { display: none; }
+    .nav button {
+      flex: 0 0 auto;
+      min-height: 36px;
+      padding: 0 14px;
+      border: 1px solid var(--line);
+      border-radius: 99px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .nav button.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+    section { padding: 34px 16px 0; scroll-margin-top: 62px; }
+    .section-head { display: flex; align-items: end; justify-content: space-between; gap: 14px; margin-bottom: 16px; }
+    .section-kicker { color: var(--accent); font-size: 10px; font-weight: 800; letter-spacing: 1.4px; text-transform: uppercase; }
+    h2 { margin-top: 5px; font-size: 25px; line-height: 1.1; letter-spacing: -.7px; }
+    .section-note { max-width: 12em; color: var(--muted); font-size: 11px; line-height: 1.45; text-align: right; }
+    .video-shell {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--panel);
+    }
+    .video-frame { position: relative; aspect-ratio: 16 / 9; background: #0e0e0d; }
+    .video-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+    .video-poster { position: absolute; inset: 0; width: 100%; padding: 0; border: 0; background: #0e0e0d; }
+    .video-poster img { height: 100%; object-fit: cover; opacity: .82; }
+    .play {
+      position: absolute;
+      inset: 50% auto auto 50%;
+      width: 62px;
+      height: 62px;
+      display: grid;
+      place-items: center;
+      transform: translate(-50%, -50%);
+      border-radius: 50%;
+      background: var(--accent);
+      color: #fff;
+      font-size: 24px;
+      font-weight: 900;
+      box-shadow: 0 12px 28px rgba(0, 0, 0, .35);
+    }
+    .video-info { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px; }
+    .video-info strong { display: block; font-size: 14px; }
+    .video-info span { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+    .source-link {
+      flex: 0 0 auto;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .network-note { padding: 0 14px 14px; color: #7a746b; font-size: 10px; line-height: 1.5; }
+    .shorts { display: flex; gap: 11px; margin-top: 12px; overflow-x: auto; scroll-snap-type: x mandatory; }
+    .short-card {
+      position: relative;
+      flex: 0 0 142px;
+      aspect-ratio: 9 / 14;
+      overflow: hidden;
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--panel);
+      text-align: left;
+      scroll-snap-align: start;
+    }
+    .short-card img { height: 100%; object-fit: cover; }
+    .short-card::after { content: ""; position: absolute; inset: 56% 0 0; background: rgba(12, 12, 11, .82); }
+    .short-copy { position: absolute; z-index: 1; left: 12px; right: 10px; bottom: 12px; }
+    .short-copy b { display: block; color: #fff; font-size: 12px; line-height: 1.35; }
+    .short-copy span { display: block; margin-top: 5px; color: #c3beb5; font-size: 10px; }
+    .rail { display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory; }
+    .movie-card {
+      flex: 0 0 154px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 19px;
+      background: var(--panel);
+      scroll-snap-align: start;
+    }
+    .poster-wrap { position: relative; aspect-ratio: 2 / 3; overflow: hidden; background: var(--panel-3); }
+    .poster-wrap img { height: 100%; object-fit: cover; transition: transform 260ms var(--ease); }
+    .rating { position: absolute; top: 9px; right: 9px; min-width: 40px; padding: 6px 7px; border-radius: 9px; background: rgba(18,18,16,.88); color: #ffd98d; font-size: 11px; font-weight: 800; text-align: center; }
+    .movie-copy { padding: 12px; }
+    .movie-copy h3 { min-height: 38px; font-size: 14px; line-height: 1.35; }
+    .movie-copy p { margin-top: 6px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+    .movie-copy button { width: 100%; min-height: 35px; margin-top: 10px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2); font-size: 11px; transition: transform 140ms var(--ease-out), background-color 140ms var(--ease-out); }
+    .movie-copy button:active { transform: scale(.97); }
+    .box-office { border-top: 1px solid var(--line); }
+    .rank-item { border-bottom: 1px solid var(--line); }
+    .rank-row {
+      display: grid;
+      grid-template-columns: 36px minmax(0, 1fr) auto;
+      width: 100%;
+      gap: 12px;
+      align-items: center;
+      padding: 16px 2px;
+      border: 0;
+      background: transparent;
+      color: var(--ink);
+      text-align: left;
+      transition: transform 140ms var(--ease-out), background-color 140ms var(--ease-out);
+    }
+    .rank-row:active { transform: scale(.97); background: var(--accent-soft); }
+    .rank { color: var(--muted); font-size: 20px; font-weight: 760; font-variant-numeric: tabular-nums; }
+    .rank-item:first-child .rank { color: var(--accent); }
+    .rank-title strong { display: block; font-size: 14px; }
+    .rank-title span { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
+    .rank-value { text-align: right; }
+    .rank-value strong { display: block; color: var(--ink); font-size: 15px; font-variant-numeric: tabular-nums; }
+    .rank-value span { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; }
+    .rank-title .expand-label { display: inline; margin-top: 0; color: var(--accent); font-weight: 750; }
+    .disclosure {
+      display: grid;
+      grid-template-rows: 0fr;
+      transition: grid-template-rows 220ms var(--ease-out);
+    }
+    .disclosure.open { grid-template-rows: 1fr; }
+    .disclosure-inner {
+      min-height: 0;
+      overflow: hidden;
+      opacity: 0;
+      transform: translateY(-6px);
+      transition: opacity 220ms var(--ease-out), transform 220ms var(--ease-out);
+    }
+    .disclosure.open .disclosure-inner { opacity: 1; transform: translateY(0); }
+    .trend { padding: 0 2px 16px 48px; }
+    .trend-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; color: var(--muted); font-size: 10px; }
+    .trend-days { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+    .trend-day { padding: 9px 4px; border-radius: 10px; background: var(--panel-2); text-align: center; }
+    .trend-day span { display: block; color: var(--muted); font-size: 9px; }
+    .trend-day strong { display: block; margin-top: 5px; font-size: 10px; font-variant-numeric: tabular-nums; }
+    .stars { display: grid; gap: 12px; }
+    .star-card {
+      display: grid;
+      grid-template-columns: 104px minmax(0, 1fr);
+      min-height: 142px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: var(--panel);
+    }
+    .star-card img { height: 100%; object-fit: cover; }
+    .star-copy { padding: 15px 14px; }
+    .star-copy small { color: var(--accent); font-size: 9px; font-weight: 800; letter-spacing: 1px; }
+    .star-copy h3 { margin-top: 6px; font-size: 18px; }
+    .star-copy p { margin-top: 7px; color: var(--muted); font-size: 11px; line-height: 1.55; }
+    .star-copy button { margin-top: 10px; padding: 0; border: 0; background: transparent; color: var(--ink); font-size: 11px; font-weight: 700; transition: transform 140ms var(--ease-out), color 140ms var(--ease-out); }
+    .star-copy button:active { transform: scale(.97); }
+    .bio { padding-top: 10px; }
+    .bio p { margin-top: 0; color: var(--ink); }
+    .inline-source { display: inline-block; margin-top: 10px !important; padding: 0; border: 0; background: transparent; color: var(--accent) !important; font-weight: 750; }
+    .briefs { display: grid; gap: 11px; }
+    .brief {
+      display: block;
+      width: 100%;
+      padding: 17px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--panel);
+      text-align: left;
+    }
+    .brief-meta { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 9px; letter-spacing: .6px; }
+    .brief h3 { margin-top: 10px; font-size: 16px; line-height: 1.38; }
+    .brief p { margin-top: 8px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+    .brief .read { display: inline-block; margin-top: 12px; padding: 0; border: 0; background: transparent; color: var(--accent); font-size: 11px; font-weight: 750; transition: transform 140ms var(--ease-out), color 140ms var(--ease-out); }
+    .brief .read:active { transform: scale(.97); }
+    .article-body { padding-top: 10px; }
+    .article-body p { color: var(--ink); font-size: 12px; line-height: 1.72; }
+    .article-body .inline-source { font-size: 10px; }
+    .sources { margin: 34px 16px 0; padding: 18px; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); }
+    .sources h2 { font-size: 17px; }
+    .sources p { margin-top: 8px; color: var(--muted); font-size: 10px; line-height: 1.6; }
+    .sources button { margin: 10px 7px 0 0; padding: 7px 9px; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--ink); font-size: 10px; }
+    .image-error { display: grid; place-items: center; height: 100%; padding: 16px; background: var(--panel-3); color: var(--muted); font-size: 11px; text-align: center; }
+    dialog {
+      width: min(calc(100% - 28px), 470px);
+      max-height: min(78dvh, 680px);
+      padding: 0;
+      border: 1px solid var(--line-strong);
+      border-radius: 22px;
+      background: var(--panel);
+      color: var(--ink);
+      opacity: 0;
+      transform: translateY(8px) scale(.97);
+      transition: opacity 220ms var(--ease-out), transform 220ms var(--ease-out);
+    }
+    dialog.visible { opacity: 1; transform: translateY(0) scale(1); }
+    dialog::backdrop { background: rgba(33, 31, 27, .42); backdrop-filter: blur(6px); }
+    .dialog-inner { max-height: min(78dvh, 680px); overflow-y: auto; padding: 20px; }
+    .dialog-inner small { color: var(--accent); font-weight: 800; }
+    .dialog-inner h3 { margin-top: 7px; font-size: 24px; }
+    .dialog-inner p { max-height: 46dvh; overflow-y: auto; margin-top: 10px; color: var(--muted); font-size: 12px; line-height: 1.7; white-space: pre-line; }
+    .dialog-actions { display: flex; gap: 9px; margin-top: 18px; }
+    @media (min-width: 640px) {
+      .hero-copy { padding-left: 34px; padding-right: 34px; }
+      section { padding-left: 26px; padding-right: 26px; }
+      .stars { grid-template-columns: repeat(3, 1fr); }
+      .star-card { display: block; }
+      .star-card img { aspect-ratio: 4 / 3; }
+      .briefs { grid-template-columns: 1.25fr .75fr; }
+      .brief:first-child { grid-row: span 2; }
+    }
+    @media (hover: hover) and (pointer: fine) {
+      .button:hover, .movie-copy button:hover { background: var(--panel-3); }
+      .button.primary:hover { background: #d9533f; }
+      .movie-card:hover img { transform: scale(1.025); }
+      .brief:hover { border-color: var(--line-strong); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .disclosure { transition: none; }
+      .disclosure-inner,
+      dialog,
+      .button,
+      .movie-copy button,
+      .rank-row,
+      .star-copy button,
+      .brief .read {
+        transform: none !important;
+        transition: opacity 120ms linear, color 120ms linear, background-color 120ms linear, border-color 120ms linear !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="hero" id="today">
+      <img class="hero-image" src="https://p0.pipi.cn/mediaplus/friday_image_fe/e42958b7f8777e82bfd7e46fd331949d6e371.jpeg?imageView2/1/w/768/h/1080=" alt="Spider-Man Brand New Day 院线海报">
+      <div class="hero-shade"></div>
+      <div class="hero-copy">
+        <div class="eyebrow">Now showing in China</div>
+        <h1>电影<br>Anything OS</h1>
+        <p>把正在热映、当日票房、官方预告与明星动态装进一块可以探索的电影银幕。</p>
+        <div class="hero-meta">
+          <span><strong>数据说明</strong> 演示数据，非实时</span>
+          <span><strong>头号热映</strong> Spider-Man: Brand New Day</span>
+        </div>
+        <div class="hero-actions">
+          <a class="button primary" href="#trailers">播放正式预告</a>
+          <button class="button" data-open-url="https://spidermanbrandnewday.movie/trailer/">官方电影页</button>
+        </div>
+      </div>
+    </header>
+
+    <nav class="nav" aria-label="电影内容导航">
+      <button class="active" data-section="today">今日</button>
+      <button data-section="trailers">预告</button>
+      <button data-section="showing">热映</button>
+      <button data-section="boxoffice">票房</button>
+      <button data-section="stars">明星</button>
+      <button data-section="briefing">动态</button>
+    </nav>
+
+    <section id="trailers">
+      <div class="section-head">
+        <div><div class="section-kicker">Official video</div><h2>银幕正在播放</h2></div>
+        <p class="section-note">来自电影官方与 Sony Pictures 频道</p>
+      </div>
+      <div class="video-shell">
+        <div class="video-frame" id="video-player">
+          <button class="video-poster" data-video-id="8TZMtslA3UY" data-video-title="Official Trailer" data-video-channel="Spider-Man 官方频道 · 长视频" aria-label="播放 Spider-Man 官方预告">
+            <img src="https://spidermanbrandnewday.movie/images/share.jpg" alt="Spider-Man Brand New Day 官方预告主视觉">
+            <span class="play">▶</span>
+          </button>
+        </div>
+        <div class="video-info">
+          <div><strong id="video-title">Official Trailer</strong><span id="video-source">Spider-Man 官方频道 · 长视频</span></div>
+          <button class="source-link" id="video-source-link" data-open-url="https://www.youtube.com/watch?v=8TZMtslA3UY">打开来源</button>
+        </div>
+        <p class="network-note">视频为真实官方 YouTube 内容。若当前网络无法播放，可点“打开来源”核验。</p>
+      </div>
+      <div class="shorts" aria-label="官方短视频">
+        <button class="short-card" data-video-id="wMs315uHMTQ" data-video-title="Official Trailer Short" data-video-channel="Sony Pictures Releasing UK · 短视频">
+          <img src="https://spidermanbrandnewday.movie/images/share.jpg" alt="Spider-Man 官方短预告主视觉">
+          <span class="short-copy"><b>60 秒看正式预告</b><span>Sony Pictures UK</span></span>
+        </button>
+        <button class="short-card" data-video-id="Vsn7sVxCq1M" data-video-title="Tom Holland New Suit Reveal" data-video-channel="Sony Pictures Entertainment · 短视频">
+          <img src="https://p0.pipi.cn/mediaplus/friday_image_fe/e42958b7f8777e82bfd7e46fd331949d6e371.jpeg?imageView2/1/w/512/h/720=" alt="Tom Holland 新战衣公开视频关联海报">
+          <span class="short-copy"><b>新战衣首次公开</b><span>Sony Pictures</span></span>
+        </button>
+        <button class="short-card" data-video-id="3gAlCLVpePk" data-video-title="New Trailer 4K" data-video-channel="Spider-Man 官方频道 · 长视频">
+          <img src="https://spidermanbrandnewday.movie/images/share.jpg" alt="Spider-Man New Trailer 4K 主视觉">
+          <span class="short-copy"><b>New Trailer 4K</b><span>Spider-Man</span></span>
+        </button>
+      </div>
+    </section>
+
+    <section id="showing">
+      <div class="section-head">
+        <div><div class="section-kicker">In theaters</div><h2>现在值得进场</h2></div>
+        <p class="section-note">评分与排片信息来自猫眼电影页</p>
+      </div>
+      <div class="rail">
+        <article class="movie-card">
+          <div class="poster-wrap"><img src="https://p0.pipi.cn/mediaplus/friday_image_fe/e42958b7f8777e82bfd7e46fd331949d6e371.jpeg?imageView2/1/w/512/h/720=" alt="Spider-Man Brand New Day 海报"><span class="rating">9.5</span></div>
+          <div class="movie-copy"><h3>Spider-Man: Brand New Day</h3><p>动作 / 冒险 · 热映中</p><button data-movie="Spider-Man: Brand New Day" data-copy="Peter Parker 再次穿上战衣，在熟悉的城市与新的威胁之间寻找自己的位置。故事延续年轻英雄在责任、身份与普通生活之间的拉扯，并把更具规模的动作场面带回纽约街头。&#10;&#10;页面收录了影片官方正式预告与新战衣公开视频，可在上方视频区直接切换观看。演示评分与票房来自公开电影页面的固定数据，不代表实时院线结果。" data-url="https://i.maoyan.com/films">查看详情</button></div>
+        </article>
+        <article class="movie-card">
+          <div class="poster-wrap"><img src="https://p0.pipi.cn/mediaplus/friday_image_fe/e42958b777e14dc8beb24efa367ca77fadc00.jpg?imageView2/1/w/512/h/720=" alt="八仙电影海报"><span class="rating">9.7</span></div>
+          <div class="movie-copy"><h3>八仙！</h3><p>奇幻 / 喜剧 · 热映中</p><button data-movie="八仙！" data-copy="八位性格迥异的主角因一场意外重新聚首，在人间烟火与奇幻冒险之间完成一段热闹旅程。影片以群像喜剧包装传统神话人物，让每个人的本领、弱点和选择都成为推进故事的关键。&#10;&#10;轻松的喜剧节奏与东方奇幻想象构成主要看点，适合希望在暑期档观看合家欢类型的观众。页面展示的评分和票房均为演示数据，非实时更新。" data-url="https://i.maoyan.com/films">查看详情</button></div>
+        </article>
+        <article class="movie-card">
+          <div class="poster-wrap"><img src="https://p0.pipi.cn/mediaplus/friday_image_fe/e42958bf4ea77e1fae4ea92f0086d30141064.png?imageView2/1/w/512/h/720=" alt="年会不能停2电影海报"><span class="rating">9.6</span></div>
+          <div class="movie-copy"><h3>年会不能停！2</h3><p>喜剧 · 热映中</p><button data-movie="年会不能停！2" data-copy="白客、高叶回归职场喜剧续作，新一轮组织调整让熟悉的办公室再次陷入荒诞局面。角色们需要在绩效、协作和个人选择之间周旋，用喜剧方式拆解日常工作中人人似曾相识的困境。&#10;&#10;续作延续群像表达与密集笑点，也把观察范围扩展到新的管理关系。页面中的评分与榜单位置为演示数据，建议通过官方来源核对最新信息。" data-url="https://i.maoyan.com/films">查看详情</button></div>
+        </article>
+        <article class="movie-card">
+          <div class="poster-wrap"><img src="https://p0.pipi.cn/mediaplus/friday_image_fe/e42958b76e38d3bd6d3d693825a264ee94987.jpg?imageView2/1/w/512/h/720=" alt="功夫女足电影海报"><span class="rating">9.4</span></div>
+          <div class="movie-copy"><h3>功夫女足</h3><p>喜剧 / 运动 · 热映中</p><button data-movie="功夫女足" data-copy="一支并不被看好的女子足球队把各自擅长的功夫带进训练场，在碰撞与磨合中寻找真正的团队节奏。赛场之外，每位队员也要面对生活选择、自我怀疑和外界期待。&#10;&#10;影片把运动热血、动作设计与轻松喜剧结合起来，重点落在团队成长而非单场胜负。页面票房与评分是固定演示数据，不构成实时市场排名。" data-url="https://i.maoyan.com/films">查看详情</button></div>
+        </article>
+        <article class="movie-card">
+          <div class="poster-wrap"><img src="https://p0.pipi.cn/mediaplus/friday_image_fe/e42958bf25c5c277e13f673a74ca10aab61aa.jpg?imageView2/1/w/512/h/720=" alt="汪汪队立大功3电影海报"></div>
+          <div class="movie-copy"><h3>汪汪队立大功3</h3><p>动画 / 家庭 · 热映中</p><button data-movie="汪汪队立大功3" data-copy="汪汪队迎来新的城市任务，熟悉的救援伙伴需要运用不同专长化解连续出现的危机。冒险过程中，新朋友加入队伍，也让合作、勇气与责任成为故事的核心。&#10;&#10;明快的节奏和清晰的角色分工适合亲子共同观看。页面中的票房位置仅用于演示界面交互，并非实时院线信息。" data-url="https://i.maoyan.com/films">查看详情</button></div>
+        </article>
+        <article class="movie-card">
+          <div class="poster-wrap"><img src="https://lumiere-a.akamaihd.net/v1/images/p_toystory5_payoff_poster_f0c85b8c.jpeg" alt="Toy Story 5 官方海报"></div>
+          <div class="movie-copy"><h3>Toy Story 5</h3><p>Disney / Pixar · 热映中</p><button data-movie="Toy Story 5" data-copy="胡迪、巴斯光年与伙伴们面对孩子成长方式的新变化，玩具与科技之间的关系成为这次冒险的新命题。熟悉的角色在新的环境里重新理解陪伴的意义，也继续用幽默和友情化解分歧。&#10;&#10;影片延续 Toy Story 系列关于成长、告别与归属感的主题。海报来自 Disney 官方电影页，页面票房信息为非实时演示数据。" data-url="https://movies.disney.com/toy-story-5">查看详情</button></div>
+        </article>
+      </div>
+    </section>
+
+    <section id="boxoffice">
+      <div class="section-head">
+        <div><div class="section-kicker">Daily chart</div><h2>今日票房风向</h2></div>
+        <p class="section-note">演示数据，非实时；金额单位为人民币</p>
+      </div>
+      <div class="box-office">
+        <article class="rank-item">
+          <button class="rank-row" data-expand="trend-spider" aria-expanded="false" aria-controls="trend-spider" data-label-closed="展开五日趋势" data-label-open="收起五日趋势"><span class="rank">01</span><span class="rank-title"><strong>Spider-Man: Brand New Day</strong><span>累计 10.30 亿 · <span class="expand-label" data-expand-label>展开五日趋势</span></span></span><span class="rank-value"><strong>740.23 万</strong><span>当日票房</span></span></button>
+          <div class="disclosure" id="trend-spider" aria-hidden="true"><div class="disclosure-inner trend"><div class="trend-head"><span>近五日票房</span><span>固定演示数据</span></div><div class="trend-days"><div class="trend-day"><span>前四日</span><strong>612.40 万</strong></div><div class="trend-day"><span>前三日</span><strong>655.18 万</strong></div><div class="trend-day"><span>前两日</span><strong>689.76 万</strong></div><div class="trend-day"><span>前一日</span><strong>711.52 万</strong></div><div class="trend-day"><span>今日</span><strong>740.23 万</strong></div></div></div></div>
+        </article>
+        <article class="rank-item">
+          <button class="rank-row" data-expand="trend-baxian" aria-expanded="false" aria-controls="trend-baxian" data-label-closed="展开五日趋势" data-label-open="收起五日趋势"><span class="rank">02</span><span class="rank-title"><strong>八仙！</strong><span>累计 12.70 亿 · <span class="expand-label" data-expand-label>展开五日趋势</span></span></span><span class="rank-value"><strong>376.43 万</strong><span>当日票房</span></span></button>
+          <div class="disclosure" id="trend-baxian" aria-hidden="true"><div class="disclosure-inner trend"><div class="trend-head"><span>近五日票房</span><span>固定演示数据</span></div><div class="trend-days"><div class="trend-day"><span>前四日</span><strong>448.20 万</strong></div><div class="trend-day"><span>前三日</span><strong>421.88 万</strong></div><div class="trend-day"><span>前两日</span><strong>405.16 万</strong></div><div class="trend-day"><span>前一日</span><strong>392.74 万</strong></div><div class="trend-day"><span>今日</span><strong>376.43 万</strong></div></div></div></div>
+        </article>
+        <article class="rank-item">
+          <button class="rank-row" data-expand="trend-chimi" aria-expanded="false" aria-controls="trend-chimi" data-label-closed="展开五日趋势" data-label-open="收起五日趋势"><span class="rank">03</span><span class="rank-title"><strong>痴迷</strong><span>累计 1.26 亿 · <span class="expand-label" data-expand-label>展开五日趋势</span></span></span><span class="rank-value"><strong>167.00 万</strong><span>当日票房</span></span></button>
+          <div class="disclosure" id="trend-chimi" aria-hidden="true"><div class="disclosure-inner trend"><div class="trend-head"><span>近五日票房</span><span>固定演示数据</span></div><div class="trend-days"><div class="trend-day"><span>前四日</span><strong>109.36 万</strong></div><div class="trend-day"><span>前三日</span><strong>128.90 万</strong></div><div class="trend-day"><span>前两日</span><strong>142.58 万</strong></div><div class="trend-day"><span>前一日</span><strong>155.42 万</strong></div><div class="trend-day"><span>今日</span><strong>167.00 万</strong></div></div></div></div>
+        </article>
+        <article class="rank-item">
+          <button class="rank-row" data-expand="trend-kungfu" aria-expanded="false" aria-controls="trend-kungfu" data-label-closed="展开五日趋势" data-label-open="收起五日趋势"><span class="rank">04</span><span class="rank-title"><strong>功夫女足</strong><span>累计 22.13 亿 · <span class="expand-label" data-expand-label>展开五日趋势</span></span></span><span class="rank-value"><strong>103.24 万</strong><span>当日票房</span></span></button>
+          <div class="disclosure" id="trend-kungfu" aria-hidden="true"><div class="disclosure-inner trend"><div class="trend-head"><span>近五日票房</span><span>固定演示数据</span></div><div class="trend-days"><div class="trend-day"><span>前四日</span><strong>156.72 万</strong></div><div class="trend-day"><span>前三日</span><strong>143.09 万</strong></div><div class="trend-day"><span>前两日</span><strong>129.64 万</strong></div><div class="trend-day"><span>前一日</span><strong>116.18 万</strong></div><div class="trend-day"><span>今日</span><strong>103.24 万</strong></div></div></div></div>
+        </article>
+        <article class="rank-item">
+          <button class="rank-row" data-expand="trend-annual" aria-expanded="false" aria-controls="trend-annual" data-label-closed="展开五日趋势" data-label-open="收起五日趋势"><span class="rank">05</span><span class="rank-title"><strong>年会不能停！2</strong><span>累计 9113.72 万 · <span class="expand-label" data-expand-label>展开五日趋势</span></span></span><span class="rank-value"><strong>97.46 万</strong><span>当日票房</span></span></button>
+          <div class="disclosure" id="trend-annual" aria-hidden="true"><div class="disclosure-inner trend"><div class="trend-head"><span>近五日票房</span><span>固定演示数据</span></div><div class="trend-days"><div class="trend-day"><span>前四日</span><strong>72.18 万</strong></div><div class="trend-day"><span>前三日</span><strong>78.54 万</strong></div><div class="trend-day"><span>前两日</span><strong>85.30 万</strong></div><div class="trend-day"><span>前一日</span><strong>91.82 万</strong></div><div class="trend-day"><span>今日</span><strong>97.46 万</strong></div></div></div></div>
+        </article>
+      </div>
+      <button class="button" style="margin-top:16px" data-open-url="https://m.sme-gov.cn/dataset/movie.html">查看完整榜单来源</button>
+    </section>
+
+    <section id="stars">
+      <div class="section-head">
+        <div><div class="section-kicker">On screen</div><h2>明星正在发生</h2></div>
+        <p class="section-note">围绕当前热映影片的真实演员资料与官方内容</p>
+      </div>
+      <div class="stars">
+        <article class="star-card">
+          <img src="https://p0.pipi.cn/basicdata/25bfd6d7537c6967cb51ba9e8b0f68a67e8a6.jpg?imageView2/1/w/500/h/700=" alt="Tom Holland 资料照">
+          <div class="star-copy"><small>SPIDER-MAN</small><h3>Tom Holland</h3><p>在官方预告中回归 Peter Parker。上方可切换观看正式预告与新战衣公开视频。</p><button data-expand="bio-tom" aria-expanded="false" aria-controls="bio-tom" data-label-closed="展开演员简介" data-label-open="收起演员简介"><span data-expand-label>展开演员简介</span></button><div class="disclosure" id="bio-tom" aria-hidden="true"><div class="disclosure-inner bio"><p>Tom Holland 是英国演员，因在漫威电影中饰演 Peter Parker / Spider-Man 被全球观众熟知。他的表演把角色的少年感、幽默与英雄责任结合在一起，也凭借舞蹈和体操训练完成了大量动作表达。此次他在新作中继续饰演 Peter Parker，官方预告和新战衣公开视频可在本页直接观看。</p><button class="inline-source" data-open-url="https://i.maoyan.com/asgard/celebrity/6463">查看官方资料</button></div></div></div>
+        </article>
+        <article class="star-card">
+          <img src="https://p0.pipi.cn/basicdata/54ecde9292392311e5cf3e3b426d57486e80f.png?imageView2/1/w/500/h/700=" alt="白客资料照">
+          <div class="star-copy"><small>年会不能停！2</small><h3>白客</h3><p>重返职场喜剧续作，以克制的喜剧节奏继续观察办公室里的普通人。</p><button data-expand="bio-baike" aria-expanded="false" aria-controls="bio-baike" data-label-closed="展开演员简介" data-label-open="收起演员简介"><span data-expand-label>展开演员简介</span></button><div class="disclosure" id="bio-baike" aria-hidden="true"><div class="disclosure-inner bio"><p>白客是中国内地演员，早期以喜剧作品进入大众视野，之后持续在电影和剧集中拓展现实题材角色。他擅长用平静、细微的反应制造喜剧效果，也能在轻松叙事中保留人物的真诚与困境。在《年会不能停！2》中，他回归职场喜剧语境，继续呈现普通员工面对变化时的选择。</p><button class="inline-source" data-open-url="https://i.maoyan.com/asgard/celebrity/354095">查看官方资料</button></div></div></div>
+        </article>
+        <article class="star-card">
+          <img src="https://p0.pipi.cn/basicdata/25bfd6d7537c69313967cb9b0d1167388fc24.jpg?imageView2/1/w/500/h/700=" alt="高叶资料照">
+          <div class="star-copy"><small>年会不能停！2</small><h3>高叶</h3><p>与白客共同回归续作，继续把鲜明、利落的职场人物带进暑期档银幕。</p><button data-expand="bio-gaoye" aria-expanded="false" aria-controls="bio-gaoye" data-label-closed="展开演员简介" data-label-open="收起演员简介"><span data-expand-label>展开演员简介</span></button><div class="disclosure" id="bio-gaoye" aria-hidden="true"><div class="disclosure-inner bio"><p>高叶是中国内地演员，长期活跃于电影、电视剧和舞台表演。她以有力量的台词、清晰的人物节奏和富有层次的情绪表达受到关注，尤其擅长塑造独立、果断又保留生活质感的女性角色。在《年会不能停！2》中，她与白客共同回归，以新的职场关系推动续作故事。</p><button class="inline-source" data-open-url="https://i.maoyan.com/asgard/celebrity/394754">查看官方资料</button></div></div></div>
+        </article>
+      </div>
+    </section>
+
+    <section id="briefing">
+      <div class="section-head">
+        <div><div class="section-kicker">Movie briefing</div><h2>电影动态简报</h2></div>
+        <p class="section-note">每条都可回到原始公开页面</p>
+      </div>
+      <div class="briefs">
+        <article class="brief">
+          <div class="brief-meta"><span>猫眼电影</span><span>热映观察</span></div>
+          <h3>Spider-Man 领跑热映页，国产喜剧与动画共同占据暑期档</h3>
+          <p>热映列表同时覆盖动作、奇幻、职场喜剧、运动喜剧与亲子动画，内容结构比单一大片更丰富。</p>
+          <button class="read" data-expand="article-hot" aria-expanded="false" aria-controls="article-hot" data-label-closed="展开完整文章" data-label-open="收起完整文章"><span data-expand-label>展开完整文章</span></button>
+          <div class="disclosure" id="article-hot" aria-hidden="true"><div class="disclosure-inner article-body"><p>院线热映内容呈现出明显的多类型并行。头部动作冒险电影贡献关注度，奇幻喜剧、职场喜剧和运动题材则承接不同观众的情绪需求，亲子动画也保持稳定选择空间。这意味着观众不必只围绕一部大片安排观影，类型之间的差异正在成为暑期档的重要吸引力。</p><p>榜单变化仍会受到排片、节假日和口碑扩散影响。本页只用固定演示数据呈现信息层级，不把它包装成实时市场判断；如果需要核对最新评分、场次或票房，应回到公开电影平台查看。</p><button class="inline-source" data-open-url="https://i.maoyan.com/films">阅读官方来源</button></div></div>
+        </article>
+        <article class="brief">
+          <div class="brief-meta"><span>新华社</span><span>暑期档片单</span></div>
+          <h3>2026 暑期档片单覆盖多类型影片</h3>
+          <p>从国产喜剧到进口动画，片单为当前院线热度提供背景。</p>
+          <button class="read" data-expand="article-slate" aria-expanded="false" aria-controls="article-slate" data-label-closed="展开完整文章" data-label-open="收起完整文章"><span data-expand-label>展开完整文章</span></button>
+          <div class="disclosure" id="article-slate" aria-hidden="true"><div class="disclosure-inner article-body"><p>公开暑期档片单覆盖喜剧、现实题材、动画、动作冒险等多个方向。不同体量和受众定位的影片集中进入市场，使档期既有适合家庭共同观看的内容，也有面向年轻观众的类型化作品，为院线提供更丰富的排片组合。</p><p>片单的意义不仅在于罗列片名，也帮助理解一段时间内的内容供给。上映安排可能继续调整，具体档期与影片信息应以发行方和权威媒体发布为准；本页保留原始公开文章入口，方便继续核验完整背景。</p><button class="inline-source" data-open-url="https://app.xinhuanet.com/news/article.html?articleId=2026053078fe1f8a0d8d412dad853ba61e03cf56">阅读官方来源</button></div></div>
+        </article>
+        <article class="brief">
+          <div class="brief-meta"><span>中国电影网</span><span>市场报告</span></div>
+          <h3>月度与周度市场数据持续更新</h3>
+          <p>适合进一步核对电影市场趋势，而非把页面中的演示数据误当实时接口。</p>
+          <button class="read" data-expand="article-market" aria-expanded="false" aria-controls="article-market" data-label-closed="展开完整文章" data-label-open="收起完整文章"><span data-expand-label>展开完整文章</span></button>
+          <div class="disclosure" id="article-market" aria-hidden="true"><div class="disclosure-inner article-body"><p>观察电影市场不能只看某一天的名次。周度和月度报告会把票房、观影人次、排片变化及不同影片的走势放在更长时间范围内比较，从而减少单日波动造成的误判，也更适合识别档期和类型变化。</p><p>本页的榜单和五日趋势用于展示交互，不接入实时数据接口。需要进行严肃市场分析时，应以权威报告中的统计口径和发布时间为准，并结合多期数据判断趋势，而不是直接引用界面上的固定演示数字。</p><button class="inline-source" data-open-url="https://www.zgdypw.cn/sc/sjbg/index.shtml">阅读官方来源</button></div></div>
+        </article>
+      </div>
+    </section>
+
+    <aside class="sources">
+      <h2>真实素材与数据边界</h2>
+      <p>本页没有占位图或模拟视频。Hero 来自 Spider-Man 官方站，预告来自官方 YouTube 频道，电影与演员图片来自猫眼公开页及 Disney 官方页。票房与趋势为固定演示数据，不宣称实时更新。</p>
+      <button data-open-url="https://spidermanbrandnewday.movie/trailer/">Sony 官方电影页</button>
+      <button data-open-url="https://i.maoyan.com/films">猫眼热映页</button>
+      <button data-open-url="https://movies.disney.com/toy-story-5">Disney 官方电影页</button>
+    </aside>
+  </main>
+
+  <dialog id="movie-dialog">
+    <div class="dialog-inner">
+      <small>APP 内详情</small>
+      <h3 id="dialog-title"></h3>
+      <p id="dialog-copy"></p>
+      <div class="dialog-actions">
+        <button class="button primary" id="dialog-source">查看官方来源</button>
+        <button class="button" id="dialog-close">关闭</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script>
+    (function () {
+      var player = document.getElementById('video-player');
+      var title = document.getElementById('video-title');
+      var source = document.getElementById('video-source');
+      var sourceLink = document.getElementById('video-source-link');
+      var dialog = document.getElementById('movie-dialog');
+      var dialogTitle = document.getElementById('dialog-title');
+      var dialogCopy = document.getElementById('dialog-copy');
+      var dialogSource = document.getElementById('dialog-source');
+      var pendingSource = '';
+
+      function openSource(url) {
+        if (!url || url.indexOf('https://') !== 0) return;
+        try {
+          if (window.AIPhoneMovie && window.AIPhoneMovie.postAction) {
+            window.AIPhoneMovie.postAction(JSON.stringify({ url: url }));
+            return;
+          }
+        } catch (_) {}
+        window.open(url, '_blank', 'noopener');
+      }
+
+      function setExpanded(trigger, expanded) {
+        var panel = document.getElementById(trigger.getAttribute('data-expand'));
+        if (!panel) return;
+        trigger.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        panel.setAttribute('aria-hidden', expanded ? 'false' : 'true');
+        panel.classList.toggle('open', expanded);
+        var label = trigger.querySelector('[data-expand-label]');
+        if (label) label.textContent = trigger.getAttribute(expanded ? 'data-label-open' : 'data-label-closed') || '';
+      }
+
+      document.addEventListener('click', function (event) {
+        var target = event.target.closest('button, a');
+        if (!target) return;
+        var sectionId = target.getAttribute('data-section');
+        if (sectionId) {
+          document.querySelectorAll('.nav button').forEach(function (item) {
+            item.classList.toggle('active', item === target);
+          });
+          document.getElementById(sectionId).scrollIntoView({ behavior: 'smooth', block: 'start' });
+          return;
+        }
+        var expandId = target.getAttribute('data-expand');
+        if (expandId) {
+          var shouldOpen = target.getAttribute('aria-expanded') !== 'true';
+          var section = target.closest('section');
+          if (section) {
+            section.querySelectorAll('[data-expand][aria-expanded="true"]').forEach(function (item) {
+              if (item !== target) setExpanded(item, false);
+            });
+          }
+          setExpanded(target, shouldOpen);
+          return;
+        }
+        var url = target.getAttribute('data-open-url');
+        if (url) {
+          event.preventDefault();
+          openSource(url);
+          return;
+        }
+        var videoId = target.getAttribute('data-video-id');
+        if (videoId) {
+          player.innerHTML = '<iframe title="官方电影视频" src="https://www.youtube.com/embed/' + videoId +
+            '?playsinline=1&rel=0&autoplay=1" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>';
+          title.textContent = target.getAttribute('data-video-title') || 'Official Video';
+          source.textContent = target.getAttribute('data-video-channel') || '官方频道';
+          sourceLink.setAttribute('data-open-url', 'https://www.youtube.com/watch?v=' + videoId);
+          document.getElementById('trailers').scrollIntoView({ behavior: 'smooth', block: 'start' });
+          return;
+        }
+        var detailTitle = target.getAttribute('data-movie');
+        if (detailTitle) {
+          dialogTitle.textContent = detailTitle;
+          dialogCopy.textContent = target.getAttribute('data-copy') || '';
+          pendingSource = target.getAttribute('data-url') || '';
+          dialogSource.hidden = !pendingSource;
+          dialog.classList.remove('visible');
+          dialog.showModal();
+          requestAnimationFrame(function () {
+            dialog.classList.add('visible');
+          });
+        }
+      });
+
+      document.getElementById('dialog-close').addEventListener('click', function () {
+        dialog.close();
+      });
+      dialogSource.addEventListener('click', function () {
+        openSource(pendingSource);
+      });
+      dialog.addEventListener('click', function (event) {
+        if (event.target === dialog) dialog.close();
+      });
+      dialog.addEventListener('close', function () {
+        dialog.classList.remove('visible');
+      });
+      document.querySelectorAll('img').forEach(function (image) {
+        image.addEventListener('error', function () {
+          var parent = image.parentElement;
+          image.remove();
+          if (parent && !parent.querySelector('.image-error')) {
+            var error = document.createElement('div');
+            error.className = 'image-error';
+            error.textContent = '真实图片加载失败，请打开来源核验';
+            parent.appendChild(error);
+          }
+        });
+      });
+    })();
+  </script>
+</body>
+</html>
