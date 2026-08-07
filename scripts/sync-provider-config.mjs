@@ -12,6 +12,7 @@ const defaultComposioBaseUrl = 'https://backend.composio.dev/api/v3.1';
 const providerKeys = [
   'TOOL_GATEWAY_API_KEY',
   'DASHSCOPE_API_KEY',
+  'DEEPSEEK_API_KEY',
   'FLIGHT_MCP_KEY',
   'VARIFLIGHT_API_KEY',
   'X_VARIFLIGHT_KEY',
@@ -158,6 +159,7 @@ console.log(`Wrote ${outPath}`);
 console.log(maskedStatus(config, [
   'TOOL_GATEWAY_API_KEY',
   'DASHSCOPE_API_KEY',
+  'DEEPSEEK_API_KEY',
   'FLIGHT_MCP_KEY',
   'VARIFLIGHT_API_KEY',
   'ROLLINGGO_HOTEL_MCP_KEY',
