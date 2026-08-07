@@ -28,6 +28,8 @@ assert.match(waterfallCss, /\.waterfall-cinema-card/);
 assert.match(waterfallCss, /\.waterfall-toolbar-primary/);
 assert.match(waterfallCss, /\.waterfall-toolbar-tools/);
 assert.match(waterfallCss, /\.waterfall-source-logo/);
+assert.match(waterfallCss, /\.waterfall-media-cover/);
+assert.doesNotMatch(waterfallCss, /\.waterfall-cinema-stage img\s*\{/);
 
 function element() {
   const classes = new Set();

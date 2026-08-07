@@ -812,7 +812,7 @@ const WATERFALL_CSS: string = `
   background: linear-gradient(145deg, #efe5df, #e9edf0);
   box-shadow: 0 16px 42px rgba(64, 44, 34, 0.1);
 }
-.waterfall-cinema-stage img {
+.waterfall-media-cover {
   position: absolute; z-index: 1; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover;
 }
 .waterfall-cinema-stage::after {
@@ -1031,7 +1031,7 @@ const WATERFALL_JS: string = `
     }));
   }
   function renderCandidate(item, index) {
-    var cover = item.coverUrl ? '<img src="' + escapeHtml(item.coverUrl) + '" alt="' + escapeHtml(item.title) +
+    var cover = item.coverUrl ? '<img class="waterfall-media-cover" src="' + escapeHtml(item.coverUrl) + '" alt="' + escapeHtml(item.title) +
       '" loading="' + (index === 0 ? 'eager' : 'lazy') + '" decoding="async" onerror="this.hidden=true" />' : '';
     var link = item.url ? '<a href="' + escapeHtml(item.url) + '" target="_blank" rel="noopener noreferrer">打开原文</a>' : '';
     var cardClass = item.coverUrl ? 'waterfall-card waterfall-cinema-card' : 'waterfall-card waterfall-cinema-card waterfall-card--text';
