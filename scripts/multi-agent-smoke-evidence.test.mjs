@@ -107,6 +107,205 @@ test('returns from each F16 external authorization page with bounded Back naviga
   assert.doesNotMatch(externalCollection, /aa', 'start', '-a', 'EntryAbility', '-b', 'com\.example\.aiphonedemo/);
 });
 
+test('keeps public-persona smoke separate from default queries and manual-gated', () => {
+  const source = readFileSync('scripts/aiphone-device-smoke.mjs', 'utf8');
+  assert.match(source, /runPublicPersonaSmoke/);
+  assert.match(source, /if \(runPublicPersona\) \{/);
+  assert.match(source, /process\.exit\(summary\.ok \? 0 : 1\)/);
+  assert.match(source, /let p01 = \{ id: 'P01', status: 'BLOCKED', ok: false, manualGate: true/);
+  assert.match(source, /const p02 = \{\s*id: 'P02', status: 'BLOCKED', ok: false, manualGate: true/);
+  assert.match(source, /const p03 = \{\s*id: 'P03', status: 'BLOCKED', ok: false, manualGate: true/);
+  assert.match(source, /const p03 = \{[\s\S]*id: 'P03'[\s\S]*reason: 'no_safe_job_token'/);
+  const publicSmokeStart = source.indexOf('async function runPublicPersonaSmoke');
+  const publicSmokeEnd = source.indexOf('\nconsole.log(`cleanData:', publicSmokeStart);
+  assert.ok(publicSmokeStart >= 0 && publicSmokeEnd > publicSmokeStart, 'public persona smoke body is present');
+  const publicSmoke = source.slice(publicSmokeStart, publicSmokeEnd);
+  const openStart = source.indexOf('async function enterPublicPersonaFromHome');
+  const openEnd = source.indexOf('\nasync function startPublicPersonaDiscoveryOnDevice', openStart);
+  const openBody = source.slice(openStart, openEnd);
+  assert.match(openBody, /opened\.center === null/);
+  assert.match(openBody, /tapPublicPersonaText\('👤', 'public-persona-open-icon'\)/);
+  assert.match(openBody, /reason: 'public persona entry not found'/);
+  assert.match(openBody, /opened\.center === null[\s\S]*dumpLayout\('public-persona-opened-after-tap\.json'\)/);
+  assert.doesNotMatch(openBody, /const layout = opened\.layout/);
+  const p02Start = publicSmoke.indexOf("const p02 =");
+  const p02Wait = publicSmoke.indexOf('await waitForPublicPersonaManualResume', p02Start);
+  const discoveryStart = publicSmoke.indexOf('const started = await startPublicPersonaDiscoveryOnDevice()');
+  const p02Baseline = publicSmoke.indexOf('p02Baseline = hdc', discoveryStart);
+  const candidateGate = publicSmoke.indexOf('manualCandidateConfirmed', discoveryStart);
+  assert.ok(p02Baseline > discoveryStart && p02Baseline < candidateGate, 'P02 baseline must follow discovery and precede manual confirmation');
+  assert.match(publicSmoke, /clearHilog\(\);[\s\S]*p02Baseline = hdc/);
+  assert.match(publicSmoke, /leaveWhileBusyEvidence/);
+  assert.match(publicSmoke, /taskContinuedEvidence/);
+  assert.match(publicSmoke, /reason: 'no_safe_job_token'/);
+  assert.match(publicSmoke, /jobEvidence: 'unavailable'/);
+  assert.doesNotMatch(publicSmoke, /readingJobId|returnJobId|publicPersonaJobId/);
+  assert.match(publicSmoke, /candidateCardEvidence/);
+  assert.match(publicSmoke, /manualCandidateConfirmed/);
+  assert.doesNotMatch(publicSmoke, /const hasCandidateFields = \/@\\S\+\//);
+  assert.match(publicSmoke, /selectedProfileUrls/);
+  assert.match(publicSmoke, /manual_seed_only/);
+  assert.match(publicSmoke, /knownUnselectedProfileUrls/);
+  assert.match(publicSmoke, /knownUnselectedAbsent/);
+  assert.match(source, /AIPHONE_PUBLIC_PERSONA_SELECTED_URLS/);
+  assert.match(source, /AIPHONE_PUBLIC_PERSONA_UNSELECTED_URLS/);
+  assert.match(publicSmoke, /selectionStepEvidence/);
+  assert.match(publicSmoke, /seedCandidateVisible/);
+  assert.match(source, /function publicPersonaCandidateLayoutState/);
+  assert.match(publicSmoke, /selectionLayoutEvidence/);
+  assert.match(publicSmoke, /expectedSelectedKeys/);
+  assert.match(publicSmoke, /expectedUnselectedKeys/);
+  assert.match(publicSmoke, /selectionSetsMatch/);
+  assert.doesNotMatch(publicSmoke, /knownUnselectedProfileUrls\.every\(/);
+  const deltaStart = source.indexOf('function publicPersonaLogDelta');
+  const deltaEnd = source.indexOf('\nfunction publicPersonaStrictLogDelta', deltaStart);
+  assert.ok(deltaStart >= 0 && deltaEnd > deltaStart, 'strict public-persona log delta helper is present');
+  const deltaBody = source.slice(deltaStart, deltaEnd);
+  assert.match(deltaBody, /baselineMismatch/);
+  assert.doesNotMatch(deltaBody, /return current;/);
+  assert.match(publicSmoke, /const deltaResult = publicPersonaLogDelta/);
+  assert.match(publicSmoke, /baselineMismatch/);
+  assert.match(publicSmoke, /correlationMarker/);
+  assert.match(publicSmoke, /p04Result/);
+  assert.match(publicSmoke, /afterSaveExitLayout/);
+  assert.match(publicSmoke, /saveExitEvidence/);
+  assert.match(publicSmoke, /reenterReloadEvidence/);
+  assert.match(publicSmoke, /savedReloadedText/);
+  assert.match(publicSmoke, /editSaveReload =/);
+  assert.match(publicSmoke, /savedReloadedText/);
+  assert.match(publicSmoke, /p05Result/);
+  assert.match(publicSmoke, /p05PromptBaseline/);
+  assert.match(publicSmoke, /promptDelta/);
+  assert.match(publicSmoke, /requestMarker/);
+  assert.match(publicSmoke, /requestMarkerObserved/);
+  assert.match(publicSmoke, /promptAssemblySafe/);
+  assert.doesNotMatch(publicSmoke, /promptPersonaAbsent = requestMarkerObserved && !personaMarkerObserved/);
+  assert.match(publicSmoke, /cleanup_required/);
+  const finallyStart = publicSmoke.indexOf('} finally {');
+  const finallyBody = publicSmoke.slice(finallyStart);
+  assert.doesNotMatch(finallyBody, /删除画像|确认删除/);
+  assert.match(finallyBody, /force-stop/);
+  assert.match(source, /function publicPersonaSnapshotExists\(\)/);
+  assert.match(source, /aiphone_public_persona/);
+  assert.match(publicSmoke, /if \(publicPersonaSnapshotExists\(\)\)/);
+  assert.doesNotMatch(publicSmoke, /cleanBundleData\(\)/);
+  assert.match(publicSmoke, /let snapshotCreatedThisRun = false/);
+  assert.match(publicSmoke, /snapshotCreatedThisRun && !snapshotDeleted/);
+  const listed = spawnSync(process.execPath, ['scripts/aiphone-device-smoke.mjs', '--public-persona', '--list-cases'], {
+    encoding: 'utf8'
+  });
+  assert.equal(listed.status, 0, listed.stderr);
+  const manifest = JSON.parse(listed.stdout);
+  assert.deepEqual(manifest.map((item) => item.id), ['P01', 'P02', 'P03', 'P04', 'P05']);
+  assert.equal(manifest.every((item) => item.automated === false && item.manualGate === true), true);
+  assert.equal(manifest.every((item) => item.requires.some((value) => value.includes('AIPHONE_PUBLIC_PERSONA_MANUAL_SEED_ONLY=1'))), true);
+  assert.equal(manifest.every((item) => item.requires.some((value) => value.includes('AIPHONE_PUBLIC_PERSONA_SELECTED_URLS'))), true);
+  assert.equal(manifest.every((item) => item.requires.some((value) => value.includes('AIPHONE_PUBLIC_PERSONA_UNSELECTED_URLS'))), true);
+  const gated = spawnSync(process.execPath, ['scripts/aiphone-device-smoke.mjs', '--public-persona'], {
+    encoding: 'utf8',
+    env: { ...process.env, AIPHONE_PUBLIC_PERSONA_PROFILE_URL: '' }
+  });
+  assert.equal(gated.status, 2);
+  assert.match(gated.stderr, /AIPHONE_PUBLIC_PERSONA_PROFILE_URL/);
+  assert.doesNotMatch(gated.stdout, /\[1\/\d+\]/);
+
+  const indexSource = readFileSync('entry/src/main/ets/pages/A2uiHome/Index.ets', 'utf8');
+  const promptStart = indexSource.indexOf('  private async submitPrompt(');
+  const promptEnd = indexSource.indexOf('\n  private ', promptStart + 1);
+  assert.ok(promptStart >= 0 && promptEnd > promptStart, 'ordinary prompt assembly is present');
+  const promptBody = indexSource.slice(promptStart, promptEnd);
+  assert.doesNotMatch(promptBody, /publicPersonaSnapshot|publicPersonaStore|aiphone_public_persona|snapshot_v1/);
+});
+
+test('keeps a public-persona job alive when its page is reopened', () => {
+  const source = readFileSync('entry/src/main/ets/pages/A2uiHome/Index.ets', 'utf8');
+  assert.match(source, /private publicPersonaInitialized: boolean = false/);
+  const loadStart = source.indexOf('  private loadPublicPersona(');
+  const loadEnd = source.indexOf('\n  private openPublicPersona', loadStart);
+  const openStart = source.indexOf('  private openPublicPersona(');
+  const openEnd = source.indexOf('\n  private skipPublicPersonaOnboarding', openStart);
+  assert.ok(loadStart >= 0 && loadEnd > loadStart);
+  assert.ok(openStart >= 0 && openEnd > openStart);
+  assert.match(source.slice(loadStart, loadEnd), /if \(this\.publicPersonaInitialized\)/);
+  assert.match(source.slice(loadStart, loadEnd), /this\.publicPersonaInitialized = true/);
+  assert.doesNotMatch(source.slice(openStart, openEnd), /loadPublicPersona\(\)/);
+});
+
+test('keeps Markdown drafts open until the parent confirms a successful save', () => {
+  const page = readFileSync('entry/src/main/ets/pages/A2uiHome/components/PublicPersonaPage.ets', 'utf8');
+  assert.match(page, /onSaveMarkdown: \(markdown: string\) => boolean/);
+  assert.match(page, /const saved = this\.onSaveMarkdown\(this\.markdownForEdit\(\)\)/);
+  assert.match(page, /if \(saved\) \{[\s\S]*this\.editingMarkdown = false/);
+  assert.match(page, /publicPersonaPreviewMarkdown\(snapshot\.personaMarkdown, snapshot\.mbtiHidden\)/);
+});
+
+test('requires an explicit manual resume before public-persona destructive gates continue', () => {
+  const source = readFileSync('scripts/aiphone-device-smoke.mjs', 'utf8');
+  const publicSmokeStart = source.indexOf('async function runPublicPersonaSmoke');
+  const publicSmokeEnd = source.indexOf('\nconsole.log(`cleanData:', publicSmokeStart);
+  const publicSmoke = source.slice(publicSmokeStart, publicSmokeEnd);
+  assert.match(source, /AIPHONE_PUBLIC_PERSONA_MANUAL_RESUME/);
+  assert.match(source, /createInterface/);
+  assert.match(publicSmoke, /manualResume/);
+  assert.match(publicSmoke, /if \(manualResume(?: &&|\))/);
+  assert.doesNotMatch(publicSmoke, /const selected = findTextCenter/);
+  assert.doesNotMatch(publicSmoke, /tapPublicPersonaText\('确认并生成画像'/);
+  assert.match(publicSmoke, /publicPersonaSnapshotExists\(\)/);
+});
+
+test('exposes the fixed eleven-platform terminal summary in the public persona UI', () => {
+  const client = readFileSync('entry/src/main/ets/publicpersona/PublicPersonaClient.ets', 'utf8');
+  const page = readFileSync('entry/src/main/ets/pages/A2uiHome/components/PublicPersonaPage.ets', 'utf8');
+  assert.match(client, /const PUBLIC_PERSONA_TOTAL: number = 11/);
+  assert.match(page, /progress\.completed >= this\.progress\.total/);
+  assert.match(page, /已检查 ' \+ this\.progress\.total\.toString\(\) \+ ' 个公开平台/);
+});
+
+test('keeps the public persona entry visible without a remote avatar', () => {
+  const page = readFileSync('entry/src/main/ets/pages/A2uiHome/components/HomePage.ets', 'utf8');
+  const socialStart = page.indexOf("label: '👤'");
+  const socialEnd = page.indexOf(".margin({ left: A2UI_HEADER_BUTTON_GAP })", socialStart);
+  assert.ok(socialStart >= 0 && socialEnd > socialStart, 'former social slot is present');
+  const socialBlock = page.slice(page.lastIndexOf('A2uiButtonView({', socialStart), socialEnd);
+  assert.match(socialBlock, /label: '👤'/);
+  assert.match(socialBlock, /hasIcon: false/);
+  assert.match(socialBlock, /onOpenPublicPersona/);
+  assert.doesNotMatch(socialBlock, /icon_social|onOpenSocialHub/);
+  assert.doesNotMatch(page, /persona_avatar_default/);
+  assert.match(socialBlock, /accessibilityText\('我的画像'/);
+});
+
+test('builds the HAP from an explicit local provider env without committing secrets', () => {
+  const sync = readFileSync('scripts/sync-provider-config.mjs', 'utf8');
+  const hvigor = readFileSync('entry/hvigorfile.ts', 'utf8');
+  assert.match(sync, /AIPHONE_PROVIDER_ENV_PATH/);
+  assert.match(hvigor, /AIPHONE_PROVIDER_ENV_PATH/);
+  assert.match(hvigor, /Skipping local provider config sync/);
+});
+
+test('surfaces provider authorization failures instead of calling them empty results', () => {
+  const page = readFileSync('entry/src/main/ets/pages/A2uiHome/components/PublicPersonaPage.ets', 'utf8');
+  assert.match(page, /needs_auth/);
+  assert.match(page, /blocked_by_site/);
+});
+
+test('invalidates in-flight MBTI reinference on local markdown and visibility changes', () => {
+  const source = readFileSync('entry/src/main/ets/pages/A2uiHome/Index.ets', 'utf8');
+  const saveStart = source.indexOf('  private savePublicPersonaMarkdown(');
+  const saveEnd = source.indexOf('\n  private async runPublicPersonaReinference', saveStart);
+  const hideStart = source.indexOf('  private setPublicPersonaMbtiHidden(');
+  const hideEnd = source.indexOf('\n  private deletePublicPersona', hideStart);
+  assert.ok(saveStart >= 0 && saveEnd > saveStart, 'markdown save method is present');
+  assert.ok(hideStart >= 0 && hideEnd > hideStart, 'MBTI visibility method is present');
+  const saveSource = source.slice(saveStart, saveEnd);
+  const hideSource = source.slice(hideStart, hideEnd);
+  assert.match(saveSource, /this\.publicPersonaJobId\+\+/);
+  assert.match(hideSource, /this\.publicPersonaJobId\+\+/);
+  assert.match(saveSource, /this\.publicPersonaJobId\+\+[\s\S]*store\.save/);
+  assert.match(hideSource, /this\.publicPersonaJobId\+\+[\s\S]*store\.save/);
+  assert.match(source, /if \(jobId !== this\.publicPersonaJobId \|\| this\.publicPersonaSnapshot === null\)/);
+});
+
 test('holds ordinary C20 multi-agent capture until its bounded settlement window', () => {
   assert.equal(typeof smokeLifecycle.multiAgentPostCompletionWaitMs, 'function');
   assert.equal(typeof smokeLifecycle.captureCompletionSettled, 'function');

@@ -20,7 +20,8 @@ function projectRoot(startDir: string): string {
 
 function syncLocalProviderConfig(): void {
   const rootDir = projectRoot(process.cwd());
-  const envPath = join(rootDir, 'tool-gateway', '.env.local');
+  const explicitEnvPath = process.env.AIPHONE_PROVIDER_ENV_PATH?.trim() ?? '';
+  const envPath = explicitEnvPath.length > 0 ? explicitEnvPath : join(rootDir, 'tool-gateway', '.env.local');
   const scriptPath = join(rootDir, 'scripts', 'sync-provider-config.mjs');
   if (!existsSync(envPath) || !existsSync(scriptPath)) {
     console.warn('[AIPhone] Skipping local provider config sync: missing tool-gateway/.env.local');

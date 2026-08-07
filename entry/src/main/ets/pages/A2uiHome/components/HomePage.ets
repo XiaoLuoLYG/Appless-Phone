@@ -43,7 +43,6 @@ import {
   A2UI_HOME_SECTION_GAP
 } from '../style/A2uiHomeLayout';
 import {
-  A2UI_MOTION_CURVE,
   A2UI_MOTION_MOVE_CURVE,
   A2UI_MOTION_NORMAL_MS
 } from '../style/A2uiHomeMotion';
@@ -98,7 +97,7 @@ export struct HomePage {
   private previousKeyboardAvoidMode: KeyboardAvoidMode = KeyboardAvoidMode.OFFSET;
   onToggleHistory: () => void = () => {};
   onOpenConfig: () => void = () => {};
-  onOpenSocialHub: () => void = () => {};
+  onOpenPublicPersona: () => void = () => {};
   onSendPrompt: () => void = () => {};
   onStartVoiceInput: () => void = () => {};
   onStopVoiceInput: () => void = () => {};
@@ -335,15 +334,11 @@ export struct HomePage {
             .margin({ left: A2UI_HEADER_BUTTON_GAP })
 
           A2uiButtonView({
-            icon: $r('app.media.icon_social'),
-            hasIcon: true,
+            label: '👤',
+            hasIcon: false,
             shape: 'circle',
             circleSize: A2UI_HEADER_BUTTON_SIZE,
-            iconSize: A2UI_HEADER_BUTTON_ICON_SIZE,
             tone: 'secondary',
-            active: this.currentSurface.intent === 'social',
-            customBackgroundColor: this.currentSurface.intent === 'social' ? COLOR_ACCENT_SOFT : '',
-            customBorderColor: this.currentSurface.intent === 'social' ? COLOR_ACCENT : '',
             isEnabled: !this.isBusy
           })
             .enabled(!this.isBusy)
@@ -351,8 +346,9 @@ export struct HomePage {
               if (this.isBusy) {
                 return;
               }
-              this.onOpenSocialHub();
+              this.onOpenPublicPersona();
             })
+            .accessibilityText('我的画像')
             .margin({ left: A2UI_HEADER_BUTTON_GAP })
 
           A2uiButtonView({

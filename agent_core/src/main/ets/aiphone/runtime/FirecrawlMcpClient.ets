@@ -592,7 +592,8 @@ function normalizedStatus(httpStatus: number, message: string): FirecrawlResultS
     return 'credits_exhausted';
   }
   if (httpStatus === 429 || lower.indexOf('rate limit') >= 0 ||
-    lower.indexOf('too many requests') >= 0) {
+    lower.indexOf('too many requests') >= 0 ||
+    lower.indexOf('status code 429') >= 0 || lower.indexOf('http 429') >= 0) {
     return 'rate_limited';
   }
   if (lower.indexOf('timeout') >= 0 || lower.indexOf('timed out') >= 0) {

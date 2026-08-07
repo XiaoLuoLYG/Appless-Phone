@@ -154,6 +154,20 @@ import {
   isAllowed12306BookingUrl
 } from './components/CheckoutWebOverlay';
 import { ConfigPage } from './components/ConfigPage';
+import { PublicPersonaPage } from './components/PublicPersonaPage';
+import { PublicPersonaClient } from '../../publicpersona/PublicPersonaClient';
+import {
+  PublicPersonaCandidate,
+  PublicPersonaPhase,
+  PublicPersonaProgress,
+  PublicPersonaSnapshot,
+  replacePublicPersonaMbti,
+  sanitizePublicPersonaSnapshot
+} from '../../publicpersona/PublicPersonaModel';
+import {
+  PUBLIC_PERSONA_STORE_NAME,
+  PublicPersonaStore
+} from '../../publicpersona/PublicPersonaStore';
 import {
   HotelTurnStatus
 } from './agent/MultiAgentHotelSupport';
@@ -687,6 +701,15 @@ struct Index {
   @State composioAuthItems: ComposioAuthConfigItem[] = [];
   @State composioAuthMessage: string = '';
   @State composioAuthBusy: boolean = false;
+  @State showPublicPersonaPage: boolean = false;
+  @State publicPersonaPhase: PublicPersonaPhase = 'input';
+  @State publicPersonaCandidates: PublicPersonaCandidate[] = [];
+  @State publicPersonaProgress: PublicPersonaProgress | null = null;
+  @State publicPersonaSnapshot: PublicPersonaSnapshot | null = null;
+  @State publicPersonaError: string = '';
+  private publicPersonaJobId: number = 0;
+  private publicPersonaInitialized: boolean = false;
+  private readonly publicPersonaClient: PublicPersonaClient = new PublicPersonaClient();
   @State mailDetailEventJson: string = '';
   @State mailReplyEventJson: string = '';
   @State mailCalendarEventJson: string = '';
@@ -1251,6 +1274,7 @@ struct Index {
     this.configureDidiMcpSandboxRuntime(true);
     this.configureComposioRuntimeForCurrentUser();
     this.loadPersonaOverrides();
+    this.loadPublicPersona();
     this.loadPaymentAccounts();
     this.loadStripeReceivingProfile();
     void this.requestLocationPermissionOnLaunch();
@@ -1298,6 +1322,269 @@ struct Index {
       store.loadSync();
     }
     this.refreshPersonaEditor(this.selectedPersonaId);
+  }
+
+  private publicPersonaStore(): PublicPersonaStore | null {
+    const context = this.getUIContext().getHostContext() as common.Context;
+    if (context === null) {
+      return null;
+    }
+    try {
+      return new PublicPersonaStore(preferences.getPreferencesSync(context, {
+        name: PUBLIC_PERSONA_STORE_NAME
+      }));
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  private loadPublicPersona(): void {
+    if (this.publicPersonaInitialized) {
+      return;
+    }
+    this.publicPersonaInitialized = true;
+    const store = this.publicPersonaStore();
+    if (store === null) {
+      this.publicPersonaSnapshot = null;
+      this.publicPersonaPhase = 'input';
+      return;
+    }
+    this.publicPersonaSnapshot = store.load();
+    this.publicPersonaPhase = this.publicPersonaSnapshot !== null ? 'complete' :
+      (store.onboardingSeen() ? 'input' : 'welcome');
+  }
+
+  private openPublicPersona(): void {
+    aiLogInfo('[AIPhone][PublicPersonaEntry] open=true');
+    this.showPublicPersonaPage = true;
+  }
+
+  private skipPublicPersonaOnboarding(): void {
+    const store = this.publicPersonaStore();
+    if (store !== null) {
+      store.markOnboardingSeen();
+    }
+    this.publicPersonaPhase = 'input';
+    this.showPublicPersonaPage = false;
+  }
+
+  private async runPublicPersonaDiscovery(jobId: number, profileUrl: string): Promise<void> {
+    try {
+      const candidates = await this.publicPersonaClient.discover(profileUrl, (progress: PublicPersonaProgress): void => {
+        if (jobId === this.publicPersonaJobId) {
+          this.publicPersonaProgress = progress;
+        }
+      });
+      if (jobId !== this.publicPersonaJobId) {
+        return;
+      }
+      this.publicPersonaCandidates = candidates;
+      this.publicPersonaPhase = 'awaiting_confirmation';
+    } catch (error) {
+      if (jobId !== this.publicPersonaJobId) {
+        return;
+      }
+      this.publicPersonaError = error instanceof Error ? error.message : '公开账号查找失败';
+      this.publicPersonaPhase = 'error';
+    }
+  }
+
+  private startPublicPersonaDiscovery(profileUrl: string): void {
+    const store = this.publicPersonaStore();
+    if (store !== null) {
+      store.markOnboardingSeen();
+    }
+    this.publicPersonaJobId++;
+    this.publicPersonaPhase = 'discovering';
+    this.publicPersonaCandidates = [];
+    this.publicPersonaProgress = null;
+    this.publicPersonaError = '';
+    const jobId = this.publicPersonaJobId;
+    void this.runPublicPersonaDiscovery(jobId, profileUrl);
+  }
+
+  private async runPublicPersonaBuild(jobId: number, selected: PublicPersonaCandidate[]): Promise<void> {
+    try {
+      const snapshot = await this.publicPersonaClient.buildSnapshot(selected, this.getSettings(), (progress: PublicPersonaProgress): void => {
+        if (jobId === this.publicPersonaJobId) {
+          this.publicPersonaProgress = progress;
+          this.publicPersonaPhase = 'reading';
+        }
+      });
+      if (jobId !== this.publicPersonaJobId) {
+        return;
+      }
+      const store = this.publicPersonaStore();
+      if (store === null || !store.save(snapshot)) {
+        throw new Error('画像保存失败');
+      }
+      this.publicPersonaSnapshot = snapshot;
+      this.publicPersonaProgress = null;
+      this.publicPersonaPhase = 'complete';
+    } catch (error) {
+      if (jobId !== this.publicPersonaJobId) {
+        return;
+      }
+      this.publicPersonaError = error instanceof Error ? error.message : '画像生成失败';
+      this.publicPersonaPhase = 'error';
+    }
+  }
+
+  private confirmPublicPersona(candidateIds: string[]): void {
+    const selected = this.publicPersonaCandidates.map((candidate: PublicPersonaCandidate): PublicPersonaCandidate => ({
+      id: candidate.id,
+      platform: candidate.platform,
+      profileUrl: candidate.profileUrl,
+      displayName: candidate.displayName,
+      username: candidate.username,
+      avatarUrl: candidate.avatarUrl,
+      exists: true,
+      ownershipConfidence: candidate.ownershipConfidence,
+      ownershipBand: candidate.ownershipBand,
+      selected: candidateIds.indexOf(candidate.id) >= 0,
+      providerState: candidate.providerState,
+      fetchedAt: candidate.fetchedAt,
+      sourceUrl: candidate.sourceUrl
+    }));
+    if (candidateIds.length === 0) {
+      this.publicPersonaError = '至少选择一个已确认账号';
+      return;
+    }
+    this.publicPersonaJobId++;
+    this.publicPersonaPhase = 'reading';
+    this.publicPersonaProgress = null;
+    this.publicPersonaError = '';
+    void this.runPublicPersonaBuild(this.publicPersonaJobId, selected);
+  }
+
+  private savePublicPersonaMarkdown(markdown: string): boolean {
+    if (this.publicPersonaSnapshot === null) {
+      return false;
+    }
+    const updated: PublicPersonaSnapshot = {
+      schemaVersion: 1,
+      personaMarkdown: markdown,
+      primaryAvatarUrl: this.publicPersonaSnapshot.primaryAvatarUrl,
+      sources: this.publicPersonaSnapshot.sources,
+      generatedAt: this.publicPersonaSnapshot.generatedAt,
+      mbtiHidden: this.publicPersonaSnapshot.mbtiHidden
+    };
+    const safe = sanitizePublicPersonaSnapshot(updated as Object);
+    if (safe === null) {
+      this.publicPersonaError = 'Markdown 缺少画像固定章节，未保存。';
+      return false;
+    }
+    this.publicPersonaJobId++;
+    const store = this.publicPersonaStore();
+    if (store === null || !store.save(safe)) {
+      this.publicPersonaError = 'Markdown 保存失败，请重试。';
+      return false;
+    }
+    this.publicPersonaSnapshot = safe;
+    this.publicPersonaError = '';
+    return true;
+  }
+
+  private async runPublicPersonaReinference(jobId: number, snapshot: PublicPersonaSnapshot): Promise<void> {
+    try {
+      const result = await this.publicPersonaClient.reinferMbti(snapshot, this.getSettings());
+      if (jobId !== this.publicPersonaJobId || this.publicPersonaSnapshot === null) {
+        return;
+      }
+      const markdown = replacePublicPersonaMbti(snapshot.personaMarkdown, result.mbtiType, result.mbtiConfidence);
+      const updated: PublicPersonaSnapshot = {
+        schemaVersion: 1,
+        personaMarkdown: markdown,
+        primaryAvatarUrl: snapshot.primaryAvatarUrl,
+        sources: snapshot.sources,
+        generatedAt: snapshot.generatedAt,
+        mbtiHidden: false
+      };
+      const safe = sanitizePublicPersonaSnapshot(updated as Object);
+      if (safe === null) {
+        throw new Error('重新推测结果未通过本地校验');
+      }
+      const store = this.publicPersonaStore();
+      if (store === null || !store.save(safe)) {
+        throw new Error('MBTI 保存失败');
+      }
+      this.publicPersonaSnapshot = safe;
+      this.publicPersonaError = '';
+    } catch (error) {
+      if (jobId === this.publicPersonaJobId) {
+        this.publicPersonaError = error instanceof Error ? error.message : 'MBTI 重新推测失败';
+      }
+    }
+  }
+
+  private reinferPublicPersonaMbti(): void {
+    if (this.publicPersonaSnapshot === null) {
+      return;
+    }
+    this.publicPersonaJobId++;
+    const jobId = this.publicPersonaJobId;
+    void this.runPublicPersonaReinference(jobId, this.publicPersonaSnapshot);
+  }
+
+  private setPublicPersonaMbtiHidden(hidden: boolean): boolean {
+    if (this.publicPersonaSnapshot === null) {
+      return false;
+    }
+    const updated: PublicPersonaSnapshot = {
+      schemaVersion: 1,
+      personaMarkdown: this.publicPersonaSnapshot.personaMarkdown,
+      primaryAvatarUrl: this.publicPersonaSnapshot.primaryAvatarUrl,
+      sources: this.publicPersonaSnapshot.sources,
+      generatedAt: this.publicPersonaSnapshot.generatedAt,
+      mbtiHidden: hidden
+    };
+    const safe = sanitizePublicPersonaSnapshot(updated as Object);
+    if (safe === null) {
+      this.publicPersonaError = 'MBTI 状态未通过本地校验。';
+      return false;
+    }
+    this.publicPersonaJobId++;
+    const store = this.publicPersonaStore();
+    if (store === null || !store.save(safe)) {
+      this.publicPersonaError = 'MBTI 状态保存失败，请重试。';
+      return false;
+    }
+    this.publicPersonaSnapshot = safe;
+    this.publicPersonaError = '';
+    return true;
+  }
+
+  private deletePublicPersona(): boolean {
+    this.publicPersonaJobId++;
+    const store = this.publicPersonaStore();
+    if (store === null || !store.deleteSnapshot()) {
+      this.publicPersonaError = '画像删除失败，请重试。';
+      return false;
+    }
+    this.publicPersonaSnapshot = null;
+    this.publicPersonaCandidates = [];
+    this.publicPersonaProgress = null;
+    this.publicPersonaError = '';
+    this.publicPersonaPhase = 'input';
+    return true;
+  }
+
+  private publicPersonaBusy(): boolean {
+    return this.publicPersonaPhase === 'discovering' || this.publicPersonaPhase === 'reading' ||
+      this.publicPersonaPhase === 'summarizing';
+  }
+
+  private publicPersonaStatus(): string {
+    if (this.publicPersonaBusy()) {
+      return this.publicPersonaProgress === null ? '正在建立画像' : this.publicPersonaProgress.message;
+    }
+    if (this.publicPersonaSnapshot !== null) {
+      return '画像已生成';
+    }
+    if (this.publicPersonaPhase === 'error') {
+      return '画像暂未完成';
+    }
+    return '';
   }
 
   private paymentAccountPreferences(): preferences.Preferences | null {
@@ -2380,6 +2667,7 @@ struct Index {
   }
 
   private async openSocialHub(): Promise<void> {
+    aiLogInfo('[AIPhone][SocialHubEntry] open=true');
     this.showHistory = false;
     this.isBusy = false;
     this.isAwaitingFirstSurface = false;
@@ -5746,6 +6034,42 @@ struct Index {
           this.configureDidiMcpSandboxRuntime(isOn);
         }
       })
+    } else if (this.showPublicPersonaPage) {
+      PublicPersonaPage({
+        phase: this.publicPersonaPhase,
+        candidates: this.publicPersonaCandidates,
+        progress: this.publicPersonaProgress,
+        snapshot: this.publicPersonaSnapshot,
+        errorMessage: this.publicPersonaError,
+        onBack: () => {
+          this.showPublicPersonaPage = false;
+        },
+        onChooseSetup: () => {
+          this.publicPersonaPhase = 'input';
+          this.publicPersonaError = '';
+        },
+        onSkip: () => {
+          this.skipPublicPersonaOnboarding();
+        },
+        onStartDiscovery: (profileUrl: string) => {
+          this.startPublicPersonaDiscovery(profileUrl);
+        },
+        onConfirm: (candidateIds: string[]) => {
+          this.confirmPublicPersona(candidateIds);
+        },
+        onSaveMarkdown: (markdown: string): boolean => {
+          return this.savePublicPersonaMarkdown(markdown);
+        },
+        onReinferMbti: () => {
+          this.reinferPublicPersonaMbti();
+        },
+        onSetMbtiHidden: (hidden: boolean) => {
+          this.setPublicPersonaMbtiHidden(hidden);
+        },
+        onDelete: (): boolean => {
+          return this.deletePublicPersona();
+        }
+      })
     } else {
       HomePage({
         inputText: $inputText,
@@ -5786,8 +6110,8 @@ struct Index {
           this.showConfigPage = true;
           this.refreshComposioAuth();
         },
-        onOpenSocialHub: () => {
-          this.openSocialHub();
+        onOpenPublicPersona: () => {
+          this.openPublicPersona();
         },
         onResetSession: () => {
           this.resetCurrentSession();

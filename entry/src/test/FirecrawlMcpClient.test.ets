@@ -883,6 +883,8 @@ export default function firecrawlMcpClientTest() {
       expect(await statusForFailure(failedPayload(402, 'Payment required'))).assertEqual('credits_exhausted');
       expect(await statusForFailure(failedPayload(400, 'Insufficient credits remaining'))).assertEqual('credits_exhausted');
       expect(await statusForFailure(failedPayload(429, 'Too many requests'))).assertEqual('rate_limited');
+      expect(await statusForFailure(textErrorPayload('Request failed with status code 429')))
+        .assertEqual('rate_limited');
       expect(await statusForFailure(failedPayload(403, 'Forbidden by MCP gateway'))).assertEqual('error');
       expect(await statusForFailure(failedPayload(403, 'Invalid API key'))).assertEqual('needs_auth');
       expect(await statusForFailure(failedPayload(403, 'Bearer credential expired'))).assertEqual('needs_auth');
