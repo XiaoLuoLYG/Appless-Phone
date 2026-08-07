@@ -20,12 +20,14 @@ function template(name) {
 const aggregateCss = template('AGGREGATE_CSS');
 const aggregateJs = template('AGGREGATE_JS');
 const waterfallCss = template('WATERFALL_CSS');
-assert.match(aggregateCss, /\.aggregate-status-message/);
+assert.match(aggregateCss, /\.aggregate-status-sheet-summary/);
 assert.match(aggregateCss, /\.aggregate-status-sheet/);
 assert.match(aggregateJs, /data-status-close/);
 assert.match(waterfallCss, /\.waterfall-entry-floating/);
+assert.match(waterfallCss, /\.waterfall-cinema-card/);
 assert.match(waterfallCss, /\.waterfall-toolbar-primary/);
 assert.match(waterfallCss, /\.waterfall-toolbar-tools/);
+assert.match(waterfallCss, /\.waterfall-source-logo/);
 
 function element() {
   const classes = new Set();
@@ -89,8 +91,9 @@ const window = {
     enabledSources: ['youtube'],
     aggregateHtml: '',
     candidates: [candidate('current'), candidate('next')],
-    sources: []
+    sources: [{ source: 'youtube', phase: 'success' }]
   },
+  __aiphoneWaterfallSourceLogos: { youtube: 'data:image/png;base64,logo' },
   AIPhoneHome: {
     postAction: (value) => actions.push(JSON.parse(value))
   }
@@ -128,7 +131,7 @@ window.__aiphoneApplyWaterfallUpdate({
   enabledSources: [],
   aggregateHtml: '',
   candidates: [candidate('current'), candidate('next')],
-  sources: [],
+  sources: [{ source: 'youtube', phase: 'success' }],
   replenishing: false,
   exhausted: true
 });
@@ -160,6 +163,9 @@ track.emit('click', {
   }
 });
 assert.equal(preferences.classList.contains('active'), true);
+assert.match(preferences.innerHTML, /class="waterfall-source-logo"/);
+assert.match(preferences.innerHTML, /data:image\/png;base64,logo/);
+assert.match(preferences.innerHTML, /data-waterfall-source="youtube"/);
 
 window.__aiphoneApplyWaterfallUpdate({
   surfaceId: 'surface-1',

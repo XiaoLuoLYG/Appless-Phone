@@ -2539,6 +2539,7 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('"enabledSources":["youtube","hackernews"]')).assertLarger(-1);
       expect(html.indexOf('进入发现流')).assertLarger(-1);
       expect(html.indexOf('waterfall-entry-floating')).assertLarger(-1);
+      expect(html.indexOf('waterfall-cinema-card')).assertLarger(-1);
       expect(html.indexOf('来源偏好')).assertLarger(-1);
       expect(html.indexOf('推荐理由')).assertLarger(-1);
       expect(html.indexOf('waterfall-toolbar-primary')).assertLarger(-1);
@@ -2583,19 +2584,30 @@ export default function htmlHomeRendererTest() {
 
       const html = renderHtmlHomeDocument(doc);
 
-      expect(html.indexOf('aggregate-status-message')).assertLarger(-1);
+      expect(html.indexOf('aggregate-status-sheet-summary')).assertLarger(-1);
       expect(html.indexOf('aggregate-status-summary')).assertLarger(-1);
       expect(html.indexOf('来源状态：X')).assertLarger(-1);
       expect(html.indexOf('部分失败')).assertLarger(-1);
       expect(html.indexOf('返回数量暂不可用')).assertLarger(-1);
       expect(html.indexOf('查看详情')).assertLarger(-1);
       expect(html.indexOf('data-status-close')).assertLarger(-1);
-      expect(html.indexOf('-webkit-line-clamp: 2')).assertLarger(-1);
       expect(html.indexOf('data-status-detail="')).assertLarger(-1);
       expect(html.indexOf(longMessage)).assertLarger(-1);
-      const visibleStatus = html.match(/<p class="aggregate-status-message"[^>]*>([\s\S]*?)<\/p>/);
-      expect(visibleStatus === null).assertFalse();
-      expect(visibleStatus?.[1].indexOf('provider diagnostic detail')).assertEqual(-1);
+      const xStatusStart = html.indexOf('data-source="x" data-status="error"');
+      const visibleStatusStart = html.indexOf('<p class="aggregate-status-sheet-summary">', xStatusStart);
+      const visibleStatusEnd = html.indexOf('</p>', visibleStatusStart);
+      const visibleStatus = html.slice(visibleStatusStart, visibleStatusEnd);
+      expect(xStatusStart).assertLarger(-1);
+      expect(visibleStatusStart).assertLarger(-1);
+      expect(visibleStatus.indexOf('X 授权状态需要更新。')).assertLarger(-1);
+      expect(visibleStatus.indexOf('provider diagnostic detail')).assertEqual(-1);
+      const sourceSummary = html.match(/<summary class="aggregate-status-summary"[^>]*>([\s\S]*?)<\/summary>/);
+      expect(sourceSummary === null).assertFalse();
+      expect(sourceSummary?.[1].indexOf('aggregate-app-icon')).assertLarger(-1);
+      expect(sourceSummary?.[1].indexOf('aggregate-status-name')).assertEqual(-1);
+      expect(sourceSummary?.[1].indexOf('aggregate-status-phase')).assertEqual(-1);
+      expect(sourceSummary?.[1].indexOf('aggregate-status-message')).assertEqual(-1);
+      expect(sourceSummary?.[1].indexOf('aggregate-status-count')).assertEqual(-1);
       expect(html.indexOf('data-filter="x"')).assertLarger(-1);
       expect(html.indexOf('waterfall-entry-floating')).assertLarger(-1);
       expect(html.indexOf('data-waterfall-enter')).assertLarger(-1);
