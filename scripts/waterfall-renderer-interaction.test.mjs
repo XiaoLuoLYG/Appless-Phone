@@ -26,6 +26,7 @@ const aggregateJs = template('AGGREGATE_JS');
 const waterfallCss = template('WATERFALL_CSS');
 assert.match(aggregateCss, /\.aggregate-status-sheet-summary/);
 assert.match(aggregateCss, /\.aggregate-status-sheet/);
+assert.match(aggregateCss, /\.aggregate-status-card > summary\s*\{[^}]*border:\s*0/s);
 assert.match(aggregateJs, /data-status-close/);
 assert.match(waterfallCss, /\.waterfall-entry-floating/);
 assert.match(waterfallCss, /\.waterfall-cinema-card/);
@@ -35,6 +36,11 @@ assert.match(waterfallCss, /\.waterfall-source-logo/);
 assert.match(waterfallCss, /\.waterfall-media-cover/);
 assert.match(waterfallCss, /\.waterfall-media-frame/);
 assert.match(waterfallCss, /\.waterfall-card\s*\{[^}]*background:\s*#f4f6f8/s);
+assert.match(waterfallCss, /\.waterfall-media-frame\s*\{[^}]*pointer-events:\s*auto/s);
+assert.doesNotMatch(waterfallCss, /\.waterfall-cinema-card h2\s*\{[^}]*-webkit-line-clamp/s);
+assert.doesNotMatch(waterfallCss, /\.waterfall-cinema-card p\s*\{[^}]*-webkit-line-clamp/s);
+assert.match(waterfallCss, /\.waterfall-preferences label\s*\{[^}]*border:\s*0/s);
+assert.match(waterfallCss, /\.waterfall-toolbar-secondary\s*\{[^}]*border:\s*0/s);
 assert.doesNotMatch(waterfallCss, /\.waterfall-cinema-stage img\s*\{/);
 assert.match(surfaceView, /\.mediaPlayGestureAccess\(false\)/);
 
@@ -89,7 +95,7 @@ const candidate = (id) => ({
   source: 'youtube',
   mediaType: 'video',
   title: id,
-  summary: id === 'current' ? 'B 站视频搜索结果：current summary' : id,
+  summary: id === 'current' ? 'B 站视频搜索结果：current summary tail' : id,
   url: id === 'current' ? 'https://www.youtube.com/watch?v=abc123' : `https://example.test/${id}`,
   coverUrl: id === 'current' ? 'https://example.test/broken-cover.jpg' : '',
   publishedAt: '',
@@ -130,6 +136,7 @@ assert.match(track.innerHTML, /autoplay=1/);
 assert.match(track.innerHTML, /mute=1/);
 assert.equal((track.innerHTML.match(/<iframe/g) ?? []).length, 1);
 assert.match(track.innerHTML, /current summary/);
+assert.match(track.innerHTML, /current summary tail/);
 assert.doesNotMatch(track.innerHTML, /B 站视频搜索结果：/);
 assert.doesNotMatch(track.innerHTML, /waterfall-recommendation/);
 assert.doesNotMatch(track.innerHTML, /标题命中查询/);
