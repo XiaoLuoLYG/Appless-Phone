@@ -105,6 +105,7 @@ import {
 import {
   BimGatedLeaderPlanner,
   BimTurnGate,
+  bimTravelQueryIsComplete,
   originalQueryFromBimPrompt
 } from '../bim/BimRuntime';
 
@@ -758,13 +759,9 @@ function queryFromTravelTaskFields(input: Object, toolId: string): string {
   return '从' + origin + '到' + destination + '，出发日期 ' + date + '，查询' + subject;
 }
 
-function validBimTravelQuery(query: string): boolean {
-  const value = query.trim();
-  const hasRoute = value.indexOf('从') >= 0 && value.indexOf('到') >= 0;
-  const hasYear = value.indexOf('20') >= 0;
-  const hasDateSeparator = value.indexOf('年') >= 0 || value.indexOf('-') >= 0 ||
-    value.indexOf('/') >= 0 || value.indexOf('.') >= 0;
-  return hasRoute && hasYear && hasDateSeparator;
+function validBimTravelQuery(query: string, currentLocalDate: string): boolean {
+  const timestamp = Date.parse(currentLocalDate + 'T00:00:00+08:00');
+  return !Number.isNaN(timestamp) && bimTravelQueryIsComplete(query, new Date(timestamp));
 }
 
 function normalizeCanaryTaskInput(
@@ -794,9 +791,9 @@ function normalizeCanaryTaskInput(
     const isBimTurn = input.text.indexOf('[BIM_CONTEXT]') === 0;
     let query = originalInput.text;
     if (isBimTurn) {
-      if (fieldQuery.length > 0) {
+      if (fieldQuery.length > 0 && validBimTravelQuery(fieldQuery, currentLocalDate)) {
         query = fieldQuery;
-      } else if (typeof taskQuery === 'string' && validBimTravelQuery(taskQuery)) {
+      } else if (typeof taskQuery === 'string' && validBimTravelQuery(taskQuery, currentLocalDate)) {
         query = taskQuery.trim();
       } else {
         throw new Error('BIM_TRAVEL_QUERY_INCOMPLETE');

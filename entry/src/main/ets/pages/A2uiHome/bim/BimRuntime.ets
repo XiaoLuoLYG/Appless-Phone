@@ -14,6 +14,7 @@ import {
   LocalModel,
   UserInputPayload,
   aiLogInfo,
+  calendarDateFromPrompt,
   emptyA2uiSurface,
   extractJsonObjects,
   summarizeAppliedA2uiSurface
@@ -560,11 +561,18 @@ export function bimTravelQueryNeedsDetails(query: string): boolean {
   const asksTravel = value.indexOf('机票') >= 0 || value.indexOf('航班') >= 0 ||
     value.indexOf('飞机') >= 0 || value.indexOf('高铁') >= 0 || value.indexOf('火车') >= 0 ||
     value.indexOf('flight') >= 0 || value.indexOf('train') >= 0;
-  const hasRoute = value.indexOf('从') >= 0 && value.indexOf('到') >= 0;
-  const hasYear = value.indexOf('20') >= 0;
-  const hasDateSeparator = value.indexOf('年') >= 0 || value.indexOf('-') >= 0 ||
-    value.indexOf('/') >= 0 || value.indexOf('.') >= 0;
-  return asksTravel && !(hasRoute && hasYear && hasDateSeparator);
+  const asksSearch = /查|搜|找|看|search|find/.test(value);
+  return asksTravel && asksSearch && !bimTravelQueryIsComplete(value);
+}
+
+export function bimTravelQueryIsComplete(query: string, now: Date = new Date()): boolean {
+  const value = query.trim();
+  const from = value.indexOf('从');
+  const to = value.indexOf('到');
+  const flightNumber = /\b[A-Z0-9]{2,3}\d{1,4}\b/i.exec(value);
+  const hasFlightNumber = flightNumber !== null && /[A-Z]/i.test(flightNumber[0]);
+  return ((from >= 0 && to > from) || hasFlightNumber) &&
+    calendarDateFromPrompt(value, now).length > 0;
 }
 
 // ponytail: O(n) over at most 100 local matters and six semantic candidates; add an indexed store only after device measurements show need.

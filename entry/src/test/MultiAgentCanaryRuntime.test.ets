@@ -191,6 +191,13 @@ const BIM_FLIGHT_FIELDS_ONLY_DECISION: string = '{"personaId":"travel_companion"
   '"input":{"origin":"深圳","destination":"杭州","departureDate":"2026-08-30"},"required":true}],' +
   '"uiIntent":{"purpose":"flight.search","preferredDensity":"comfortable",' +
   '"requiredSections":["flight"]}}';
+const BIM_FLIGHT_MONTH_ONLY_FIELDS_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["flight.search"],"roundAction":"execute","continuationMode":"complete",' +
+  '"dataTasks":[{"localId":"flight","goal":"搜索展会出行航班",' +
+  '"allowedToolIds":["flight.search"],"toolId":"flight.search",' +
+  '"input":{"origin":"北京","destination":"上海","departureDate":"2026-08"},"required":true}],' +
+  '"uiIntent":{"purpose":"flight.search","preferredDensity":"comfortable",' +
+  '"requiredSections":["flight"]}}';
 const BIM_TRAIN_FIELDS_ONLY_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
   '"requestedCapabilityIds":["train.search"],"roundAction":"execute","continuationMode":"complete",' +
   '"dataTasks":[{"localId":"train","goal":"搜索展会出行高铁",' +
@@ -2117,6 +2124,39 @@ export default function multiAgentCanaryRuntimeTest() {
 
       const outcome = await runtime.submit(
         bimPrompt, { text: '帮我查去展会的机票' }
+      ) as MultiAgentSettledOutcome;
+
+      expect(outcome.status).assertEqual('error');
+      expect(providerCalls).assertEqual(0);
+      runtime.dispose();
+    });
+
+    it('rejects a month-only BIM flight date before the provider', 0, async () => {
+      let providerCalls: number = 0;
+      const options: MultiAgentCanaryOptions = canaryOptions(
+        new QueueModel([BIM_FLIGHT_MONTH_ONLY_FIELDS_DECISION]),
+        new CanaryHotelExecutor(),
+        new RecordingOpener(),
+        [],
+        []
+      );
+      options.dataExecutor = undefined;
+      options.structuredToolCall = async (
+        _toolId: string,
+        _prompt: string,
+        _args: Object
+      ): Promise<DataResult> => {
+        providerCalls += 1;
+        return canaryStructuredResult('flight.search', 'flights');
+      };
+      const runtime = new MultiAgentCanaryRuntime(options);
+      const originalQuery = '帮我查从北京到上海 2026年8月的航班';
+      const bimPrompt = '[BIM_CONTEXT]\nContinue the primary matter.\n' +
+        '{"primary":{"id":"bim-expo","title":"展会计划","contextJson":"{}",' +
+        '"appliedSurfaceDigest":{}},"secondary":[],"query":"' + originalQuery + '"}';
+
+      const outcome = await runtime.submit(
+        bimPrompt, { text: originalQuery }
       ) as MultiAgentSettledOutcome;
 
       expect(outcome.status).assertEqual('error');
