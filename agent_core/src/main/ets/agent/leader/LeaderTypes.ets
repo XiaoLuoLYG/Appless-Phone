@@ -41,6 +41,71 @@ export interface LeaderUiIntent {
   requiredSections: string[];
 }
 
+export interface LeaderBimSuggestion {
+  title: string;
+  summary: string;
+  reason: string;
+  keywords: string[];
+}
+
+export type LeaderBimDashboardItemKind =
+  'progress' | 'metric' | 'person' | 'timeline' | 'task' |
+  'hotel' | 'flight' | 'transport' | 'event';
+
+export interface LeaderBimDashboardItem {
+  kind: LeaderBimDashboardItemKind;
+  title: string;
+  value: string;
+  detail: string;
+  status: string;
+}
+
+function validDashboardKind(value: string): boolean {
+  return value === 'progress' || value === 'metric' || value === 'person' ||
+    value === 'timeline' || value === 'task' || value === 'hotel' ||
+    value === 'flight' || value === 'transport' || value === 'event';
+}
+
+function validDashboardText(value: string, maximum: number, required: boolean = false): boolean {
+  return typeof value === 'string' && value.length <= maximum && value === value.trim() &&
+    (!required || value.length > 0);
+}
+
+export function validLeaderBimDashboardItems(
+  items: LeaderBimDashboardItem[] | undefined
+): boolean {
+  if (items === undefined) return true;
+  if (!Array.isArray(items) || items.length > 32) return false;
+  const seen: string[] = [];
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index];
+    if (item === null || item === undefined ||
+      Object.keys(item).sort().join(',') !== 'detail,kind,status,title,value' ||
+      !validDashboardKind(item.kind) ||
+      !validDashboardText(item.title, 80, true) ||
+      !validDashboardText(item.value, 80) ||
+      !validDashboardText(item.detail, 240) ||
+      !validDashboardText(item.status, 40)) return false;
+    const identity = item.kind + '\n' + item.title;
+    if (seen.indexOf(identity) >= 0) return false;
+    seen.push(identity);
+  }
+  return true;
+}
+
+export interface LeaderBimContextUpdate {
+  summary: string;
+  facts: string[];
+  constraints: string[];
+  decisions: string[];
+  entities: string[];
+  timeAnchors: string[];
+  locations: string[];
+  commitments: string[];
+  keywords: string[];
+  dashboardItems?: LeaderBimDashboardItem[];
+}
+
 export interface LeaderDecision {
   personaId: string;
   skillId: string;
@@ -52,6 +117,8 @@ export interface LeaderDecision {
   normalizedActionInputText?: string;
   actionIntent?: LeaderActionIntent;
   answer?: string;
+  bimSuggestion?: LeaderBimSuggestion;
+  bimContextUpdate?: LeaderBimContextUpdate;
   reasonCode: string;
 }
 

@@ -51,6 +51,7 @@ const CHINA_HOTEL_PLACE_MARKERS: string[] = [
   '西安', '苏州', '厦门', '青岛', '长沙', '昆明', '海口', '三亚', '东莞', '佛山',
   '郑州', '宁波', '无锡', '合肥', '福州', '济南', '沈阳', '大连'
 ];
+const TOKYO_HOTEL_PLACE_MARKERS: string[] = ['东京'];
 
 export interface HotelPlannerIdFactory {
   nextId(prefix: string): string;
@@ -151,13 +152,14 @@ function explicitHotelPlaceAndCountry(query: string, raw: HotelSearchModelArgs):
   if (destination.length === 0 ||
     typeof raw.place !== 'string' || raw.place !== destination ||
     raw.placeType !== expectedPlaceType ||
-    typeof raw.countryCode !== 'string' || raw.countryCode.trim() !== 'CN') {
+    typeof raw.countryCode !== 'string') {
     return false;
   }
   for (let index = 0; index < CHINA_HOTEL_PLACE_MARKERS.length; index++) {
-    if (raw.place.indexOf(CHINA_HOTEL_PLACE_MARKERS[index]) >= 0) {
-      return true;
-    }
+    if (raw.place.indexOf(CHINA_HOTEL_PLACE_MARKERS[index]) >= 0) return raw.countryCode.trim() === 'CN';
+  }
+  for (let index = 0; index < TOKYO_HOTEL_PLACE_MARKERS.length; index++) {
+    if (raw.place.indexOf(TOKYO_HOTEL_PLACE_MARKERS[index]) >= 0) return raw.countryCode.trim() === 'JP';
   }
   return false;
 }

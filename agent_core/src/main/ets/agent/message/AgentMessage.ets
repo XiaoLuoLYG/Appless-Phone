@@ -1,3 +1,5 @@
+import { LeaderBimContextUpdate, LeaderBimSuggestion } from '../leader/LeaderTypes';
+
 export enum AgentMessageType {
   INPUT_USER = 'INPUT.USER',
   TASK_CREATE_UI = 'TASK.CREATE.UI',
@@ -68,6 +70,8 @@ export interface TurnResultPayload {
   message: string;
   personaId?: string;
   skillId?: string;
+  bimSuggestion?: LeaderBimSuggestion;
+  bimContextUpdate?: LeaderBimContextUpdate;
 }
 
 export interface UiTaskPayload {

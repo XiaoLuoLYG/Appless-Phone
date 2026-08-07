@@ -7,6 +7,8 @@ import {
   DataTaskAuthorizer,
   DataTaskExecutor,
   DataTaskPlanner,
+  LeaderBimContextUpdate,
+  LeaderBimSuggestion,
   LeaderCurrentLocalDateProvider,
   LeaderPlanner,
   LeaderDataTaskInputNormalizer,
@@ -34,6 +36,8 @@ export interface MultiAgentSettledOutcome {
   message: string;
   personaId: string;
   skillId: string;
+  bimSuggestion?: LeaderBimSuggestion;
+  bimContextUpdate?: LeaderBimContextUpdate;
 }
 
 export type RuntimeOwner = CoreRuntimeOwner;

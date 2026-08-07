@@ -5,6 +5,10 @@ import {
   ConversationContext,
   InputUserPayload,
   LeaderActionIntent,
+  LeaderBimContextUpdate,
+  LeaderBimDashboardItem,
+  LeaderBimDashboardItemKind,
+  LeaderBimSuggestion,
   LeaderDataTaskInputNormalizer,
   LeaderDecision,
   LeaderDecisionDataTask,
@@ -40,6 +44,12 @@ const DECISION_KEYS: string[] = [
 const DATA_TASK_KEYS: string = 'allowedToolIds,goal,input,localId,required,toolId';
 const UI_INTENT_KEYS: string = 'preferredDensity,purpose,requiredSections';
 const ACTION_INTENT_KEYS: string = 'allowedActionIds,goal';
+const BIM_SUGGESTION_KEYS: string = 'keywords,reason,summary,title';
+const BIM_CONTEXT_UPDATE_KEYS: string =
+  'commitments,constraints,decisions,entities,facts,keywords,locations,summary,timeAnchors';
+const BIM_CONTEXT_UPDATE_DASHBOARD_KEYS: string =
+  'commitments,constraints,dashboardItems,decisions,entities,facts,keywords,locations,summary,timeAnchors';
+const BIM_DASHBOARD_ITEM_KEYS: string = 'detail,kind,status,title,value';
 const ANSWER_FIELD_RULE: string = 'For roundAction answer or clarify, include answer as a non-empty string. ' +
   'For roundAction execute, omit answer.';
 const REASON_CODE_FIELD_RULE: string = 'Omit reasonCode. The host creates deterministic diagnostic reason metadata.';
@@ -54,6 +64,28 @@ const FULL_DECISION_CONTRACT: string =
   'set dataTasks to [], and include a non-empty answer. ' +
   'uiIntent must contain exactly purpose, preferredDensity, and requiredSections. Choose purpose, preferredDensity, ' +
   'and requiredSections from the current user request and real recentObservations when present; never omit them.';
+const BIM_FIELD_RULES: string =
+  'bimSuggestion is optional. Include it only when the subject remains useful after this answer, ' +
+  'needs later progress, and has a stable boundary. Omit it for one-off lookup, explanation, ' +
+  'translation, reminder-only, or an existing BIM context. ' +
+  'bimContextUpdate is required for answer or clarify when the input contains the internal ' +
+  '[BIM_CONTEXT] marker; omit it from execute decisions until the terminal answer. ' +
+  'When you emit bimSuggestion, also emit bimContextUpdate as its complete initial state. ' +
+  'Return current facts and constraints after incorporating real observations. ' +
+  'When included, emit every core bimContextUpdate schema field and dashboardItems. ' +
+  'dashboardItems is the latest state, not a history. Use only kind progress, metric, person, timeline, task, ' +
+  'hotel, flight, transport, or event. Every item has exactly kind, title, value, detail, and status. ' +
+  'When bimSuggestion is present, dashboardItems must contain at least one known goal, status, or next step; ' +
+  'represent unknown details as pending instead of returning an empty array. ' +
+  'When a natural-language request contains a date or stage plus ongoing follow-up, participants plus ongoing ' +
+  'follow-up, or another stable long-running matter signal, treat it as BIM rather than Persona Memory: do not ' +
+  'select memory.update; ' +
+  'return a bimSuggestion and complete initial bimContextUpdate at the terminal answer. Stable preferences and ' +
+  'background facts without those matter signals may still use memory.update. ' +
+  'Write user-visible dashboard title, value, detail, and status in concise Chinese. ' +
+  'Use hotel, flight, transport, and event only for outcomes explicitly confirmed by the user or a real provider; ' +
+  'never turn candidates or intermediate search results into confirmed cards. Use [] when there is no item. ' +
+  'Do not copy the conversation transcript and do not claim unverified external completion.';
 const REQUEST_SCOPE_CONTRACT: string =
   'Request scope contract: The current user request defines a closed capability and source set. ' +
   'Persona, active Skill, saved Memory, defaults, and available tools may shape behavior but must not add an ' +
@@ -66,9 +98,18 @@ const REQUEST_SCOPE_CONTRACT: string =
   'against that closed set; do not output the check.';
 const LEADER_SYSTEM_PROMPT: string = 'Return exactly one JSON object and nothing else. ' +
   'Do not include Thought, markdown, or code fences. ' + ANSWER_FIELD_RULE + ' ' + REASON_CODE_FIELD_RULE + ' ' +
-  CONTINUATION_MODE_FIELD_RULE + ' ' + REQUEST_SCOPE_CONTRACT + ' ' + FULL_DECISION_CONTRACT;
+  CONTINUATION_MODE_FIELD_RULE + ' ' + REQUEST_SCOPE_CONTRACT + ' ' + FULL_DECISION_CONTRACT + ' ' +
+  BIM_FIELD_RULES;
 const REPAIR_INSTRUCTION: string = 'Correction: previous decision rejected by strict schema. ' +
   'Return one corrected decision matching the schema exactly. ' + FULL_DECISION_CONTRACT;
+const BIM_MEMORY_UPDATE_REPAIR_INSTRUCTION: string =
+  'Correction: BIM state is separate from Persona Memory. Return answer or clarify with ' +
+  'requestedCapabilityIds=[], dataTasks=[], no actionIntent, and a complete bimContextUpdate.';
+const BIM_NEW_MATTER_MEMORY_UPDATE_REPAIR_INSTRUCTION: string =
+  'Correction: this request describes a changing long-running matter, not a stable Persona Memory preference. ' +
+  'Return answer or clarify with requestedCapabilityIds=[], dataTasks=[], no actionIntent, a bimSuggestion, ' +
+  'and a complete initial bimContextUpdate including dashboardItems. Preserve memory.update only for stable ' +
+  'preferences or background facts that do not describe an ongoing matter.';
 const COMPLETED_TOOL_REUSE_ERROR: string = 'LEADER_COMPLETED_TOOL_REUSE';
 const UNBOUND_LATER_TOOL_ERROR: string = 'LEADER_UNBOUND_LATER_TOOL';
 const SAME_ROUND_DEPENDENCY_ERROR: string = 'LEADER_SAME_ROUND_DEPENDENCY';
@@ -77,6 +118,11 @@ const TASK_INPUT_INVALID_ERROR: string = 'LEADER_TASK_INPUT_INVALID';
 const ACTION_OWNED_DATA_TASK_ERROR: string = 'LEADER_ACTION_OWNED_DATA_TASK';
 const SKILL_CAPABILITY_ERROR: string = 'LEADER_SKILL_CAPABILITY_VIOLATION';
 const PERSONA_SKILL_SWITCH_ERROR: string = 'LEADER_PERSONA_SKILL_SWITCH';
+const BIM_MEMORY_UPDATE_ERROR: string = 'LEADER_BIM_MEMORY_UPDATE_FORBIDDEN';
+const BIM_NEW_MATTER_MEMORY_UPDATE_ERROR: string =
+  'LEADER_NEW_BIM_MEMORY_UPDATE_FORBIDDEN';
+const BIM_NEW_MATTER_CONTRACT_ERROR: string =
+  'LEADER_NEW_BIM_CONTRACT_FORBIDDEN';
 const EXPLICIT_MAPS_SELECTION_ERROR: string = 'LEADER_EXPLICIT_MAPS_SELECTION';
 const PREMATURE_MAPS_DETAILS_ERROR: string = 'LEADER_PREMATURE_MAPS_DETAILS';
 const PREMATURE_CALENDAR_UPDATE_ACTION_ERROR: string =
@@ -88,6 +134,34 @@ const PREMATURE_CALENDAR_DELETE_ACTION_ERROR: string =
 const REQUESTED_CAPABILITY_MISMATCH_ERROR: string =
   'Leader requested capabilities do not exactly match its execution plan.';
 const REPAIR_SCOPE_INVALID_ERROR: string = 'LEADER_REPAIR_SCOPE_INVALID';
+
+// ponytail: keep the boundary at the existing Leader validation seam; replace this lexical guard with a
+// structured matter intent only when the model contract has one.
+function isLongRunningMatterRequest(text: string): boolean {
+  const normalized: string = text.trim().toLowerCase();
+  const hasDateOrStage: boolean = /\d{4}[年/-]\d{1,2}[月/-]\d{1,2}/.test(normalized) ||
+    normalized.indexOf('长期') >= 0 || normalized.indexOf('截止') >= 0 ||
+    normalized.indexOf('阶段') >= 0 || normalized.indexOf('下个月') >= 0 ||
+    normalized.indexOf('下周') >= 0 || normalized.indexOf('明年') >= 0;
+  const hasParticipants: boolean = normalized.indexOf('参加') >= 0 ||
+    normalized.indexOf('参与') >= 0 || normalized.indexOf('宾客') >= 0 ||
+    normalized.indexOf('人数') >= 0 || normalized.indexOf('同事') >= 0 ||
+    normalized.indexOf('团队') >= 0 || normalized.indexOf('成员') >= 0 ||
+    normalized.indexOf('家人') >= 0 || normalized.indexOf('朋友') >= 0 ||
+    normalized.indexOf('多人') >= 0;
+  const hasOngoingWork: boolean = normalized.indexOf('后续') >= 0 ||
+    normalized.indexOf('持续') >= 0 || normalized.indexOf('跟进') >= 0 ||
+    normalized.indexOf('进度') >= 0 || normalized.indexOf('待办') >= 0 ||
+    normalized.indexOf('准备') >= 0 || normalized.indexOf('规划') >= 0 ||
+    normalized.indexOf('计划') >= 0 || normalized.indexOf('分阶段') >= 0 ||
+    normalized.indexOf('每周') >= 0 || normalized.indexOf('每月') >= 0;
+  const explicitMatter: boolean = normalized.indexOf('记在心上') >= 0 ||
+    normalized.indexOf('长期事项') >= 0 || normalized.indexOf('长期任务') >= 0;
+  return (hasDateOrStage && hasOngoingWork) ||
+    (hasParticipants && hasOngoingWork) ||
+    (explicitMatter && (hasDateOrStage || hasParticipants || hasOngoingWork));
+}
+
 const COMPLETED_TOOL_REPAIR_INSTRUCTION: string =
   'Correction: previous decision repeated a completed Data tool. ' +
   'Every completed Data tool is terminal for this turn. Return answer or clarify with a truthful summary, ' +
@@ -125,6 +199,13 @@ const TASK_INPUT_REPAIR_INSTRUCTION: string =
   'registered input shape. Keep personaId, skillId, requestedCapabilityIds, roundAction, each Data task localId, ' +
   'goal, allowedToolIds, toolId and required value, uiIntent, actionIntent, answer, and Data task order exactly ' +
   'unchanged. The only permitted difference is inside dataTasks[].input. ' + FULL_DECISION_CONTRACT;
+const BIM_STATE_ONLY_REPAIR_INSTRUCTION: string =
+  'Correction: LEADER_TASK_INPUT_INVALID during a BIM turn. First decide whether the user explicitly requested ' +
+  'the selected business tool. A BIM state-only update, including participants, room preferences, dates, budgets, ' +
+  'constraints, or decisions, is not a tool request. For a state-only update, return answer with ' +
+  'requestedCapabilityIds=[], dataTasks=[], no actionIntent, and a complete bimContextUpdate. Otherwise change ' +
+  'only dataTasks[].input for the existing explicit tool request. Never invent a provider result or claim an ' +
+  'external action completed. ' + FULL_DECISION_CONTRACT;
 const CALENDAR_DELETE_SELECTION_CONTRACT: string =
   'Calendar delete contract: for a natural-language delete without a real Event ID on the current surface, ' +
   'select calendar.events.search as the read-first Data task. Do not select calendar.event.delete as a zero-Data ' +
@@ -266,7 +347,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     let sameRoundConsumerTaskToolIds: string[] = [];
     let rejectedDecision: LeaderDecision | null = null;
     try {
-      const decision: LeaderDecision = this.parseDecision(output, context);
+      const decision: LeaderDecision = this.parseDecision(output, context, input.text);
       this.normalizeModelContinuationDecision(decision);
       this.normalizeIncompleteSerialCalendarCreate(
         message, input, decision, currentLocalDate, round
@@ -297,6 +378,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         decision,
         this.currentTurnCompletedToolIds(message, input, context, round)
       );
+      this.rejectNewMatterMemoryUpdate(input, decision);
+      this.rejectNewMatterContract(input, decision);
       this.rejectUnboundLaterTool(
         input,
         decision,
@@ -322,7 +405,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
           input
         );
         try {
-          const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
+          const repairedDecision: LeaderDecision = this.parseDecision(repaired, context, input.text);
           this.normalizeModelContinuationDecision(repairedDecision);
           if (rejectedDecision === null ||
             !this.explicitMapsSelectionOnlyRepair(rejectedDecision, repairedDecision)) {
@@ -341,6 +424,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
             repairedDecision,
             this.currentTurnCompletedToolIds(message, input, context, round)
           );
+          this.rejectNewMatterMemoryUpdate(input, repairedDecision);
+          this.rejectNewMatterContract(input, repairedDecision);
           this.rejectUnboundLaterTool(
             input,
             repairedDecision,
@@ -365,7 +450,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
           if (!this.prematureCalendarUpdateActionOnlyRepair(output, repaired)) {
             throw new Error(PREMATURE_CALENDAR_UPDATE_ACTION_ERROR);
           }
-          const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
+          const repairedDecision: LeaderDecision = this.parseDecision(repaired, context, input.text);
           this.normalizeModelContinuationDecision(repairedDecision);
           this.rejectSkillCapabilityViolation(repairedDecision, context);
           this.rejectOverlappingVideoTools(repairedDecision);
@@ -380,6 +465,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
             repairedDecision,
             this.currentTurnCompletedToolIds(message, input, context, round)
           );
+          this.rejectNewMatterMemoryUpdate(input, repairedDecision);
+          this.rejectNewMatterContract(input, repairedDecision);
           this.rejectUnboundLaterTool(
             input,
             repairedDecision,
@@ -404,7 +491,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
           if (!this.prematureMapsDetailsOnlyRepair(output, repaired)) {
             throw new Error(PREMATURE_MAPS_DETAILS_ERROR);
           }
-          const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
+          const repairedDecision: LeaderDecision = this.parseDecision(repaired, context, input.text);
           this.normalizeModelContinuationDecision(repairedDecision);
           this.rejectSkillCapabilityViolation(repairedDecision, context);
           this.rejectOverlappingVideoTools(repairedDecision);
@@ -419,6 +506,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
             repairedDecision,
             this.currentTurnCompletedToolIds(message, input, context, round)
           );
+          this.rejectNewMatterMemoryUpdate(input, repairedDecision);
+          this.rejectNewMatterContract(input, repairedDecision);
           this.rejectUnboundLaterTool(
             input,
             repairedDecision,
@@ -452,30 +541,57 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       } else if (error instanceof Error && error.message === OVERLAPPING_VIDEO_TOOLS_ERROR) {
         correction = OVERLAPPING_VIDEO_TOOLS_REPAIR_INSTRUCTION;
       } else if (error instanceof Error && error.message === TASK_INPUT_INVALID_ERROR) {
-        correction = TASK_INPUT_REPAIR_INSTRUCTION + '\nRejected decision: ' + output;
+        correction = input.text.indexOf('[BIM_CONTEXT]') === 0 ?
+          BIM_STATE_ONLY_REPAIR_INSTRUCTION + '\nRejected decision: ' + output :
+          TASK_INPUT_REPAIR_INSTRUCTION + '\nRejected decision: ' + output;
       } else if (error instanceof Error && error.message === ACTION_OWNED_DATA_TASK_ERROR) {
         correction = ACTION_OWNED_DATA_TASK_REPAIR_INSTRUCTION + '\nRejected decision: ' + output;
       } else if (error instanceof Error && error.message === SKILL_CAPABILITY_ERROR) {
         correction = SKILL_CAPABILITY_REPAIR_INSTRUCTION + '\nRejected decision: ' + output;
+      } else if (error instanceof Error && error.message === BIM_MEMORY_UPDATE_ERROR) {
+        correction = BIM_MEMORY_UPDATE_REPAIR_INSTRUCTION;
+      } else if (error instanceof Error && error.message === BIM_NEW_MATTER_MEMORY_UPDATE_ERROR) {
+        correction = BIM_NEW_MATTER_MEMORY_UPDATE_REPAIR_INSTRUCTION;
+      } else if (error instanceof Error && error.message === BIM_NEW_MATTER_CONTRACT_ERROR) {
+        correction = BIM_NEW_MATTER_MEMORY_UPDATE_REPAIR_INSTRUCTION;
       }
+      const bimMemoryUpdateRepair: boolean = error instanceof Error &&
+        (error.message === BIM_MEMORY_UPDATE_ERROR ||
+          error.message === BIM_NEW_MATTER_MEMORY_UPDATE_ERROR ||
+          error.message === BIM_NEW_MATTER_CONTRACT_ERROR);
+      const repairScope: LeaderRepairScope = bimMemoryUpdateRepair ? {
+        requestedCapabilityIds: [],
+        dataCapabilityIds: [],
+        actionCapabilityIds: [],
+        roundAction: frozenScope.roundAction
+      } : frozenScope;
       const actionOwnedRepair: boolean = error instanceof Error &&
         error.message === ACTION_OWNED_DATA_TASK_ERROR;
+      const bimStateOnlyRepair: boolean = error instanceof Error &&
+        error.message === TASK_INPUT_INVALID_ERROR &&
+        input.text.indexOf('[BIM_CONTEXT]') === 0;
       const allowsTerminalExecutionDrop: boolean = error instanceof Error &&
         (error.message === COMPLETED_TOOL_REUSE_ERROR ||
           error.message === UNBOUND_LATER_TOOL_ERROR ||
           error.message === PREMATURE_CALENDAR_DELETE_ACTION_ERROR ||
-          error.message === PREMATURE_CALENDAR_UPDATE_AFTER_SEARCH_ERROR);
+          error.message === PREMATURE_CALENDAR_UPDATE_AFTER_SEARCH_ERROR ||
+          error.message === BIM_MEMORY_UPDATE_ERROR ||
+          error.message === BIM_NEW_MATTER_MEMORY_UPDATE_ERROR ||
+          error.message === BIM_NEW_MATTER_CONTRACT_ERROR);
       correction += '\nFrozen requestedCapabilityIds: ' +
-        JSON.stringify(frozenScope.requestedCapabilityIds) +
+        JSON.stringify(repairScope.requestedCapabilityIds) +
         '\nFrozen Data-position capability IDs: ' +
-        JSON.stringify(frozenScope.dataCapabilityIds) +
+        JSON.stringify(repairScope.dataCapabilityIds) +
         '\nFrozen actionIntent-position capability IDs: ' +
-        JSON.stringify(frozenScope.actionCapabilityIds);
+        JSON.stringify(repairScope.actionCapabilityIds);
       correction += actionOwnedRepair ?
         '\nAction-owned repair freeze: preserve personaId, skillId, requestedCapabilityIds, roundAction, answer, ' +
           'uiIntent, each non-Action Data task, all existing Action IDs, and the original request intent exactly. ' +
           'Move exactly one Action-only capability ID from Data positions to actionIntent.allowedActionIds. ' +
           'Do not add, remove, reorder, or change any other field or capability.' :
+        bimStateOnlyRepair ?
+        '\nFor a BIM state-only answer, clear all three frozen capability sets and preserve personaId and skillId. ' +
+          'For an explicit business-tool request, preserve all frozen sets and change only dataTasks[].input.' :
         allowsTerminalExecutionDrop ?
         '\nA corrected answer or clarify decision may clear both execution-position sets to empty. ' +
           'It must preserve requestedCapabilityIds exactly and must not introduce any new Data or Action capability.' :
@@ -484,19 +600,23 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       const repaired: string = await this.completeBounded(prompt + '\n' + correction, input);
       try {
         const repairedScope: LeaderRepairScope | null = this.repairScope(repaired);
-        if (repairedScope === null || (actionOwnedRepair ?
+        const repairedDecision: LeaderDecision = this.parseDecision(repaired, context, input.text);
+        this.normalizeModelContinuationDecision(repairedDecision);
+        const acceptedBimStateOnlyRepair: boolean = bimStateOnlyRepair &&
+          rejectedDecision !== null &&
+          this.bimStateOnlyRepair(rejectedDecision, repairedDecision);
+        if (repairedScope === null || (!acceptedBimStateOnlyRepair && (actionOwnedRepair ?
           !this.sameActionOwnedRepair(output, repaired, context, frozenScope, repairedScope) :
-          !this.sameRepairScope(frozenScope, repairedScope, allowsTerminalExecutionDrop))) {
+          !this.sameRepairScope(repairScope, repairedScope, allowsTerminalExecutionDrop)))) {
           throw new Error(REPAIR_SCOPE_INVALID_ERROR);
         }
-        const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
-        this.normalizeModelContinuationDecision(repairedDecision);
         if (error instanceof Error && error.message === SKILL_CAPABILITY_ERROR &&
           (rejectedDecision === null || !this.skillOnlyRepair(rejectedDecision, repairedDecision))) {
           throw new Error(SKILL_CAPABILITY_ERROR);
         }
         this.rejectSkillCapabilityViolation(repairedDecision, context);
         if (error instanceof Error && error.message === TASK_INPUT_INVALID_ERROR &&
+          !acceptedBimStateOnlyRepair &&
           (rejectedDecision === null || !this.inputOnlyRepair(rejectedDecision, repairedDecision))) {
           throw new Error(TASK_INPUT_INVALID_ERROR);
         }
@@ -521,6 +641,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
           repairedDecision,
           this.currentTurnCompletedToolIds(message, input, context, round)
         );
+        this.rejectNewMatterMemoryUpdate(input, repairedDecision);
+        this.rejectNewMatterContract(input, repairedDecision);
         this.rejectUnboundLaterTool(
           input,
           repairedDecision,
@@ -559,6 +681,36 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     }
   }
 
+  private rejectNewMatterMemoryUpdate(
+    input: InputUserPayload,
+    decision: LeaderDecision
+  ): void {
+    if (input.text.indexOf('[BIM_CONTEXT]') < 0 &&
+      decision.requestedCapabilityIds.indexOf('memory.update') >= 0 &&
+      isLongRunningMatterRequest(input.text)) {
+      throw new Error(BIM_NEW_MATTER_MEMORY_UPDATE_ERROR);
+    }
+  }
+
+  private rejectNewMatterContract(
+    input: InputUserPayload,
+    decision: LeaderDecision
+  ): void {
+    if (input.text.indexOf('[BIM_CONTEXT]') >= 0 || !isLongRunningMatterRequest(input.text)) {
+      return;
+    }
+    const hasInitialState: boolean = decision.bimSuggestion !== undefined &&
+      decision.bimContextUpdate !== undefined &&
+      decision.bimContextUpdate.dashboardItems !== undefined &&
+      decision.bimContextUpdate.dashboardItems.length > 0;
+    const hasExecution: boolean = decision.requestedCapabilityIds.length > 0 ||
+      decision.dataTasks.length > 0 || decision.actionIntent !== undefined ||
+      decision.roundAction === 'execute';
+    if (!hasInitialState || hasExecution) {
+      throw new Error(BIM_NEW_MATTER_CONTRACT_ERROR);
+    }
+  }
+
   private inputOnlyRepair(original: LeaderDecision, repaired: LeaderDecision): boolean {
     if (original.personaId !== repaired.personaId ||
       original.skillId !== repaired.skillId ||
@@ -584,6 +736,19 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       }
     }
     return true;
+  }
+
+  private bimStateOnlyRepair(original: LeaderDecision, repaired: LeaderDecision): boolean {
+    return original.personaId === repaired.personaId &&
+      original.skillId === repaired.skillId &&
+      original.dataTasks.length > 0 &&
+      (repaired.roundAction === 'answer' || repaired.roundAction === 'clarify') &&
+      repaired.requestedCapabilityIds.length === 0 &&
+      repaired.dataTasks.length === 0 &&
+      repaired.actionIntent === undefined &&
+      repaired.answer !== undefined &&
+      repaired.answer.trim().length > 0 &&
+      repaired.bimContextUpdate !== undefined;
   }
 
   private skillOnlyRepair(original: LeaderDecision, repaired: LeaderDecision): boolean {
@@ -1360,7 +1525,11 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     throw new Error(PREMATURE_CALENDAR_UPDATE_AFTER_SEARCH_ERROR);
   }
 
-  private parseDecision(output: string, context: LeaderPlanningContext): LeaderDecision {
+  private parseDecision(
+    output: string,
+    context: LeaderPlanningContext,
+    inputText: string
+  ): LeaderDecision {
     let trimmed: string = output.trim();
     if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
       throw new Error('Leader planner requires exactly one JSON object.');
@@ -1382,7 +1551,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     if (this.hasDuplicateObjectKeys(trimmed)) {
       throw new Error('Leader planner JSON contains duplicate object keys.');
     }
-    return this.decision(parsed, context);
+    return this.decision(parsed, context, inputText);
   }
 
   private hasDuplicateObjectKeys(json: string): boolean {
@@ -1483,7 +1652,14 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         '"toolId":"string","input":{},"required":true}],"uiIntent":{' +
         '"purpose":"string","preferredDensity":"string","requiredSections":["string"]},' +
         '"actionIntent":{"goal":"string","allowedActionIds":["string"]} optional,' +
-        '"answer":"required non-empty string for answer|clarify; omit for execute"}.',
+        '"answer":"required non-empty string for answer|clarify; omit for execute",' +
+        '"bimSuggestion":{"title":"string","summary":"string","reason":"string",' +
+        '"keywords":["string"]} optional,"bimContextUpdate":{"summary":"string",' +
+        '"facts":["string"],"constraints":["string"],"decisions":["string"],' +
+        '"entities":["string"],"timeAnchors":["string"],"locations":["string"],' +
+        '"commitments":["string"],"keywords":["string"],"dashboardItems":[' +
+        '{"kind":"progress|metric|person|timeline|task|hotel|flight|transport|event",' +
+        '"title":"string","value":"string","detail":"string","status":"string"}]} optional}.',
       ANSWER_FIELD_RULE,
       REASON_CODE_FIELD_RULE,
       CONTINUATION_MODE_FIELD_RULE,
@@ -1524,6 +1700,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       OBSERVATION_REUSE_CONTRACT,
       DATA_SCOPE_CONTRACT,
       EXPLICIT_SERIAL_SEQUENCE_CONTRACT,
+      BIM_FIELD_RULES,
       'Never emit provider facts, action args, A2UI, credentials, or unregistered tool IDs.',
       hotelSearchPlanningContract(currentLocalDate),
       'Maximum planning rounds: 3.',
@@ -1613,12 +1790,18 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     return Number.isInteger(round) && round > 0 ? round : 0;
   }
 
-  private decision(parsed: Object, context: LeaderPlanningContext): LeaderDecision {
+  private decision(
+    parsed: Object,
+    context: LeaderPlanningContext,
+    inputText: string
+  ): LeaderDecision {
     if (parsed === null || Array.isArray(parsed)) {
       throw new Error('Leader decision contains missing or unknown fields.');
     }
     const decisionKeys: string = Object.keys(parsed)
       .filter((key: string): boolean => key !== 'reasonCode' && key !== 'continuationMode')
+      .filter((key: string): boolean => key !== 'bimSuggestion')
+      .filter((key: string): boolean => key !== 'bimContextUpdate')
       .sort()
       .join(',');
     if (DECISION_KEYS.indexOf(decisionKeys) < 0) {
@@ -1634,6 +1817,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     const reasonCode = values['reasonCode'];
     const continuationMode = values['continuationMode'];
     const rawRequestedCapabilities = values['requestedCapabilityIds'];
+    const rawBimSuggestion = values['bimSuggestion'];
+    const rawBimContextUpdate = values['bimContextUpdate'];
     if (typeof personaId !== 'string' || personaId.trim().length === 0 ||
       typeof skillId !== 'string' ||
       !this.validRoundAction(roundAction) ||
@@ -1718,7 +1903,180 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     if (actionIntent !== null) {
       decision.actionIntent = actionIntent;
     }
+    const hasBimContext: boolean = inputText.indexOf('[BIM_CONTEXT]') >= 0;
+    if (rawBimSuggestion !== undefined) {
+      if (hasBimContext && rawBimContextUpdate === undefined) {
+        throw new Error('Leader BIM suggestion is forbidden for an existing BIM context.');
+      }
+      if (!hasBimContext) {
+        decision.bimSuggestion = this.bimSuggestion(rawBimSuggestion);
+      }
+    }
+    if (hasBimContext && decision.requestedCapabilityIds.indexOf('memory.update') >= 0) {
+      throw new Error(BIM_MEMORY_UPDATE_ERROR);
+    }
+    if (rawBimContextUpdate !== undefined) {
+      if (!hasBimContext && decision.bimSuggestion === undefined) {
+        throw new Error('Leader BIM context update requires the internal BIM marker.');
+      }
+      decision.bimContextUpdate = this.bimContextUpdate(rawBimContextUpdate);
+      if (decision.bimSuggestion !== undefined &&
+        decision.bimContextUpdate.dashboardItems !== undefined &&
+        decision.bimContextUpdate.dashboardItems.length === 0) {
+        throw new Error('Leader new BIM dashboard must contain current state.');
+      }
+    } else if (hasBimContext && decision.roundAction !== 'execute') {
+      throw new Error('Leader terminal BIM decision requires a context update.');
+    }
     return decision;
+  }
+
+  private bimSuggestion(
+    raw: Object | string | number | boolean | null | undefined
+  ): LeaderBimSuggestion {
+    if (raw === null || raw === undefined || typeof raw !== 'object' || Array.isArray(raw) ||
+      Object.keys(raw).sort().join(',') !== BIM_SUGGESTION_KEYS) {
+      throw new Error('Leader BIM suggestion contains missing or unknown fields.');
+    }
+    const values = raw as Record<string, Object | string | number | boolean | null | undefined>;
+    return {
+      title: this.boundedText(values['title'], 80, 'Leader BIM suggestion title'),
+      summary: this.boundedText(values['summary'], 500, 'Leader BIM suggestion summary'),
+      reason: this.boundedText(values['reason'], 500, 'Leader BIM suggestion reason'),
+      keywords: this.boundedStrings(
+        values['keywords'], 16, 40, 'Leader BIM suggestion keywords'
+      )
+    };
+  }
+
+  private bimContextUpdate(
+    raw: Object | string | number | boolean | null | undefined
+  ): LeaderBimContextUpdate {
+    if (raw === null || raw === undefined || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new Error('Leader BIM context update contains missing or unknown fields.');
+    }
+    const keys: string = Object.keys(raw).sort().join(',');
+    if (keys !== BIM_CONTEXT_UPDATE_KEYS && keys !== BIM_CONTEXT_UPDATE_DASHBOARD_KEYS) {
+      throw new Error('Leader BIM context update contains missing or unknown fields.');
+    }
+    const values = raw as Record<string, Object | string | number | boolean | null | undefined>;
+    const update: LeaderBimContextUpdate = {
+      summary: this.boundedText(values['summary'], 2000, 'Leader BIM context summary'),
+      facts: this.boundedStrings(values['facts'], 32, 240, 'Leader BIM context facts'),
+      constraints: this.boundedStrings(
+        values['constraints'], 32, 240, 'Leader BIM context constraints'
+      ),
+      decisions: this.boundedStrings(
+        values['decisions'], 32, 240, 'Leader BIM context decisions'
+      ),
+      entities: this.boundedStrings(values['entities'], 16, 80, 'Leader BIM context entities'),
+      timeAnchors: this.boundedStrings(
+        values['timeAnchors'], 16, 80, 'Leader BIM context time anchors'
+      ),
+      locations: this.boundedStrings(
+        values['locations'], 16, 80, 'Leader BIM context locations'
+      ),
+      commitments: this.boundedStrings(
+        values['commitments'], 16, 80, 'Leader BIM context commitments'
+      ),
+      keywords: this.boundedStrings(values['keywords'], 16, 40, 'Leader BIM context keywords')
+    };
+    if (keys === BIM_CONTEXT_UPDATE_DASHBOARD_KEYS) {
+      update.dashboardItems = this.bimDashboardItems(values['dashboardItems']);
+    }
+    return update;
+  }
+
+  private bimDashboardItems(
+    raw: Object | string | number | boolean | null | undefined
+  ): LeaderBimDashboardItem[] {
+    if (!Array.isArray(raw) || raw.length > 32) {
+      throw new Error('Leader BIM dashboard items must be a bounded array.');
+    }
+    const items: LeaderBimDashboardItem[] = [];
+    const identities: string[] = [];
+    for (let index = 0; index < raw.length; index++) {
+      const source: Object = raw[index];
+      if (source === null || typeof source !== 'object' || Array.isArray(source) ||
+        Object.keys(source).sort().join(',') !== BIM_DASHBOARD_ITEM_KEYS) {
+        throw new Error('Leader BIM dashboard item contains missing or unknown fields.');
+      }
+      const values = source as Record<string, Object | string | number | boolean | null | undefined>;
+      const kind = values['kind'];
+      if (!this.validBimDashboardKind(kind)) {
+        throw new Error('Leader BIM dashboard kind is invalid.');
+      }
+      const item: LeaderBimDashboardItem = {
+        kind: kind as LeaderBimDashboardItemKind,
+        title: this.boundedText(values['title'], 80, 'Leader BIM dashboard title'),
+        value: this.boundedOptionalText(values['value'], 80, 'Leader BIM dashboard value'),
+        detail: this.boundedOptionalText(values['detail'], 240, 'Leader BIM dashboard detail'),
+        status: this.boundedOptionalText(values['status'], 40, 'Leader BIM dashboard status')
+      };
+      const identity: string = item.kind + '\n' + item.title;
+      if (identities.indexOf(identity) >= 0) {
+        throw new Error('Leader BIM dashboard items must be unique.');
+      }
+      identities.push(identity);
+      items.push(item);
+    }
+    return items;
+  }
+
+  private validBimDashboardKind(
+    value: Object | string | number | boolean | null | undefined
+  ): boolean {
+    return value === 'progress' || value === 'metric' || value === 'person' ||
+      value === 'timeline' || value === 'task' || value === 'hotel' ||
+      value === 'flight' || value === 'transport' || value === 'event';
+  }
+
+  private boundedOptionalText(
+    value: Object | string | number | boolean | null | undefined,
+    maxLength: number,
+    label: string
+  ): string {
+    if (typeof value !== 'string' || value.length > maxLength || value !== value.trim()) {
+      throw new Error(label + ' must be a bounded string.');
+    }
+    return value;
+  }
+
+  private boundedText(
+    value: Object | string | number | boolean | null | undefined,
+    maxLength: number,
+    label: string
+  ): string {
+    if (typeof value !== 'string' || value.length === 0 || value.length > maxLength ||
+      value !== value.trim()) {
+      throw new Error(label + ' must be a bounded non-empty string.');
+    }
+    return value;
+  }
+
+  private boundedStrings(
+    value: Object | string | number | boolean | null | undefined,
+    maxEntries: number,
+    maxLength: number,
+    label: string
+  ): string[] {
+    if (!Array.isArray(value) || value.length > maxEntries) {
+      throw new Error(label + ' must be a bounded string array.');
+    }
+    const result: string[] = [];
+    for (let index = 0; index < value.length; index++) {
+      const item: Object = value[index];
+      if (typeof item !== 'string') {
+        throw new Error(label + ' must contain unique bounded non-empty strings.');
+      }
+      const canonical: string = item.trim();
+      if (item.length === 0 || item.length > maxLength || item !== canonical ||
+        result.indexOf(canonical) >= 0) {
+        throw new Error(label + ' must contain unique bounded non-empty strings.');
+      }
+      result.push(canonical);
+    }
+    return result;
   }
 
   private normalizeSingleMixedActionTask(

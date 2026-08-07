@@ -47,6 +47,7 @@ import {
   A2UI_MOTION_MOVE_CURVE,
   A2UI_MOTION_NORMAL_MS
 } from '../style/A2uiHomeMotion';
+import { formatBimCount } from './BimHomePage';
 
 const A2UI_HISTORY_EMPTY_HEIGHT: number = 108;
 const A2UI_HISTORY_ROW_HEIGHT: number = 76;
@@ -55,6 +56,8 @@ const A2UI_SEND_SPINNER_INTERVAL_MS: number = 90;
 const A2UI_HEADER_BUTTON_GAP: number = 3;
 const A2UI_HEADER_BUTTON_SIZE: number = 36;
 const A2UI_HEADER_BUTTON_ICON_SIZE: number = 18;
+const A2UI_HEART_TARGET_SIZE: number = 44;
+const A2UI_HEART_ICON_SIZE: number = 28;
 const A2UI_HEADER_LOGO_SIZE: number = 26;
 const A2UI_HEADER_TITLE_FONT_SIZE: number = 17;
 const A2UI_VOICE_DOCK_HEIGHT: number = 72;
@@ -63,6 +66,8 @@ const A2UI_VOICE_PULSE_STEPS: number = 12;
 export function shouldShowHomeChrome(waterfallFullscreen: boolean): boolean {
   return !waterfallFullscreen;
 }
+
+export type BimRememberState = 'ready' | 'saving' | 'saved' | 'error';
 
 @Component
 export struct HomePage {
@@ -98,9 +103,16 @@ export struct HomePage {
   @Prop trainPresaleError: string = '';
   @Prop trainPresaleWorking: boolean = false;
   @Prop isDebugBuild: boolean = false;
+  @Prop bimVisibleCount: number = 0;
+  @Prop bimSuggestionTitle: string = '';
+  @Prop bimSuggestionReason: string = '';
+  @Prop bimRememberState: BimRememberState = 'ready';
+  @Prop bimRememberError: string = '';
+  @Prop reduceMotion: boolean = false;
   @State sendSpinnerRotation: number = 0;
   @State voicePulseTick: number = 0;
   @State waterfallFullscreen: boolean = false;
+  @State heartPressed: boolean = false;
   private sendSpinnerTimerId: number = -1;
   private previousKeyboardAvoidMode: KeyboardAvoidMode = KeyboardAvoidMode.OFFSET;
   onToggleHistory: () => void = () => {};
@@ -116,6 +128,8 @@ export struct HomePage {
     (_submission: TrainPresalePanelSubmission): void => {};
   onCloseTrainPresale: () => void = () => {};
   onCancelTrainPresaleTask: () => void = () => {};
+  onOpenBim: () => void = () => {};
+  onRememberBim: () => void = () => {};
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
 
   aboutToAppear(): void {
@@ -219,6 +233,34 @@ export struct HomePage {
     }
   }
 
+  private heartAccessibilityText(): string {
+    return this.bimVisibleCount <= 0 ?
+      '打开心上事' :
+      '打开心上事，共 ' + this.bimVisibleCount.toString() + ' 件';
+  }
+
+  private showBimSuggestion(): boolean {
+    return !this.isBusy &&
+      (this.bimSuggestionTitle.trim().length > 0 || this.bimRememberError.trim().length > 0);
+  }
+
+  private bimRememberLabel(): string {
+    if (this.bimRememberState === 'saving') {
+      return '正在记下';
+    }
+    return this.bimRememberState === 'saved' ? '♡ 已记在心上' : '♡ 记在心上';
+  }
+
+  private handleHeartTouch(event: TouchEvent): void {
+    if (event.type === TouchType.Down) {
+      this.heartPressed = true;
+      return;
+    }
+    if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+      this.heartPressed = false;
+    }
+  }
+
   @Builder
   private VoiceWaveBar(index: number) {
     Column() {}
@@ -309,6 +351,37 @@ export struct HomePage {
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .layoutWeight(1)
+
+          Stack({ alignContent: Alignment.Center }) {
+            Image($r('app.media.icon_heart'))
+              .width(A2UI_HEART_ICON_SIZE)
+              .height(A2UI_HEART_ICON_SIZE)
+              .objectFit(ImageFit.Contain)
+
+            if (formatBimCount(this.bimVisibleCount).length > 0) {
+              Text(formatBimCount(this.bimVisibleCount))
+                .fontSize(this.bimVisibleCount > 9 ? 8 : 10)
+                .fontWeight(FontWeight.Bold)
+                .fontColor(COLOR_ACCENT)
+                .maxLines(1)
+            }
+          }
+          .width(A2UI_HEART_TARGET_SIZE)
+          .height(A2UI_HEART_TARGET_SIZE)
+          .borderRadius(A2UI_HEART_TARGET_SIZE / 2)
+          .backgroundColor(this.heartPressed ? COLOR_ACCENT_SOFT : '#00000000')
+          .scale({
+            x: !this.reduceMotion && this.heartPressed ? 0.97 : 1,
+            y: !this.reduceMotion && this.heartPressed ? 0.97 : 1
+          })
+          .animation({ duration: this.reduceMotion ? 0 : 120, curve: Curve.EaseOut })
+          .accessibilityText(this.heartAccessibilityText())
+          .onTouch((event: TouchEvent) => {
+            this.handleHeartTouch(event);
+          })
+          .onClick(() => {
+            this.onOpenBim();
+          })
 
           A2uiButtonView({
             icon: $r('app.media.icon_history'),
@@ -458,6 +531,62 @@ export struct HomePage {
       }
 
       if (shouldShowHomeChrome(this.waterfallFullscreen)) {
+        if (this.showBimSuggestion()) {
+          Row() {
+            Column() {
+              if (this.bimSuggestionTitle.trim().length > 0) {
+                Text(this.bimSuggestionTitle)
+                  .fontSize(14)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(COLOR_INK)
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                Text(this.bimSuggestionReason)
+                  .fontSize(12)
+                  .fontColor(COLOR_MUTED)
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .margin({ top: 3 })
+              }
+              if (this.bimRememberError.trim().length > 0) {
+                Text(this.bimRememberError)
+                  .fontSize(12)
+                  .fontColor(COLOR_ACCENT)
+                  .maxLines(2)
+                  .margin({ top: this.bimSuggestionTitle.trim().length > 0 ? 5 : 0 })
+              }
+            }
+            .layoutWeight(1)
+            .alignItems(HorizontalAlign.Start)
+            .margin({ right: 10 })
+
+            if (this.bimSuggestionTitle.trim().length > 0) {
+              A2uiButtonView({
+                label: this.bimRememberLabel(),
+                shape: 'pill',
+                tone: this.bimRememberState === 'saved' ? 'secondary' : 'primary',
+                isEnabled: !this.isBusy &&
+                  this.bimRememberState !== 'saving' && this.bimRememberState !== 'saved'
+              })
+                .enabled(!this.isBusy &&
+                  this.bimRememberState !== 'saving' && this.bimRememberState !== 'saved')
+                .onClick(() => {
+                  if (!this.isBusy &&
+                    this.bimRememberState !== 'saving' && this.bimRememberState !== 'saved') {
+                    this.onRememberBim();
+                  }
+                })
+            }
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Center)
+          .padding(12)
+          .margin({ top: A2UI_HOME_SECTION_GAP })
+          .backgroundColor(COLOR_ACCENT_SOFT)
+          .borderRadius(14)
+          .border({ width: 1, color: COLOR_CARD_EDGE })
+        }
+
       Column() {
         Row() {
           if (this.isVoiceListening) {

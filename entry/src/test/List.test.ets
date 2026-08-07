@@ -99,6 +99,9 @@ import trainPresaleExecutionTest from './TrainPresaleExecution.test';
 import trainPresaleWebAutomationTest from './TrainPresaleWebAutomation.test';
 import trainPresaleDebugTest from './TrainPresaleDebug.test';
 import movieDemoContractTest from './MovieDemoContract.test';
+import bimStoreTest from './BimStore.test';
+import bimRuntimeTest from './BimRuntime.test';
+import bimHomePageTest from './BimHomePage.test';
 
 export default function testsuite() {
   movieDemoContractTest();
@@ -196,6 +199,9 @@ export default function testsuite() {
   trainPresaleExecutionTest();
   trainPresaleWebAutomationTest();
   trainPresaleDebugTest();
+  bimStoreTest();
+  bimRuntimeTest();
+  bimHomePageTest();
   personaStoreTest();
   personaA2uiTest();
   personaMemoryUpdateTest();

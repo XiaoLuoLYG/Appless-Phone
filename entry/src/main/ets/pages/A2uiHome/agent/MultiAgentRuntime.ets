@@ -18,6 +18,9 @@ import {
   CurrentSurfaceSummary,
   DataAgent,
   DataResult,
+  LeaderBimContextUpdate,
+  LeaderBimSuggestion,
+  validLeaderBimDashboardItems,
   LeaderAgent,
   LeaderPlanningContext,
   LinkedMessageBus,
@@ -111,9 +114,11 @@ function settled(
   message: string,
   surfaceId: string = '',
   personaId: string = '',
-  skillId: string = ''
+  skillId: string = '',
+  bimSuggestion?: LeaderBimSuggestion,
+  bimContextUpdate?: LeaderBimContextUpdate
 ): MultiAgentSettledOutcome {
-  return {
+  const outcome: MultiAgentSettledOutcome = {
     kind: 'settled',
     ok: status === 'success' || status === 'partial' || status === 'empty',
     status,
@@ -122,10 +127,25 @@ function settled(
     personaId,
     skillId
   };
+  if (bimSuggestion !== undefined) {
+    outcome.bimSuggestion = bimSuggestion;
+  }
+  if (bimContextUpdate !== undefined) {
+    outcome.bimContextUpdate = bimContextUpdate;
+  }
+  return outcome;
 }
 
 function nonempty(value: string | undefined): boolean {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+function hasOwnKey(value: Object, key: string): boolean {
+  return Object.getOwnPropertyNames(value).indexOf(key) >= 0;
+}
+
+function hasKey(value: Object, key: string): boolean {
+  return Reflect.has(value, key);
 }
 
 type MailIdentityValue = Object | string | number | boolean | null | undefined;
@@ -1015,7 +1035,9 @@ export class MultiAgentRuntime {
       this.settleTurn(pending, settled(
         'error', message, surfaceId,
         pending.personaId,
-        pending.skillId
+        pending.skillId,
+        hasOwnKey(result, 'bimSuggestion') ? result.bimSuggestion : undefined,
+        hasOwnKey(result, 'bimContextUpdate') ? result.bimContextUpdate : undefined
       ));
       return;
     }
@@ -1025,7 +1047,9 @@ export class MultiAgentRuntime {
     this.settleTurn(pending, settled(
       result.status, result.message, surfaceId,
       pending.personaId,
-      pending.skillId
+      pending.skillId,
+      hasOwnKey(result, 'bimSuggestion') ? result.bimSuggestion : undefined,
+      hasOwnKey(result, 'bimContextUpdate') ? result.bimContextUpdate : undefined
     ));
   }
 
@@ -1293,7 +1317,18 @@ export class MultiAgentRuntime {
     if (result === null || typeof result !== 'object' || Array.isArray(result)) {
       return false;
     }
-    const keys: string = Object.keys(result).sort().join(',');
+    const rawKeys: string[] = Object.keys(result);
+    const hasBimSuggestion: boolean = hasOwnKey(result, 'bimSuggestion');
+    const hasBimContextUpdate: boolean = hasOwnKey(result, 'bimContextUpdate');
+    if ((!hasBimSuggestion && hasKey(result, 'bimSuggestion')) ||
+      (!hasBimContextUpdate && hasKey(result, 'bimContextUpdate'))) {
+      return false;
+    }
+    const keys: string = rawKeys
+      .filter((key: string): boolean => key !== 'bimSuggestion')
+      .filter((key: string): boolean => key !== 'bimContextUpdate')
+      .sort()
+      .join(',');
     return (keys === 'message,roundCount,status' ||
       keys === 'message,roundCount,status,surfaceId' ||
       keys === 'message,personaId,roundCount,skillId,status' ||
@@ -1307,7 +1342,62 @@ export class MultiAgentRuntime {
         (nonempty(result.personaId) && typeof result.skillId === 'string')) &&
       (result.skillId === undefined ||
         (typeof result.skillId === 'string' && nonempty(result.personaId))) &&
-      (result.surfaceId === undefined || nonempty(result.surfaceId));
+      (result.surfaceId === undefined || nonempty(result.surfaceId)) &&
+      (!hasBimSuggestion || (result.bimSuggestion !== undefined &&
+        this.validBimSuggestion(result.bimSuggestion))) &&
+      (!hasBimContextUpdate || (result.bimContextUpdate !== undefined &&
+        this.validBimContextUpdate(result.bimContextUpdate)));
+  }
+
+  private validBimSuggestion(value: LeaderBimSuggestion): boolean {
+    return value !== null && typeof value === 'object' && !Array.isArray(value) &&
+      Object.keys(value).sort().join(',') === 'keywords,reason,summary,title' &&
+      this.validBoundedText(value.title, 80) &&
+      this.validBoundedText(value.summary, 500) &&
+      this.validBoundedText(value.reason, 500) &&
+      this.validBoundedStrings(value.keywords, 16, 40);
+  }
+
+  private validBimContextUpdate(value: LeaderBimContextUpdate): boolean {
+    const keys: string = value === null || value === undefined ? '' :
+      Object.keys(value).sort().join(',');
+    return value !== null && typeof value === 'object' && !Array.isArray(value) &&
+      (keys === 'commitments,constraints,decisions,entities,facts,keywords,locations,summary,timeAnchors' ||
+        keys === 'commitments,constraints,dashboardItems,decisions,entities,facts,keywords,locations,summary,timeAnchors') &&
+      this.validBoundedText(value.summary, 2000) &&
+      this.validBoundedStrings(value.facts, 32, 240) &&
+      this.validBoundedStrings(value.constraints, 32, 240) &&
+      this.validBoundedStrings(value.decisions, 32, 240) &&
+      this.validBoundedStrings(value.entities, 16, 80) &&
+      this.validBoundedStrings(value.timeAnchors, 16, 80) &&
+      this.validBoundedStrings(value.locations, 16, 80) &&
+      this.validBoundedStrings(value.commitments, 16, 80) &&
+      this.validBoundedStrings(value.keywords, 16, 40) &&
+      validLeaderBimDashboardItems(value.dashboardItems);
+  }
+
+  private validBoundedText(value: string, maxLength: number): boolean {
+    return typeof value === 'string' && value.length > 0 && value.length <= maxLength &&
+      value === value.trim();
+  }
+
+  private validBoundedStrings(values: string[], maxEntries: number, maxLength: number): boolean {
+    if (!Array.isArray(values) || values.length > maxEntries) {
+      return false;
+    }
+    const seen: Set<string> = new Set<string>();
+    for (let index = 0; index < values.length; index++) {
+      const value: string = values[index];
+      if (typeof value !== 'string') {
+        return false;
+      }
+      const canonical: string = value.trim();
+      if (!this.validBoundedText(value, maxLength) || seen.has(canonical)) {
+        return false;
+      }
+      seen.add(canonical);
+    }
+    return true;
   }
 
   private actionOutputSurfaceId(pending: PendingTurn, result: ActionResultPayload): string {

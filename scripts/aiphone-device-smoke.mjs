@@ -47,6 +47,21 @@ import {
   toolExecutionEvidence,
   visibleMailBodyText
 } from './multi-agent-smoke-evidence.mjs';
+import {
+  bimCleanSessionBlocker,
+  bimScenarioStatus,
+  bimSmokeStatus,
+  completeBimScenarios,
+  hasBimDirectory,
+  hasBimExecutionBar,
+  hasBimHome,
+  hasConversationTranscript,
+  hasMainAgentResult,
+  hasRememberSuggestion,
+  hasZeroCandidateBimRoute,
+  heartCountFromLayout,
+  sanitizeBimFailureReason
+} from './bim-smoke-evidence.mjs';
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const outDir = process.env.AIPHONE_SMOKE_OUT_DIR || join(rootDir, 'tool-gateway', '.smoke');
@@ -608,6 +623,7 @@ const runGoogleApps = argv.includes('--google-apps');
 const runFullRegression = argv.includes('--full-regression');
 const runCoreRegression = argv.includes('--core-regression');
 const runGmailSendManual = argv.includes('--gmail-send-manual');
+const runBimSmoke = argv.includes('--bim');
 const listCases = argv.includes('--list-cases');
 const queryArgs = argv.filter((arg) => arg !== '--clean-data' &&
   arg !== '--dynamic-tools' &&
@@ -617,6 +633,7 @@ const queryArgs = argv.filter((arg) => arg !== '--clean-data' &&
   arg !== '--full-regression' &&
   arg !== '--core-regression' &&
   arg !== '--gmail-send-manual' &&
+  arg !== '--bim' &&
   arg !== '--list-cases');
 const selectedDefaultCases = runComposioCases ? composioCases :
   (runFullRegression ? fullRegressionCases :
@@ -627,6 +644,15 @@ const useDefaultCases = queryArgs.length === 0;
 const queries = useDefaultCases ? selectedDefaultCases.map((testCase) => testCase.query) : queryArgs;
 const queryRetryLimit = Number.parseInt(process.env.AIPHONE_QUERY_RETRY_LIMIT || '2', 10);
 if (listCases) {
+  if (runBimSmoke) {
+    console.log(JSON.stringify([{
+      id: 'BIM',
+      mode: 'device-smoke',
+      automated: true,
+      requires: ['local-model', 'heart-things']
+    }], null, 2));
+    process.exit(0);
+  }
   if (runGmailSendManual) {
     const safeThreadId = (process.env.AIPHONE_GMAIL_SAFE_THREAD_ID || '').trim();
     const safeRecipient = (process.env.AIPHONE_GMAIL_SAFE_RECIPIENT || '').trim();
@@ -659,7 +685,8 @@ if (runGmailSendManual) {
   console.error('gmail.message.send is manual-only; use --gmail-send-manual --list-cases to inspect its safe gate.');
   process.exit(2);
 }
-const target = process.env.AIPHONE_HDC_TARGET || firstTarget();
+let target = (process.env.AIPHONE_HDC_TARGET || '').trim();
+if (!runBimSmoke && target.length === 0) target = firstTarget();
 const timeoutMs = Number.parseInt(process.env.AIPHONE_QUERY_TIMEOUT_MS || '90000', 10);
 const mailActionScrollLimit = Number.parseInt(process.env.AIPHONE_MAIL_ACTION_SCROLL_LIMIT || '16', 10);
 
@@ -986,8 +1013,10 @@ function clearHilog() {
 function cleanBundleData() {
   try {
     hdc(['shell', 'bm', 'clean', '-n', 'com.example.aiphonedemo', '-d']);
+    return true;
   } catch (error) {
     console.warn(`Could not clean bundle data: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
   }
 }
 
@@ -1207,7 +1236,7 @@ function collectLayoutText(layout) {
   const values = [];
   walk(layout, (node) => {
     const attrs = node.attributes || {};
-    ['text', 'content', 'description', 'hint'].forEach((key) => {
+    ['text', 'content', 'description', 'hint', 'accessibilityText'].forEach((key) => {
       const value = attrs[key];
       if (typeof value === 'string' && value.trim().length > 0) {
         values.push(value.trim());
@@ -1253,7 +1282,7 @@ function findTextMatches(layout, marker) {
     if (bounds === null) {
       return;
     }
-    const text = ['text', 'content', 'description', 'hint']
+    const text = ['text', 'content', 'description', 'hint', 'accessibilityText']
       .map((key) => attrs[key])
       .filter((value) => typeof value === 'string' && value.includes(marker))
       .join('|');
@@ -3705,6 +3734,226 @@ async function runComposioAuthSmoke() {
   return summary;
 }
 
+function bimUnavailableReason(logText, layoutText = '') {
+  const evidence = `${logText}\n${layoutText}`;
+  const match = evidence.match(/\[AIPhone\]\[(?:ModelResult|A2uiHomeModelResult)\] ok=false[^\n]*|\[AIPhone\]\[A2uiHomeSubmitBlocked\][^\n]*|请先填写 Base URL|模型连接异常|模型服务不可用|需要供应商配置|需要配置：|授权(?:失败|已过期|不可用)/);
+  return match === null ? '' : match[0];
+}
+
+function bimScenario(id, ok, blockedReason, evidence = {}) {
+  const status = bimScenarioStatus(ok, blockedReason);
+  const safeBlockedReason = sanitizeBimFailureReason(blockedReason);
+  return {
+    id,
+    status,
+    ok: status === 'PASS',
+    ...(safeBlockedReason.length > 0 ? { reason: safeBlockedReason } : {}),
+    ...evidence
+  };
+}
+
+function writeBimLayout(prefix, layout) {
+  const text = collectLayoutText(layout).join('\n');
+  const textPath = join(outDir, `${prefix}-layout-text.txt`);
+  writeFileSync(textPath, text + '\n');
+  return { text, textPath };
+}
+
+async function waitForBimLayout(prefix, predicate, attempts = 12) {
+  let latest = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const layout = dumpLayout(`${prefix}-${attempt + 1}-layout.json`);
+    const written = writeBimLayout(`${prefix}-${attempt + 1}`, layout);
+    latest = { layout, ...written };
+    if (predicate(layout, written.text)) return latest;
+    await sleep(400);
+  }
+  return latest;
+}
+
+async function submitBimPrompt(query, prefix, captureExecutionBar = false) {
+  clearHilog();
+  const appPid = hdc(['shell', 'pidof', 'com.example.aiphonedemo']).trim().split(/\s+/)[0] || '';
+  const controls = await waitForControls(`${prefix}-controls-layout.json`);
+  let typed = false;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    hdc(['shell', 'uitest', 'uiInput', 'click', String(controls.input.x), String(controls.input.y)]);
+    hdc(['shell', 'uitest', 'uiInput', 'keyEvent', '2072', '2017']);
+    hdc(['shell', 'uitest', 'uiInput', 'keyEvent', '2055']);
+    hdc(['shell', 'uitest', 'uiInput', 'text', query]);
+    await sleep(700);
+    if (collectInputText(dumpLayout(`${prefix}-input-${attempt + 1}-layout.json`)).includes(query)) {
+      typed = true;
+      break;
+    }
+  }
+  if (!typed) throw new Error(`Could not type full BIM query: ${query}`);
+  let executionBar = null;
+  const logs = await captureWhile(appPid, async () => {
+    const submit = await waitForControls(`${prefix}-submit-layout.json`, 2);
+    hdc(['shell', 'uitest', 'uiInput', 'click', String(submit.generate.x), String(submit.generate.y)]);
+    if (!captureExecutionBar) return;
+    executionBar = await waitForBimLayout(`${prefix}-execution`, (layout) => hasBimExecutionBar(layout), 10);
+    if (executionBar !== null && hasBimExecutionBar(executionBar.layout)) {
+      executionBar.screenPath = captureScreen(`${prefix}-execution-screen.png`);
+    }
+  }, {
+    idleActionTimeoutMs: 0,
+    completionEvidence: (text) => ({
+      complete: /\[AIPhone\]\[MultiAgentTurnResult\][^\n]*\bstatus=(?:success|partial|empty|error|canceled)\b/.test(text) ||
+        bimUnavailableReason(text).length > 0
+    })
+  });
+  const safeLogText = sanitizeExternalUrlLogs(logs.join('\n'));
+  const logPath = join(outDir, `${prefix}.log`);
+  writeFileSync(logPath, safeLogText + '\n');
+  const final = await waitForBimLayout(`${prefix}-final`, () => true, 1);
+  final.screenPath = captureScreen(`${prefix}-final-screen.png`);
+  return { logs: safeLogText, logPath, executionBar, ...final };
+}
+
+function tapBimText(layout, text, label) {
+  const point = findTextCenter(layout, text);
+  if (point === null) throw new Error(`Could not find ${label}.`);
+  hdc(['shell', 'uitest', 'uiInput', 'click', String(point.x), String(point.y)]);
+}
+
+async function runBimDeviceSmoke() {
+  const scenarios = [];
+  let currentScenarioId = 'suggestion';
+  let failedScenarioId = '';
+  let failureReason = '';
+  try {
+    if (queryArgs.length > 0) throw new Error('--bim does not accept query arguments.');
+    failureReason = bimCleanSessionBlocker(cleanData, false);
+    if (!cleanData) return;
+    if (target.length === 0) target = firstTarget();
+    hdc(['shell', 'aa', 'force-stop', 'com.example.aiphonedemo']);
+    const cleanSucceeded = cleanBundleData();
+    failureReason = bimCleanSessionBlocker(true, cleanSucceeded);
+    if (!cleanSucceeded) return;
+    hdc(['shell', 'aa', 'start', '-a', 'EntryAbility', '-b', 'com.example.aiphonedemo']);
+    await sleep(3000);
+    moveAppWindowIntoScreenshot();
+    const initial = await waitForBimLayout('bim-initial-home', (layout) =>
+      hasBimHome(layout) && heartCountFromLayout(layout) === 0);
+    if (initial === null || !hasBimHome(initial.layout) || heartCountFromLayout(initial.layout) !== 0) {
+      throw new Error('Clean BIM session did not open exact Home with zero heart items.');
+    }
+
+    const plan = await submitBimPrompt('帮我规划八月去东京一周的旅行，之后还要继续选机票和酒店', 'bim-plan');
+    const planBlocked = bimUnavailableReason(plan.logs, plan.text);
+    const planOk = hasRememberSuggestion(plan.layout) &&
+      !/(?:预订成功|订单已确认|已出票|订票成功|订房成功)/.test(plan.text);
+    scenarios.push(bimScenario('suggestion', planOk, planBlocked, {
+      layoutPath: join(outDir, 'bim-plan-final-1-layout.json'), logPath: plan.logPath,
+      screenPath: plan.screenPath
+    }));
+    if (!planOk || planBlocked.length > 0) {
+      failureReason = planBlocked || 'Missing visible remember suggestion or saw fabricated booking success.';
+      return;
+    }
+
+    currentScenarioId = 'remember';
+    tapBimText(plan.layout, '记在心上', '记在心上 suggestion');
+    const saved = await waitForBimLayout('bim-saved', (layout) =>
+      collectLayoutText(layout).some((value) => value.includes('已记在心上')) && heartCountFromLayout(layout) === 1);
+    saved.screenPath = captureScreen('bim-saved-screen.png');
+    const saveOk = collectLayoutText(saved.layout).some((value) => value.includes('已记在心上')) &&
+      heartCountFromLayout(saved.layout) === 1;
+    scenarios.push(bimScenario('remember', saveOk, '', { screenPath: saved.screenPath }));
+    if (!saveOk) {
+      failureReason = 'Remember action did not settle with one heart item.';
+      return;
+    }
+
+    currentScenarioId = 'directory';
+    tapBimText(saved.layout, '打开心上事', 'heart entry');
+    const directory = await waitForBimLayout('bim-directory', (layout, text) =>
+      hasBimDirectory(layout) && text.includes('东京旅行'));
+    directory.screenPath = captureScreen('bim-directory-screen.png');
+    const directoryOk = hasBimDirectory(directory.layout) && directory.text.includes('东京旅行');
+    scenarios.push(bimScenario('directory', directoryOk, '', { screenPath: directory.screenPath }));
+    if (!directoryOk) {
+      failureReason = 'Heart directory did not show 东京旅行.';
+      return;
+    }
+
+    currentScenarioId = 'detail';
+    tapBimText(directory.layout, '东京旅行', '东京旅行 row');
+    const detail = await waitForBimLayout('bim-detail', (layout, text) =>
+      /当前(?:状态|安排)/.test(text) && !hasConversationTranscript(layout));
+    detail.screenPath = captureScreen('bim-detail-screen.png');
+    const detailOk = /当前(?:状态|安排)/.test(detail.text) && !hasConversationTranscript(detail.layout);
+    scenarios.push(bimScenario('detail', detailOk, '', { screenPath: detail.screenPath }));
+    if (!detailOk) {
+      failureReason = 'Detail did not show current state or leaked a conversation transcript.';
+      return;
+    }
+
+    currentScenarioId = 'update';
+    const update = await submitBimPrompt('不要红眼航班，尽量中午前到', 'bim-update', true);
+    const updateBlocked = bimUnavailableReason(update.logs, update.text);
+    const executionSeen = update.executionBar !== null && hasBimExecutionBar(update.executionBar.layout);
+    const updateOk = executionSeen && !hasBimExecutionBar(update.layout) &&
+      update.text.includes('不要红眼航班') && !hasConversationTranscript(update.layout);
+    scenarios.push(bimScenario('update', updateOk, updateBlocked, {
+      executionScreenPath: update.executionBar?.screenPath || '', screenPath: update.screenPath,
+      logPath: update.logPath
+    }));
+    if (!updateOk || updateBlocked.length > 0) {
+      failureReason = updateBlocked || 'BIM execution bar or updated current state was not observed.';
+      return;
+    }
+
+    currentScenarioId = 'main-agent';
+    tapBimText(update.layout, '返回心上事列表', 'detail back');
+    const restoredDirectory = await waitForBimLayout('bim-return-directory', (layout) => hasBimDirectory(layout));
+    if (restoredDirectory === null || !hasBimDirectory(restoredDirectory.layout)) {
+      throw new Error('Detail back did not restore the exact heart directory.');
+    }
+    hdc(['shell', 'uitest', 'uiInput', 'swipe', '1100', '1200', '100', '1200', '500']);
+    const home = await waitForBimLayout('bim-home', (layout) => hasBimHome(layout));
+    if (home === null || !hasBimHome(home.layout)) {
+      throw new Error('Left swipe did not restore the exact Home surface.');
+    }
+    const main = await submitBimPrompt('解释一下量子计算', 'bim-main');
+    const mainBlocked = bimUnavailableReason(main.logs, main.text);
+    const mainOk = hasZeroCandidateBimRoute(main.logs) && hasMainAgentResult(main.logs) &&
+      hasBimHome(main.layout);
+    scenarios.push(bimScenario('main-agent', mainOk, mainBlocked, {
+      screenPath: main.screenPath, logPath: main.logPath
+    }));
+    if (!mainOk || mainBlocked.length > 0) {
+      failureReason = mainBlocked || 'Main Agent result was not retained after zero-candidate BIM routing.';
+    }
+  } catch (error) {
+    failureReason = sanitizeBimFailureReason(error);
+    failedScenarioId = currentScenarioId;
+    if (!scenarios.some((scenario) => scenario.id === currentScenarioId)) {
+      scenarios.push(bimScenario(currentScenarioId, false, '', { reason: failureReason }));
+    }
+  } finally {
+    return finishBimSmoke(scenarios, failureReason, failedScenarioId);
+  }
+}
+
+function finishBimSmoke(scenarios, failureReason, failedId = '') {
+  const safeFailureReason = sanitizeBimFailureReason(failureReason || 'BIM smoke did not complete.');
+  const completedScenarios = completeBimScenarios(scenarios, safeFailureReason, failedId);
+  const ok = completedScenarios.every((scenario) => scenario.status === 'PASS');
+  const summary = {
+    caseId: 'BIM',
+    status: bimSmokeStatus(completedScenarios.map((scenario) => scenario.status)),
+    ok,
+    scenarios: completedScenarios,
+    ...(ok ? {} : { reason: safeFailureReason })
+  };
+  snapshotCaseArtifacts('BIM', 1, ['bim'], summary);
+  writeFileSync(join(outDir, 'bim-summary.json'), JSON.stringify(summary, null, 2));
+  return summary;
+}
+
 console.log(`cleanData: ${cleanData ? 'true' : 'false'}`);
 
 if (runComposioAuthCases) {
@@ -3716,6 +3965,13 @@ if (runComposioAuthCases) {
   if (!runComposioCases && queryArgs.length === 0) {
     process.exit(0);
   }
+}
+if (runBimSmoke) {
+  const summary = await runBimDeviceSmoke();
+  console.log(JSON.stringify(summary, null, 2));
+  console.log(`screenshotIndex: ${writeScreenshotIndex()}`);
+  if (!summary.ok) process.exit(1);
+  process.exit(0);
 }
 const modelHealth = await ensureLocalModel();
 console.log(`modelHealth: ${JSON.stringify(modelHealth, null, 2)}`);

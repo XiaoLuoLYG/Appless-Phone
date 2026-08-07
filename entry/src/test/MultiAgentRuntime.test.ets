@@ -25,6 +25,7 @@ import {
   DataTaskAuthorizationResult,
   DataTaskExecutor,
   InputUserPayload,
+  LeaderBimSuggestion,
   LeaderDecision,
   LeaderDecisionDataTask,
   LeaderPlanner,
@@ -216,6 +217,21 @@ class HangingPlanner implements LeaderPlanner {
   ): Promise<LeaderDecision> {
     return new Promise<LeaderDecision>((_resolve: (value: LeaderDecision) => void) => {
     });
+  }
+}
+
+class InheritedBimTurnResult implements TurnResultPayload {
+  status: 'success' = 'success';
+  roundCount: number = 1;
+  message: string = 'inherited BIM must not settle';
+
+  get bimSuggestion(): LeaderBimSuggestion {
+    return {
+      title: '东京旅行',
+      summary: '八月东京一周旅行',
+      reason: '需要继续筛选机票和酒店',
+      keywords: ['东京', '旅行']
+    };
   }
 }
 
@@ -745,6 +761,34 @@ async function settle(): Promise<void> {
   for (let index = 0; index < 16; index++) {
     await Promise.resolve();
   }
+}
+
+async function runtimeRejectsBimTerminal(payload: TurnResultPayload): Promise<boolean> {
+  const bus = new CountingBus();
+  const runtime = new MultiAgentRuntime(runtimeOptions(
+    bus,
+    new HangingPlanner(),
+    new ControlledWriter()
+  ));
+  let resolved: boolean = false;
+  const pending = runtime.submit('reject malformed BIM', { text: '' });
+  pending.then(() => {
+    resolved = true;
+  });
+  await bus.inputSeen.promise;
+  const input = bus.input as AgentMessage;
+  bus.publish({
+    type: AgentMessageType.TURN_RESULT,
+    conversationId: input.conversationId,
+    turnId: input.turnId,
+    taskId: input.taskId,
+    payload
+  });
+  await settle();
+  const rejected: boolean = !resolved;
+  runtime.dispose();
+  await pending;
+  return rejected;
 }
 
 function latestInput(bus: CountingBus): AgentMessage {
@@ -1830,6 +1874,110 @@ export default function multiAgentRuntimeTest() {
       expect(result.status).assertEqual('success');
       expect(result.message).assertEqual('exact answer');
       runtime.dispose();
+    });
+
+    it('settles validated BIM metadata from the terminal turn result', 0, async () => {
+      const bus = new CountingBus();
+      const runtime = new MultiAgentRuntime(runtimeOptions(
+        bus,
+        new HangingPlanner(),
+        new ControlledWriter()
+      ));
+      const pending = runtime.submit('manual BIM result', { text: '' });
+      await bus.inputSeen.promise;
+      const input = bus.input as AgentMessage;
+      const payload: TurnResultPayload = {
+        status: 'success',
+        roundCount: 1,
+        message: 'exact answer',
+        bimSuggestion: {
+          title: '东京旅行',
+          summary: '八月东京一周旅行',
+          reason: '需要继续筛选机票和酒店',
+          keywords: ['东京', '旅行', '机票', '酒店']
+        },
+        bimContextUpdate: {
+          summary: '东京旅行，机票待确认',
+          facts: ['八月出发'],
+          constraints: ['预算有限'],
+          decisions: [],
+          entities: ['东京'],
+          timeAnchors: ['八月'],
+          locations: ['东京'],
+          commitments: ['筛选机票'],
+          keywords: ['东京', '机票']
+        }
+      };
+      bus.publish({
+        type: AgentMessageType.TURN_RESULT,
+        conversationId: input.conversationId,
+        turnId: input.turnId,
+        taskId: input.taskId,
+        payload
+      });
+      const result = await pending as MultiAgentSettledOutcome;
+
+      expect(result.bimSuggestion?.title).assertEqual('东京旅行');
+      expect(result.bimSuggestion?.keywords.length).assertEqual(4);
+      expect(result.bimContextUpdate?.summary).assertEqual('东京旅行，机票待确认');
+      expect(result.bimContextUpdate?.facts[0]).assertEqual('八月出发');
+      runtime.dispose();
+    });
+
+    it('rejects malformed BIM values at the Runtime boundary', 0, async () => {
+      const oversized: TurnResultPayload = {
+        status: 'success',
+        roundCount: 1,
+        message: 'oversized BIM must not settle',
+        bimSuggestion: {
+          title: '东京旅行',
+          summary: 'a'.repeat(501),
+          reason: 'later',
+          keywords: ['东京']
+        }
+      };
+      const unknown: TurnResultPayload = {
+        status: 'success',
+        roundCount: 1,
+        message: 'unknown BIM key must not settle',
+        bimSuggestion: JSON.parse(
+          '{"title":"东京旅行","summary":"八月东京一周旅行","reason":"later",' +
+          '"keywords":["东京"],"extra":"not allowed"}'
+        ) as LeaderBimSuggestion
+      };
+      const untrimmed: TurnResultPayload = {
+        status: 'success',
+        roundCount: 1,
+        message: 'untrimmed BIM must not settle',
+        bimSuggestion: {
+          title: ' 东京旅行 ',
+          summary: '八月东京一周旅行',
+          reason: 'later',
+          keywords: ['东京']
+        }
+      };
+
+      expect(await runtimeRejectsBimTerminal(oversized)).assertTrue();
+      expect(await runtimeRejectsBimTerminal(unknown)).assertTrue();
+      expect(await runtimeRejectsBimTerminal(untrimmed)).assertTrue();
+    });
+
+    it('rejects inherited optional BIM metadata at the Runtime boundary', 0, async () => {
+      expect(await runtimeRejectsBimTerminal(new InheritedBimTurnResult())).assertTrue();
+    });
+
+    it('rejects a null BIM array entry without settling the Runtime turn', 0, async () => {
+      const malformed: TurnResultPayload = {
+        status: 'success',
+        roundCount: 1,
+        message: 'null BIM entry must not settle',
+        bimSuggestion: JSON.parse(
+          '{"title":"东京旅行","summary":"八月东京一周旅行","reason":"later",' +
+          '"keywords":["东京",null]}'
+        ) as LeaderBimSuggestion
+      };
+
+      expect(await runtimeRejectsBimTerminal(malformed)).assertTrue();
     });
 
     it('rejects missing or mismatched terminal persona after an exact UI authority', 0, async () => {

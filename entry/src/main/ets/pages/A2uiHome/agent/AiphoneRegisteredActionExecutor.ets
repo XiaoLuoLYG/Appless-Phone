@@ -29,6 +29,8 @@ export interface MailDetailFollowUpPreparer {
 
 export interface RegisteredPageActionContext extends ActionExecutionContext {
   pageActionId: string;
+  /** Positive host generation captured when the originating runtime turn began. */
+  hostGeneration?: number;
 }
 
 export type RegisteredPageAction = (

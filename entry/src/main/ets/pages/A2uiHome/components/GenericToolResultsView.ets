@@ -14,6 +14,7 @@ import { isRideToolResult } from '../state/RideToolResultsState';
 import {
   COLOR_ACCENT,
   COLOR_ACCENT_DARK,
+  COLOR_ACCENT_DEEP,
   COLOR_ACCENT_SOFT,
   COLOR_CARD,
   COLOR_CARD_EDGE,
@@ -59,6 +60,10 @@ export struct GenericToolResultsView {
 
   private isWeatherResult(item: A2uiGenericToolResultData): boolean {
     return item.toolName === 'maps_weather' || item.title.indexOf('天气') >= 0;
+  }
+
+  private isHotelResult(item: A2uiGenericToolResultData): boolean {
+    return item.toolName === 'hotel.search' || item.toolName === 'hotel.detail';
   }
 
   private isGmailResult(item: A2uiGenericToolResultData): boolean {
@@ -339,6 +344,28 @@ export struct GenericToolResultsView {
       }
     }
     return '';
+  }
+
+  private hotelPrice(item: A2uiGenericToolResultData): string {
+    return this.firstRowValue(item, ['平均价', '参考价']);
+  }
+
+  private hotelPriceLabel(item: A2uiGenericToolResultData): string {
+    return item.toolName === 'hotel.detail' ? '晚均参考' : '本次参考';
+  }
+
+  private hotelDetailRows(item: A2uiGenericToolResultData): A2uiGenericToolResultRowData[] {
+    const visibleLabels = item.toolName === 'hotel.detail' ?
+      ['床型', '餐食', '供应商确认', '取消政策', '税费与有效期'] :
+      ['星级', '设施', '标签', '价格说明', '部分结果提醒'];
+    const rows: A2uiGenericToolResultRowData[] = [];
+    for (let index = 0; index < visibleLabels.length; index++) {
+      const value = this.rowValue(item, visibleLabels[index]).trim();
+      if (value.length > 0) {
+        rows.push({ label: visibleLabels[index], value });
+      }
+    }
+    return rows;
   }
 
   private weatherTemp(item: A2uiGenericToolResultData): string {
@@ -640,7 +667,158 @@ export struct GenericToolResultsView {
         } else {
           ForEach(this.results(), (item: A2uiGenericToolResultData, index: number) => {
             Column() {
-              if (this.isWeatherResult(item)) {
+              if (this.isHotelResult(item)) {
+                if (this.rowValue(item, '酒店图片').length > 0) {
+                  Image(this.rowValue(item, '酒店图片'))
+                    .width('100%')
+                    .height(136)
+                    .objectFit(ImageFit.Cover)
+                    .borderRadius(13)
+                    .accessibilityText(this.titleOf(item) + '酒店图片')
+                }
+
+                Row() {
+                  Column() {
+                    Row() {
+                      Text(item.toolName === 'hotel.detail' ? '实时房型' : '酒店')
+                        .fontSize(11)
+                        .fontWeight(FontWeight.Medium)
+                        .fontColor(COLOR_ACCENT_DARK)
+                        .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+                        .backgroundColor(COLOR_ACCENT_SOFT)
+                        .borderRadius(7)
+                      Text(item.sourceTag)
+                        .fontSize(11)
+                        .fontColor(COLOR_MUTED)
+                        .margin({ left: 8 })
+                    }
+                    .alignItems(VerticalAlign.Center)
+
+                    Text(this.titleOf(item))
+                      .fontSize(18)
+                      .fontWeight(FontWeight.Bold)
+                      .fontColor(COLOR_INK)
+                      .lineHeight(24)
+                      .maxLines(2)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                      .margin({ top: 9 })
+                  }
+                  .alignItems(HorizontalAlign.Start)
+                  .layoutWeight(1)
+                  .margin({ right: 12 })
+
+                  if (this.hotelPrice(item).length > 0) {
+                    Column() {
+                      Text(this.hotelPrice(item))
+                        .fontSize(19)
+                        .fontWeight(FontWeight.Bold)
+                        .fontColor(COLOR_ACCENT_DEEP)
+                      Text(this.hotelPriceLabel(item))
+                        .fontSize(10)
+                        .fontColor(COLOR_MUTED)
+                        .margin({ top: 3 })
+                    }
+                    .alignItems(HorizontalAlign.End)
+                  } else {
+                    StatusBadgeView({ status: item.status, label: item.sourceTag })
+                  }
+                }
+                .width('100%')
+                .alignItems(VerticalAlign.Top)
+                .margin({ top: this.rowValue(item, '酒店图片').length > 0 ? 14 : 0 })
+
+                if (this.rowValue(item, '地址').length > 0) {
+                  Text(this.rowValue(item, '地址'))
+                    .fontSize(13)
+                    .fontColor(COLOR_TEXT)
+                    .lineHeight(20)
+                    .maxLines(2)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    .margin({ top: 10 })
+                }
+
+                if (this.rowValue(item, '入住').length > 0 || this.rowValue(item, '客人').length > 0) {
+                  Row() {
+                    if (this.rowValue(item, '入住').length > 0) {
+                      Column() {
+                        Text('入住安排')
+                          .fontSize(10)
+                          .fontColor(COLOR_MUTED)
+                        Text(this.rowValue(item, '入住'))
+                          .fontSize(12)
+                          .fontWeight(FontWeight.Medium)
+                          .fontColor(COLOR_INK)
+                          .maxLines(2)
+                          .margin({ top: 4 })
+                      }
+                      .alignItems(HorizontalAlign.Start)
+                      .layoutWeight(1)
+                    }
+                    if (this.rowValue(item, '客人').length > 0) {
+                      Column() {
+                        Text('入住人数')
+                          .fontSize(10)
+                          .fontColor(COLOR_MUTED)
+                        Text(this.rowValue(item, '客人'))
+                          .fontSize(12)
+                          .fontWeight(FontWeight.Medium)
+                          .fontColor(COLOR_INK)
+                          .maxLines(2)
+                          .margin({ top: 4 })
+                      }
+                      .alignItems(HorizontalAlign.Start)
+                      .layoutWeight(1)
+                      .margin({ left: 16 })
+                    }
+                  }
+                  .width('100%')
+                  .alignItems(VerticalAlign.Top)
+                  .padding({ left: 12, right: 12, top: 11, bottom: 11 })
+                  .margin({ top: 13 })
+                  .backgroundColor(COLOR_CARD_INSET)
+                  .borderRadius(11)
+                }
+
+                if (this.hotelDetailRows(item).length > 0) {
+                  Column() {
+                    ForEach(this.hotelDetailRows(item), (row: A2uiGenericToolResultRowData, rowIndex: number) => {
+                      Row() {
+                        Text(row.label)
+                          .fontSize(11)
+                          .fontColor(COLOR_MUTED)
+                          .width(78)
+                        Text(row.value)
+                          .fontSize(12)
+                          .fontColor(COLOR_TEXT)
+                          .lineHeight(18)
+                          .maxLines(row.label === '取消政策' || row.label === '税费与有效期' ? 3 : 2)
+                          .textOverflow({ overflow: TextOverflow.Ellipsis })
+                          .layoutWeight(1)
+                      }
+                      .width('100%')
+                      .alignItems(VerticalAlign.Top)
+                      .padding({ top: rowIndex === 0 ? 0 : 8 })
+                    }, (row: A2uiGenericToolResultRowData, rowIndex: number) =>
+                      row.label + row.value + rowIndex.toString()
+                    )
+                  }
+                  .width('100%')
+                  .padding({ left: 2, right: 2, top: 13 })
+                }
+
+                if (this.rowValue(item, '能力边界').length > 0) {
+                  Text(this.rowValue(item, '能力边界'))
+                    .fontSize(11)
+                    .fontColor(COLOR_MUTED)
+                    .lineHeight(17)
+                    .width('100%')
+                    .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+                    .margin({ top: 13 })
+                    .backgroundColor(COLOR_FIELD)
+                    .borderRadius(9)
+                    .border({ width: 1, color: COLOR_LINE })
+                }
+              } else if (this.isWeatherResult(item)) {
                 Row() {
                   Column() {
                     Text(this.titleOf(item))
@@ -779,9 +957,17 @@ export struct GenericToolResultsView {
               }
             }
             .width('100%')
-            .padding({ left: this.isWeatherResult(item) ? 12 : 0, right: this.isWeatherResult(item) ? 12 : 0, top: 12, bottom: 12 })
-            .backgroundColor(this.isWeatherResult(item) ? COLOR_CARD_RAISED : A2UI_PANEL_BACKGROUND_COLOR)
-            .borderRadius(this.isWeatherResult(item) ? 16 : 0)
+            .padding({
+              left: this.isWeatherResult(item) || this.isHotelResult(item) ? 12 : 0,
+              right: this.isWeatherResult(item) || this.isHotelResult(item) ? 12 : 0,
+              top: 12,
+              bottom: 12
+            })
+            .backgroundColor(
+              this.isWeatherResult(item) || this.isHotelResult(item) ?
+                COLOR_CARD_RAISED : A2UI_PANEL_BACKGROUND_COLOR
+            )
+            .borderRadius(this.isWeatherResult(item) || this.isHotelResult(item) ? 16 : 0)
             .border({ width: { bottom: index === this.results().length - 1 ? 0 : 1 }, color: COLOR_CARD_EDGE })
             .transition(a2uiEnterTransition())
           }, (item: A2uiGenericToolResultData, index: number) => item.toolName + item.title + index.toString() + '-' + this.renderTick.toString())

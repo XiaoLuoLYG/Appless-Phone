@@ -13,6 +13,8 @@ import {
   HotelPlannerIdFactory
 } from '../main/ets/pages/A2uiHome/agent/HotelLeaderPlanner';
 import {
+  bimLifecycleSweepModelConfigured,
+  bimTurnInputBusy,
   hotelModelSettingsFingerprint,
   hotelTurnReadyMessage
 } from '../main/ets/pages/A2uiHome/Index';
@@ -78,6 +80,23 @@ const CROSS_YEAR_SEARCH_JSON: string = '{' +
   '"roomCount":1,' +
   '"currency":"CNY",' +
   '"size":10' +
+  '}';
+
+const TOKYO_MODEL_QUERY: string =
+  '请帮我搜索2026年8月15日至17日东京的酒店，4位成人，2间房';
+const TOKYO_SEARCH_JSON: string = '{' +
+  '"originQuery":"' + TOKYO_MODEL_QUERY + '",' +
+  '"place":"东京",' +
+  '"placeType":"CITY",' +
+  '"countryCode":"JP",' +
+  '"checkInDate":"2026-08-15",' +
+  '"stayNights":2,' +
+  '"adultCount":4,' +
+  '"childCount":0,' +
+  '"childAgeDetails":[],' +
+  '"roomCount":2,' +
+  '"currency":"",' +
+  '"size":0' +
   '}';
 
 class FakeHotelModel implements LocalModel {
@@ -294,6 +313,19 @@ export default function hotelLeaderPlannerTest() {
         expect(args.stayNights).assertEqual(2);
       });
 
+    it('accepts the explicitly named Tokyo hotel search without weakening country validation', 0,
+      async () => {
+        const plan = await planFor(TOKYO_MODEL_QUERY, TOKYO_SEARCH_JSON);
+        const args = plan.dataTasks[0].args as
+          Record<string, Object | string | number | boolean | null | undefined>;
+
+        expect(args.originQuery).assertEqual(TOKYO_MODEL_QUERY);
+        expect(args.place).assertEqual('东京');
+        expect(args.countryCode).assertEqual('JP');
+        expect(args.adultCount).assertEqual(4);
+        expect(args.roomCount).assertEqual(2);
+      });
+
     it('rejects empty generalized arbitrary and Unicode-mutated omitted prefixes', 0, async () => {
       const emptyQuery = C20_SEARCH_JSON.replace(C20_MODEL_QUERY, '');
       const generalized = C20_SEARCH_JSON.replace(C20_MODEL_QUERY, '酒店');
@@ -461,6 +493,32 @@ export default function hotelLeaderPlannerTest() {
       expect(hotelTurnReadyMessage('empty', '酒店查询').indexOf('真实酒店结果')).assertEqual(-1);
       expect(hotelTurnReadyMessage('partial', '酒店查询').indexOf('部分')).assertLarger(-1);
       expect(hotelTurnReadyMessage('success', '酒店查询').indexOf('真实酒店结果')).assertLarger(-1);
+    });
+
+    it('starts lifecycle sweeps only with the same complete model configuration used by the provider', 0, () => {
+      const settings: LocalModelSettings = {
+        provider: 'openai-compatible',
+        baseUrl: 'https://model.example/v1',
+        model: 'model-a',
+        apiKey: 'secret-a',
+        customParametersJson: '',
+        ignoreToolSurfaceUpdates: false
+      };
+      expect(bimLifecycleSweepModelConfigured(settings)).assertTrue();
+      settings.apiKey = ' ';
+      expect(bimLifecycleSweepModelConfigured(settings)).assertFalse();
+      settings.apiKey = 'secret-a';
+      settings.baseUrl = ' ';
+      expect(bimLifecycleSweepModelConfigured(settings)).assertFalse();
+      settings.baseUrl = 'https://model.example/v1';
+      settings.model = ' ';
+      expect(bimLifecycleSweepModelConfigured(settings)).assertFalse();
+    });
+
+    it('treats a lifecycle sweep as busy at both prompt submission entries', 0, () => {
+      expect(bimTurnInputBusy(false, false)).assertFalse();
+      expect(bimTurnInputBusy(true, false)).assertTrue();
+      expect(bimTurnInputBusy(false, true)).assertTrue();
     });
   });
 }

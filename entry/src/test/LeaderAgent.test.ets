@@ -12,6 +12,7 @@ import {
   DataResultStatus,
   InputUserPayload,
   LeaderAgent,
+  LeaderBimSuggestion,
   LeaderDataTaskInputNormalizer,
   LeaderDataTask,
   LeaderDecision,
@@ -21,6 +22,7 @@ import {
   LeaderPlannerResult,
   LeaderPlanningContext,
   LeaderToolMetadata,
+  LeaderUiIntent,
   LeaderUiTask,
   LinkedMessageBus,
   LocalModel,
@@ -227,6 +229,30 @@ class RoundScriptedPlanner implements LeaderPlanner {
       throw new Error('No scripted Leader decision');
     }
     return this.decisions.shift() as LeaderDecision;
+  }
+}
+
+class InheritedBimDecision implements LeaderDecision {
+  personaId: string = 'travel_companion';
+  skillId: string = '';
+  requestedCapabilityIds: string[] = [];
+  roundAction: 'answer' = 'answer';
+  dataTasks: LeaderDecisionDataTask[] = [];
+  uiIntent: LeaderUiIntent = {
+    purpose: 'conversation',
+    preferredDensity: 'comfortable',
+    requiredSections: []
+  };
+  answer: string = 'Enough observations';
+  reasonCode: string = 'answer';
+
+  get bimSuggestion(): LeaderBimSuggestion {
+    return {
+      title: '东京旅行',
+      summary: '八月东京一周旅行',
+      reason: '需要继续筛选机票和酒店',
+      keywords: ['东京', '旅行']
+    };
   }
 }
 
@@ -784,8 +810,116 @@ async function repairCallsAfterTerminal(kind: string): Promise<number> {
   }
 }
 
+async function leaderRejectsBimDecision(decision: LeaderDecision): Promise<boolean> {
+  const bus = new LinkedMessageBus();
+  const leader = new LeaderAgent(
+    bus,
+    new RoundScriptedPlanner([decision]),
+    semanticPlanningContext()
+  );
+  const observer = bus.openReader();
+  leader.start();
+  try {
+    bus.publish(inputMessage());
+    await receive(observer);
+    const rejected = await receive(observer);
+    return rejected.type === AgentMessageType.TASK_ERROR &&
+      (rejected.payload as TaskErrorPayload).code === 'LEADER_PLAN_INVALID';
+  } finally {
+    leader.stop();
+    observer.close();
+  }
+}
+
 export default function leaderAgentTest() {
   describe('leaderAgent', () => {
+    it('publishes validated BIM metadata only on the terminal turn result', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const decision = semanticDecision([], 'answer');
+      decision.requestedCapabilityIds = [];
+      decision.bimSuggestion = {
+        title: '东京旅行',
+        summary: '八月东京一周旅行',
+        reason: '需要继续筛选机票和酒店',
+        keywords: ['东京', '旅行', '机票', '酒店']
+      };
+      decision.bimContextUpdate = {
+        summary: '东京旅行，机票待确认',
+        facts: ['八月出发'],
+        constraints: ['预算有限'],
+        decisions: [],
+        entities: ['东京'],
+        timeAnchors: ['八月'],
+        locations: ['东京'],
+        commitments: ['筛选机票'],
+        keywords: ['东京', '机票']
+      };
+      const leader = new LeaderAgent(
+        bus,
+        new RoundScriptedPlanner([decision]),
+        semanticPlanningContext()
+      );
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      const terminal = await receive(observer);
+      const payload = terminal.payload as TurnResultPayload;
+
+      expect(terminal.type).assertEqual(AgentMessageType.TURN_RESULT);
+      expect(payload.bimSuggestion?.title).assertEqual('东京旅行');
+      expect(payload.bimSuggestion?.keywords.join(',')).assertEqual('东京,旅行,机票,酒店');
+      expect(payload.bimContextUpdate?.summary).assertEqual('东京旅行，机票待确认');
+      expect(payload.bimContextUpdate?.constraints[0]).assertEqual('预算有限');
+      leader.stop();
+      observer.close();
+    });
+
+    it('rejects malformed BIM values at the Leader boundary', 0, async () => {
+      const oversized = semanticDecision([], 'answer');
+      oversized.requestedCapabilityIds = [];
+      oversized.bimSuggestion = {
+        title: '东京旅行',
+        summary: 'a'.repeat(501),
+        reason: 'later',
+        keywords: ['东京']
+      };
+      const unknown = semanticDecision([], 'answer');
+      unknown.requestedCapabilityIds = [];
+      unknown.bimSuggestion = JSON.parse(
+        '{"title":"东京旅行","summary":"八月东京一周旅行","reason":"later",' +
+        '"keywords":["东京"],"extra":"not allowed"}'
+      ) as LeaderBimSuggestion;
+      const duplicate = semanticDecision([], 'answer');
+      duplicate.requestedCapabilityIds = [];
+      duplicate.bimSuggestion = {
+        title: '东京旅行',
+        summary: '八月东京一周旅行',
+        reason: 'later',
+        keywords: ['东京', ' 东京 ']
+      };
+
+      expect(await leaderRejectsBimDecision(oversized)).assertTrue();
+      expect(await leaderRejectsBimDecision(unknown)).assertTrue();
+      expect(await leaderRejectsBimDecision(duplicate)).assertTrue();
+    });
+
+    it('rejects inherited optional BIM metadata at the Leader boundary', 0, async () => {
+      expect(await leaderRejectsBimDecision(new InheritedBimDecision())).assertTrue();
+    });
+
+    it('rejects a numeric BIM array entry as an invalid Leader decision', 0, async () => {
+      const numeric = semanticDecision([], 'answer');
+      numeric.requestedCapabilityIds = [];
+      numeric.bimSuggestion = JSON.parse(
+        '{"title":"东京旅行","summary":"八月东京一周旅行","reason":"later",' +
+        '"keywords":["东京",1]}'
+      ) as LeaderBimSuggestion;
+
+      expect(await leaderRejectsBimDecision(numeric)).assertTrue();
+    });
+
     it('publishes an exact valid legacy hotel shape on round one', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const leader: LeaderAgent = new LeaderAgent(

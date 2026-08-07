@@ -1995,16 +1995,22 @@ export default function registeredPageActionMigrationTest() {
     it('limits virtual ownership to exact World Cup and structured Maps handlers', 0, async () => {
       const invoker = new RecordingPageToolInvoker();
       const handler = new RegisteredPageActionHandler(invoker);
+      const hostGeneration: number = 1;
       const runtime = canary(
         new QueueModel([WORLDCUP_DECISION, MAPS_DECISION, MAPS_DECISION, SOCIAL_DECISION]),
         handler,
-        (): RegisteredPageSnapshot | null => null
+        (): RegisteredPageSnapshot | null => null,
+        undefined,
+        undefined,
+        new RecordingOpener(),
+        undefined,
+        (): number => hostGeneration
       );
 
-      const worldcup = await runtime.submit('打开世界杯页面', { text: '' });
-      const maps = await runtime.submit('打开深圳北到香港西九龙的路线', { text: '' });
-      const ambiguousMaps = await runtime.submit('打开路线', { text: '' });
-      const social = await runtime.submit('帮我起草回复', { text: '' });
+      const worldcup = await runtime.submit('打开世界杯页面', { text: '' }, hostGeneration);
+      const maps = await runtime.submit('打开深圳北到香港西九龙的路线', { text: '' }, hostGeneration);
+      const ambiguousMaps = await runtime.submit('打开路线', { text: '' }, hostGeneration);
+      const social = await runtime.submit('帮我起草回复', { text: '' }, hostGeneration);
 
       expect(worldcup.kind).assertEqual('settled');
       expect(maps.kind).assertEqual('settled');

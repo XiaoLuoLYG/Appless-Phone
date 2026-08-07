@@ -12,6 +12,9 @@ import { LinkedMessageBus } from '../message/LinkedMessageBus';
 import {
   InputUserPayload,
   LeaderCurrentLocalDateProvider,
+  LeaderBimContextUpdate,
+  LeaderBimSuggestion,
+  validLeaderBimDashboardItems,
   LeaderDataTask,
   LeaderDataTaskInputNormalizer,
   LeaderDecision,
@@ -69,6 +72,8 @@ interface LeaderTurnState {
   uiSurfaceId: string;
   virtualActionTaskId: string;
   pendingAnswer: string | null;
+  bimSuggestion: LeaderBimSuggestion | null;
+  bimContextUpdate: LeaderBimContextUpdate | null;
   dataDone: boolean;
   terminal: boolean;
   timerId: number;
@@ -85,6 +90,14 @@ interface LeaderPendingDataTask {
 const MAX_POST_OBSERVATION_PLANNING_MS: number = 12000;
 const MAX_POST_OBSERVATION_UI_RESERVE_MS: number = 8000;
 const OBSERVATION_FALLBACK_ANSWER: string = 'Showing the available tool results.';
+
+function hasOwnKey(value: Object, key: string): boolean {
+  return Object.getOwnPropertyNames(value).indexOf(key) >= 0;
+}
+
+function hasKey(value: Object, key: string): boolean {
+  return Reflect.has(value, key);
+}
 
 export class LeaderAgent extends MessageDrivenAgent {
   private readonly bus: LinkedMessageBus;
@@ -273,6 +286,8 @@ export class LeaderAgent extends MessageDrivenAgent {
       uiSurfaceId: '',
       virtualActionTaskId: '',
       pendingAnswer: null,
+      bimSuggestion: null,
+      bimContextUpdate: null,
       dataDone: false,
       terminal: false,
       timerId: -1,
@@ -499,6 +514,12 @@ export class LeaderAgent extends MessageDrivenAgent {
     state.semantic = true;
     state.personaId = decision.personaId;
     state.skillId = decision.skillId;
+    if (hasOwnKey(decision, 'bimSuggestion') && decision.bimSuggestion !== undefined) {
+      state.bimSuggestion = decision.bimSuggestion;
+    }
+    if (hasOwnKey(decision, 'bimContextUpdate') && decision.bimContextUpdate !== undefined) {
+      state.bimContextUpdate = decision.bimContextUpdate;
+    }
     if (decision.roundAction === 'answer' || decision.roundAction === 'clarify') {
       if (state.dataTaskIds.length > 0) {
         state.pendingAnswer = decision.answer as string;
@@ -975,6 +996,12 @@ export class LeaderAgent extends MessageDrivenAgent {
       rawKeys.indexOf('normalizationCurrentLocalDate') >= 0;
     const hasNormalizedActionInput: boolean =
       rawKeys.indexOf('normalizedActionInputText') >= 0;
+    const hasBimSuggestion: boolean = hasOwnKey(decision, 'bimSuggestion');
+    const hasBimContextUpdate: boolean = hasOwnKey(decision, 'bimContextUpdate');
+    if ((!hasBimSuggestion && hasKey(decision, 'bimSuggestion')) ||
+      (!hasBimContextUpdate && hasKey(decision, 'bimContextUpdate'))) {
+      return false;
+    }
     const normalizationDateMatchesAuthority: boolean =
       this.validNormalizationCurrentLocalDate(decision.normalizationCurrentLocalDate) &&
       decision.normalizationCurrentLocalDate === trustedCurrentLocalDate;
@@ -993,6 +1020,8 @@ export class LeaderAgent extends MessageDrivenAgent {
     const keys: string = rawKeys
       .filter((key: string): boolean => key !== 'normalizationCurrentLocalDate')
       .filter((key: string): boolean => key !== 'normalizedActionInputText')
+      .filter((key: string): boolean => key !== 'bimSuggestion')
+      .filter((key: string): boolean => key !== 'bimContextUpdate')
       .sort()
       .join(',');
     if (keys !== 'dataTasks,personaId,reasonCode,requestedCapabilityIds,roundAction,skillId,uiIntent' &&
@@ -1028,7 +1057,62 @@ export class LeaderAgent extends MessageDrivenAgent {
     }
     const actionIntent = decision.actionIntent;
     return (actionIntent === undefined || this.validActionIntent(actionIntent)) &&
+      (!hasBimSuggestion || (decision.bimSuggestion !== undefined &&
+        this.validBimSuggestion(decision.bimSuggestion))) &&
+      (!hasBimContextUpdate || (decision.bimContextUpdate !== undefined &&
+        this.validBimContextUpdate(decision.bimContextUpdate))) &&
       this.requestedCapabilitiesMatchExecution(decision);
+  }
+
+  private validBimSuggestion(value: LeaderBimSuggestion): boolean {
+    return value !== null && typeof value === 'object' && !Array.isArray(value) &&
+      Object.keys(value).sort().join(',') === 'keywords,reason,summary,title' &&
+      this.validBoundedText(value.title, 80) &&
+      this.validBoundedText(value.summary, 500) &&
+      this.validBoundedText(value.reason, 500) &&
+      this.validBoundedStrings(value.keywords, 16, 40);
+  }
+
+  private validBimContextUpdate(value: LeaderBimContextUpdate): boolean {
+    const keys: string = value === null || value === undefined ? '' :
+      Object.keys(value).sort().join(',');
+    return value !== null && typeof value === 'object' && !Array.isArray(value) &&
+      (keys === 'commitments,constraints,decisions,entities,facts,keywords,locations,summary,timeAnchors' ||
+        keys === 'commitments,constraints,dashboardItems,decisions,entities,facts,keywords,locations,summary,timeAnchors') &&
+      this.validBoundedText(value.summary, 2000) &&
+      this.validBoundedStrings(value.facts, 32, 240) &&
+      this.validBoundedStrings(value.constraints, 32, 240) &&
+      this.validBoundedStrings(value.decisions, 32, 240) &&
+      this.validBoundedStrings(value.entities, 16, 80) &&
+      this.validBoundedStrings(value.timeAnchors, 16, 80) &&
+      this.validBoundedStrings(value.locations, 16, 80) &&
+      this.validBoundedStrings(value.commitments, 16, 80) &&
+      this.validBoundedStrings(value.keywords, 16, 40) &&
+      validLeaderBimDashboardItems(value.dashboardItems);
+  }
+
+  private validBoundedText(value: string, maxLength: number): boolean {
+    return typeof value === 'string' && value.length > 0 && value.length <= maxLength &&
+      value === value.trim();
+  }
+
+  private validBoundedStrings(values: string[], maxEntries: number, maxLength: number): boolean {
+    if (!Array.isArray(values) || values.length > maxEntries) {
+      return false;
+    }
+    const seen: Set<string> = new Set<string>();
+    for (let index = 0; index < values.length; index++) {
+      const value: string = values[index];
+      if (typeof value !== 'string') {
+        return false;
+      }
+      const canonical: string = value.trim();
+      if (!this.validBoundedText(value, maxLength) || seen.has(canonical)) {
+        return false;
+      }
+      seen.add(canonical);
+    }
+    return true;
   }
 
   private validRequestedCapabilityIds(ids: string[]): boolean {
@@ -1583,6 +1667,12 @@ export class LeaderAgent extends MessageDrivenAgent {
     }
     if (state.uiSurfaceId.length > 0) {
       payload.surfaceId = state.uiSurfaceId;
+    }
+    if (state.bimSuggestion !== null) {
+      payload.bimSuggestion = state.bimSuggestion;
+    }
+    if (state.bimContextUpdate !== null) {
+      payload.bimContextUpdate = state.bimContextUpdate;
     }
     this.bus.publish({
       type: AgentMessageType.TURN_RESULT,

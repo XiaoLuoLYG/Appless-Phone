@@ -267,6 +267,35 @@ const VALID_ANSWER_DECISION: string = LIVE_ANSWER_WITHOUT_REASON_CODE.substring(
   0,
   LIVE_ANSWER_WITHOUT_REASON_CODE.length - 1
 ) + ',"reasonCode":"greeting"}';
+const BIM_STATE_ONLY_TOOL_DECISION: string =
+  '{"personaId":"travel_companion","skillId":"","requestedCapabilityIds":["hotel.search"],' +
+  '"roundAction":"execute","continuationMode":"complete","dataTasks":[{"localId":"hotel",' +
+  '"goal":"更新东京旅行酒店要求","allowedToolIds":["hotel.search"],"toolId":"hotel.search",' +
+  '"input":{},"required":true}],"uiIntent":{"purpose":"更新东京旅行","preferredDensity":"comfortable",' +
+  '"requiredSections":["hotel"]}}';
+const BIM_STATE_ONLY_ANSWER: string =
+  '{"personaId":"travel_companion","skillId":"","requestedCapabilityIds":[],' +
+  '"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
+  '"uiIntent":{"purpose":"更新东京旅行","preferredDensity":"comfortable",' +
+  '"requiredSections":["overview"]},"answer":"已把人数更新为四人，并记录两间双床房。",' +
+  '"bimContextUpdate":{"summary":"东京四人旅行，酒店需要两间双床房",' +
+  '"facts":["出行人数为四人"],"constraints":["酒店需要两间双床房"],"decisions":[],' +
+  '"entities":["东京","四人"],"timeAnchors":[],"locations":["东京"],' +
+  '"commitments":["预订两间双床房"],"keywords":["东京","旅行","四人","双床房"]}}';
+const BIM_CREATION_ANSWER: string =
+  '{"personaId":"travel_companion","skillId":"","requestedCapabilityIds":[],' +
+  '"roundAction":"answer","continuationMode":"complete","dataTasks":[],' +
+  '"uiIntent":{"purpose":"记录长期事项","preferredDensity":"comfortable",' +
+  '"requiredSections":["overview"]},"answer":"已记下这件长期事项。",' +
+  '"bimSuggestion":{"title":"南京婚宴","summary":"跟进南京婚宴宾客安排",' +
+  '"reason":"有日期、参与人和后续确认进度","keywords":["南京","婚宴","宾客"]},' +
+  '"bimContextUpdate":{"summary":"2027年2月14日南京婚宴，持续跟进宾客确认",' +
+  '"facts":["当前小王和李阿姨参加"],"constraints":["总人数50人","每桌10人"],' +
+  '"decisions":[],"entities":["小王","李阿姨"],"timeAnchors":["2027-02-14"],' +
+  '"locations":["南京"],"commitments":["持续跟进宾客确认"],' +
+  '"keywords":["南京","婚宴","宾客"],"dashboardItems":[' +
+  '{"kind":"event","title":"婚宴日期","value":"2027-02-14",' +
+  '"detail":"南京","status":"进行中"}]}}';
 const EXPLICIT_SERIAL_QUERY: string =
   '查一下现在的时间，查好时间之后帮我打车从华为坂田基地打车到秋岗花园，再在明天的这个时间新建一个会议日程';
 const EXPLICIT_SERIAL_QUERY_WITH_DURATION: string =
@@ -480,6 +509,16 @@ const socialInputNormalizer: LeaderDataTaskInputNormalizer = (
     Object.keys(values).join(',') !== 'platforms' ||
     !Array.isArray(values['platforms'])) {
     throw new Error('SOCIAL_FEED_PLATFORMS_INVALID');
+  }
+  return task.input;
+};
+
+const rejectedHotelInputNormalizer: LeaderDataTaskInputNormalizer = (
+  _input: InputUserPayload,
+  task: LeaderDecisionDataTask
+): Object => {
+  if (task.toolId === 'hotel.search') {
+    throw new Error('HOTEL_STATE_UPDATE_IS_NOT_SEARCH');
   }
   return task.input;
 };
@@ -1057,6 +1096,322 @@ export default function multiAgentLeaderPlannerTest() {
       expect(context.tools[foodToolIndex].intent).assertEqual('local.food.search');
     });
 
+    it('accepts a conservative BIM suggestion from the same Leader call', 0, async () => {
+      const output: string = LIVE_ANSWER_WITHOUT_REASON_CODE.substring(
+        0, LIVE_ANSWER_WITHOUT_REASON_CODE.length - 1
+      ) + ',"bimSuggestion":{"title":"东京旅行","summary":"八月东京一周旅行",' +
+        '"reason":"需要继续筛选机票和酒店","keywords":["东京","旅行","机票","酒店"]}}';
+      const decision = await new MultiAgentLeaderPlanner(new QueueLocalModel([output])).plan(
+        inputMessage(), { text: '规划东京旅行' }, planningContext(), 1
+      );
+
+      expect(decision.bimSuggestion?.title).assertEqual('东京旅行');
+      expect(decision.bimSuggestion?.keywords.length).assertEqual(4);
+    });
+
+    it('accepts initial dashboard state together with a BIM suggestion', 0, async () => {
+      const prefix: string = LIVE_ANSWER_WITHOUT_REASON_CODE.substring(
+        0, LIVE_ANSWER_WITHOUT_REASON_CODE.length - 1
+      );
+      const output: string = prefix +
+        ',"bimSuggestion":{"title":"婚宴宾客","summary":"南京婚宴宾客安排",' +
+        '"reason":"需要持续确认宾客","keywords":["婚宴","宾客","南京"]},' +
+        '"bimContextUpdate":{"summary":"49 位宾客已确认，3 位待确认",' +
+        '"facts":["婚宴在南京举办"],"constraints":["每桌10人"],"decisions":[],' +
+        '"entities":["017","小王","李阿姨"],"timeAnchors":["2027-02-14"],' +
+        '"locations":["南京"],"commitments":["持续确认三位宾客"],' +
+        '"keywords":["婚宴","宾客","桌数"],"dashboardItems":[' +
+        '{"kind":"metric","title":"已确认","value":"49","detail":"位宾客","status":""},' +
+        '{"kind":"person","title":"小王","value":"待确认","detail":"","status":"待回复"}]}}';
+      const fallback: string = prefix +
+        ',"bimSuggestion":{"title":"婚宴宾客","summary":"南京婚宴宾客安排",' +
+        '"reason":"需要持续确认宾客","keywords":["婚宴","宾客","南京"]}}';
+      const model = new QueueLocalModel([output, fallback]);
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(), { text: '帮我持续跟进婚宴宾客' }, planningContext(), 1,
+        (): boolean => true
+      );
+
+      expect(model.prompts.length).assertEqual(1);
+      expect(decision.bimSuggestion?.title).assertEqual('婚宴宾客');
+      expect(decision.bimContextUpdate?.dashboardItems?.length).assertEqual(2);
+      expect(decision.bimContextUpdate?.dashboardItems?.[1].title).assertEqual('小王');
+    });
+
+    it('moves a new long-running wedding matter out of persona memory', 0, async () => {
+      const model = new QueueLocalModel([
+        actionDecision('memory.update'),
+        BIM_CREATION_ANSWER
+      ]);
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: '2027年2月14日在南京办婚宴，小王和李阿姨参加，总人数50人，每桌10人，后续持续跟进宾客确认。' },
+        actionOwnerContext(),
+        1,
+        (): boolean => true
+      );
+
+      expect(model.prompts.length).assertEqual(2);
+      expect(decision.requestedCapabilityIds.length).assertEqual(0);
+      expect(decision.actionIntent === undefined).assertTrue();
+      expect(decision.bimSuggestion?.title).assertEqual('南京婚宴');
+      expect(decision.bimContextUpdate?.dashboardItems?.length).assertEqual(1);
+    });
+
+    it('uses the same boundary for a non-wedding multi-stage group matter', 0, async () => {
+      const model = new QueueLocalModel([
+        actionDecision('memory.update'),
+        BIM_CREATION_ANSWER
+      ]);
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: '下个月和三位同事分阶段推进展会，后续每周跟进任务。' },
+        actionOwnerContext(),
+        1,
+        (): boolean => true
+      );
+
+      expect(model.prompts.length).assertEqual(2);
+      expect(decision.requestedCapabilityIds.length).assertEqual(0);
+      expect(decision.bimSuggestion !== undefined).assertTrue();
+      expect(decision.bimContextUpdate?.dashboardItems?.length).assertEqual(1);
+    });
+
+    it('suggests a natural long-running matter without a remember prefix', 0, async () => {
+      const model = new QueueLocalModel([
+        LIVE_ANSWER_WITHOUT_REASON_CODE,
+        BIM_CREATION_ANSWER
+      ]);
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: '我下个月要去上海参加展会，后面还要持续跟进准备，先帮我把这个计划记下来。' },
+        actionOwnerContext(),
+        1,
+        (): boolean => true
+      );
+
+      expect(model.prompts.length).assertEqual(2);
+      expect(decision.requestedCapabilityIds.length).assertEqual(0);
+      expect(decision.actionIntent === undefined).assertTrue();
+      expect(decision.bimSuggestion !== undefined).assertTrue();
+      expect(decision.bimContextUpdate?.dashboardItems?.length).assertEqual(1);
+    });
+
+    it('recognizes natural staged progress without a remember prefix', 0, async () => {
+      const model = new QueueLocalModel([
+        LIVE_ANSWER_WITHOUT_REASON_CODE,
+        BIM_CREATION_ANSWER
+      ]);
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: '孩子明年参加高考，报名、备考和志愿分阶段推进，每周跟进准备进度。' },
+        actionOwnerContext(),
+        1,
+        (): boolean => true
+      );
+
+      expect(model.prompts.length).assertEqual(2);
+      expect(decision.requestedCapabilityIds.length).assertEqual(0);
+      expect(decision.bimSuggestion !== undefined).assertTrue();
+      expect(decision.bimContextUpdate?.dashboardItems?.length).assertEqual(1);
+    });
+
+    it('repairs a new long-running matter that the model routes to a business action', 0, async () => {
+      const model = new QueueLocalModel([
+        actionDecision('calendar.event.create'),
+        BIM_CREATION_ANSWER
+      ]);
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: '请记在心上：2027年5月和三位同事分阶段筹备展会，后续每周跟进准备状态。' },
+        actionOwnerContext(),
+        1,
+        (): boolean => true
+      );
+
+      expect(model.prompts.length).assertEqual(2);
+      expect(decision.requestedCapabilityIds.length).assertEqual(0);
+      expect(decision.actionIntent === undefined).assertTrue();
+      expect(decision.bimSuggestion !== undefined).assertTrue();
+      expect(decision.bimContextUpdate?.dashboardItems?.length).assertEqual(1);
+    });
+
+    it('requires a complete initial BIM payload for an explicit new matter', 0, async () => {
+      const prefix: string = LIVE_ANSWER_WITHOUT_REASON_CODE.substring(
+        0, LIVE_ANSWER_WITHOUT_REASON_CODE.length - 1
+      );
+      const incomplete: string = prefix +
+        ',"bimSuggestion":{"title":"展会筹备","summary":"分阶段跟进展会准备",' +
+        '"reason":"有日期、参与人和持续进度","keywords":["展会","同事"]}}';
+      const model = new QueueLocalModel([incomplete, BIM_CREATION_ANSWER]);
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: '请记在心上：2027年5月和三位同事分阶段筹备展会，后续每周跟进准备状态。' },
+        actionOwnerContext(),
+        1,
+        (): boolean => true
+      );
+
+      expect(model.prompts.length).assertEqual(2);
+      expect(decision.bimSuggestion !== undefined).assertTrue();
+      expect(decision.bimContextUpdate?.dashboardItems?.length).assertEqual(1);
+    });
+
+    it('keeps a stable preference in persona memory', 0, async () => {
+      const decision = await new MultiAgentLeaderPlanner(
+        new QueueLocalModel([actionDecision('memory.update')])
+      ).plan(
+        inputMessage(),
+        { text: '请记住我喜欢清淡口味，偏好少油少盐。' },
+        actionOwnerContext(),
+        1
+      );
+
+      expect(decision.requestedCapabilityIds.join(',')).assertEqual('memory.update');
+      expect(decision.actionIntent!.allowedActionIds.join(',')).assertEqual('memory.update');
+      expect(decision.bimSuggestion === undefined).assertTrue();
+    });
+
+    it('repairs an empty initial dashboard into known current state', 0, async () => {
+      const prefix: string = LIVE_ANSWER_WITHOUT_REASON_CODE.substring(
+        0, LIVE_ANSWER_WITHOUT_REASON_CODE.length - 1
+      );
+      const suggestion: string =
+        ',"bimSuggestion":{"title":"可信考试","summary":"跟进四科考试进度",' +
+        '"reason":"需要跨多次更新","keywords":["考试","科目","进度"]}';
+      const contextPrefix: string =
+        ',"bimContextUpdate":{"summary":"目标在截止日前通过四科","facts":[],' +
+        '"constraints":["2027-02-28前通过4科"],"decisions":[],"entities":["可信考试"],' +
+        '"timeAnchors":["2027-02-28"],"locations":[],"commitments":["持续跟进"],' +
+        '"keywords":["考试","科目","进度"],"dashboardItems":';
+      const empty: string = prefix + suggestion + contextPrefix + '[]}}';
+      const repaired: string = prefix + suggestion + contextPrefix +
+        '[{"kind":"progress","title":"通过进度","value":"0/4",' +
+        '"detail":"截止 2027-02-28","status":"进行中"}]}}';
+      const model = new QueueLocalModel([empty, repaired]);
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(), { text: '持续跟进可信考试四科进度' }, planningContext(), 1,
+        (): boolean => true
+      );
+
+      expect(model.prompts.length).assertEqual(2);
+      expect(decision.bimContextUpdate?.dashboardItems?.length).assertEqual(1);
+      expect(decision.bimContextUpdate?.dashboardItems?.[0].value).assertEqual('0/4');
+    });
+
+    it('rejects BIM metadata with an oversized summary', 0, async () => {
+      const invalid: string = LIVE_ANSWER_WITHOUT_REASON_CODE.substring(
+        0, LIVE_ANSWER_WITHOUT_REASON_CODE.length - 1
+      ) + ',"bimSuggestion":{"title":"东京旅行","summary":"' + 'a'.repeat(2001) +
+        '","reason":"later","keywords":["东京"]}}';
+      const model = new QueueLocalModel([invalid, LIVE_ANSWER_WITHOUT_REASON_CODE]);
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(), { text: '规划东京旅行' }, planningContext(), 1,
+        (): boolean => true
+      );
+
+      expect(model.prompts.length).assertEqual(2);
+      expect(decision.bimSuggestion === undefined).assertTrue();
+    });
+
+    it('rejects BIM metadata with an unknown key', 0, async () => {
+      const invalid: string = LIVE_ANSWER_WITHOUT_REASON_CODE.substring(
+        0, LIVE_ANSWER_WITHOUT_REASON_CODE.length - 1
+      ) + ',"bimSuggestion":{"title":"东京旅行","summary":"八月东京一周旅行",' +
+        '"reason":"later","keywords":["东京"],"extra":"not allowed"}}';
+      const model = new QueueLocalModel([invalid, LIVE_ANSWER_WITHOUT_REASON_CODE]);
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(), { text: '规划东京旅行' }, planningContext(), 1,
+        (): boolean => true
+      );
+
+      expect(model.prompts.length).assertEqual(2);
+      expect(decision.bimSuggestion === undefined).assertTrue();
+    });
+
+    it('rejects untrimmed BIM scalars and trim-equivalent array duplicates', 0, async () => {
+      const prefix: string = LIVE_ANSWER_WITHOUT_REASON_CODE.substring(
+        0, LIVE_ANSWER_WITHOUT_REASON_CODE.length - 1
+      );
+      const untrimmed: string = prefix +
+        ',"bimSuggestion":{"title":" 东京旅行 ","summary":"八月东京一周旅行",' +
+        '"reason":"later","keywords":["东京"]}}';
+      const duplicate: string = prefix +
+        ',"bimSuggestion":{"title":"东京旅行","summary":"八月东京一周旅行",' +
+        '"reason":"later","keywords":["东京"," 东京 "]}}';
+      const scalarModel = new QueueLocalModel([untrimmed, LIVE_ANSWER_WITHOUT_REASON_CODE]);
+      const duplicateModel = new QueueLocalModel([duplicate, LIVE_ANSWER_WITHOUT_REASON_CODE]);
+
+      const scalar = await new MultiAgentLeaderPlanner(scalarModel).plan(
+        inputMessage(), { text: '规划东京旅行' }, planningContext(), 1,
+        (): boolean => true
+      );
+      const array = await new MultiAgentLeaderPlanner(duplicateModel).plan(
+        inputMessage(), { text: '规划东京旅行' }, planningContext(), 1,
+        (): boolean => true
+      );
+
+      expect(scalarModel.prompts.length).assertEqual(2);
+      expect(scalar.bimSuggestion === undefined).assertTrue();
+      expect(duplicateModel.prompts.length).assertEqual(2);
+      expect(array.bimSuggestion === undefined).assertTrue();
+    });
+
+    it('allows context updates only for internal BIM context turns', 0, async () => {
+      const contextUpdate: string = LIVE_ANSWER_WITHOUT_REASON_CODE.substring(
+        0, LIVE_ANSWER_WITHOUT_REASON_CODE.length - 1
+      ) + ',"bimContextUpdate":{"summary":"东京旅行，机票待确认","facts":["八月出发"],' +
+        '"constraints":["预算有限"],"decisions":[],"entities":["东京"],"timeAnchors":["八月"],' +
+        '"locations":["东京"],"commitments":["筛选机票"],"keywords":["东京","机票"]}}';
+      const suggestion: string = LIVE_ANSWER_WITHOUT_REASON_CODE.substring(
+        0, LIVE_ANSWER_WITHOUT_REASON_CODE.length - 1
+      ) + ',"bimSuggestion":{"title":"东京旅行","summary":"八月东京一周旅行",' +
+        '"reason":"需要继续筛选机票","keywords":["东京","机票"]}}';
+      const redundantSuggestionUpdate: string = contextUpdate.substring(
+        0, contextUpdate.length - 1
+      ) + ',"bimSuggestion":{"title":"东京旅行","summary":"八月东京一周旅行",' +
+        '"reason":"需要继续筛选机票","keywords":["东京","机票"]}}';
+      const ordinaryModel = new QueueLocalModel([contextUpdate, LIVE_ANSWER_WITHOUT_REASON_CODE]);
+      const ordinary = await new MultiAgentLeaderPlanner(ordinaryModel).plan(
+        inputMessage(), { text: '规划东京旅行' }, planningContext(), 1,
+        (): boolean => true
+      );
+      const contextModel = new QueueLocalModel([suggestion, contextUpdate]);
+      const updated = await new MultiAgentLeaderPlanner(contextModel).plan(
+        inputMessage(), { text: '[BIM_CONTEXT] 继续规划东京旅行' }, planningContext(), 1,
+        (): boolean => true
+      );
+      const requiredModel = new QueueLocalModel([LIVE_ANSWER_WITHOUT_REASON_CODE, contextUpdate]);
+      const required = await new MultiAgentLeaderPlanner(requiredModel).plan(
+        inputMessage(), { text: '[BIM_CONTEXT] 继续规划东京旅行' }, planningContext(), 1,
+        (): boolean => true
+      );
+      const memoryModel = new QueueLocalModel([actionDecision('memory.update'), contextUpdate]);
+      const memorySeparated = await new MultiAgentLeaderPlanner(memoryModel).plan(
+        inputMessage(), { text: '[BIM_CONTEXT] 继续规划东京旅行' }, planningContext(), 1,
+        (): boolean => true
+      );
+      const redundantModel = new QueueLocalModel([redundantSuggestionUpdate]);
+      const redundant = await new MultiAgentLeaderPlanner(redundantModel).plan(
+        inputMessage(), { text: '[BIM_CONTEXT] 继续规划东京旅行' }, planningContext(), 1,
+        (): boolean => true
+      );
+
+      expect(ordinaryModel.prompts.length).assertEqual(2);
+      expect(ordinary.bimContextUpdate === undefined).assertTrue();
+      expect(contextModel.prompts.length).assertEqual(2);
+      expect(updated.bimSuggestion === undefined).assertTrue();
+      expect(updated.bimContextUpdate?.summary).assertEqual('东京旅行，机票待确认');
+      expect(requiredModel.prompts.length).assertEqual(2);
+      expect(required.bimContextUpdate?.summary).assertEqual('东京旅行，机票待确认');
+      expect(memoryModel.prompts.length).assertEqual(2);
+      expect(memorySeparated.requestedCapabilityIds.length).assertEqual(0);
+      expect(memorySeparated.bimContextUpdate?.summary).assertEqual('东京旅行，机票待确认');
+      expect(redundantModel.prompts.length).assertEqual(1);
+      expect(redundant.bimSuggestion === undefined).assertTrue();
+      expect(redundant.bimContextUpdate?.summary).assertEqual('东京旅行，机票待确认');
+    });
+
     it('rejects an oversized registered tool catalog before calling the model', 0, async () => {
       const model = new QueueLocalModel([LIVE_ANSWER_WITHOUT_REASON_CODE]);
       const context = planningContext();
@@ -1448,6 +1803,9 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.systemPrompts[0].indexOf('Do not include Thought') >= 0).assertTrue();
       expect(model.systemPrompts[0].indexOf('markdown') >= 0).assertTrue();
       expect(model.systemPrompts[0].indexOf('Omit reasonCode') >= 0).assertTrue();
+      expect(model.systemPrompts[0].indexOf(
+        'When included, emit every core bimContextUpdate schema field and dashboardItems'
+      ) >= 0).assertTrue();
       expect(model.prompts[0].indexOf('Omit reasonCode') >= 0).assertTrue();
       expect(model.prompts[0].indexOf('"reasonCode":"string"')).assertEqual(-1);
       expect(model.systemPrompts[0].indexOf(
@@ -2738,6 +3096,26 @@ export default function multiAgentLeaderPlannerTest() {
       expect(decision.dataTasks[0].toolId).assertEqual('social.feed.search');
       expect(decision.uiIntent.purpose).assertEqual('展示 SocialHub 消息');
       expect(Object.keys(repairedInput).join(',')).assertEqual('platforms');
+    });
+
+    it('repairs a BIM-only state change without forcing an unrelated business tool', 0, async () => {
+      const model = new QueueLocalModel([BIM_STATE_ONLY_TOOL_DECISION, BIM_STATE_ONLY_ANSWER]);
+      const planner = new MultiAgentLeaderPlanner(model, undefined, rejectedHotelInputNormalizer);
+      const input: InputUserPayload = {
+        text: '[BIM_CONTEXT]\n{"query":"我去东京旅行的人数增加到四个人，酒店我希望是两间双床房"}'
+      };
+
+      const decision = await planner.plan(
+        inputMessage(), input, planningContext(), 1, (): boolean => true
+      );
+
+      expect(model.prompts.length).assertEqual(2);
+      expect(model.prompts[1].indexOf('BIM state-only update')).assertLarger(-1);
+      expect(decision.roundAction).assertEqual('answer');
+      expect(decision.requestedCapabilityIds.length).assertEqual(0);
+      expect(decision.dataTasks.length).assertEqual(0);
+      expect(decision.bimContextUpdate?.facts[0]).assertEqual('出行人数为四人');
+      expect(decision.bimContextUpdate?.constraints[0]).assertEqual('酒店需要两间双床房');
     });
 
     it('captures one local date snapshot for prompt and every repair normalization', 0, async () => {
