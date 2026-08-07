@@ -18,8 +18,11 @@ function template(name) {
 }
 
 const aggregateCss = template('AGGREGATE_CSS');
+const aggregateJs = template('AGGREGATE_JS');
 const waterfallCss = template('WATERFALL_CSS');
 assert.match(aggregateCss, /\.aggregate-status-message/);
+assert.match(aggregateCss, /\.aggregate-status-sheet/);
+assert.match(aggregateJs, /data-status-close/);
 assert.match(waterfallCss, /\.waterfall-entry-floating/);
 assert.match(waterfallCss, /\.waterfall-toolbar-primary/);
 assert.match(waterfallCss, /\.waterfall-toolbar-tools/);
@@ -131,6 +134,26 @@ window.__aiphoneApplyWaterfallUpdate({
 });
 assert.match(track.innerHTML, /data-waterfall-empty-sources/);
 assert.doesNotMatch(track.innerHTML, /\\u672c\\u8f6e\\u5185\\u5bb9\\u5df2\\u7ed3\\u675f/);
+
+const statusDetails = { open: true };
+const statusListeners = {};
+const statusDocument = {
+  querySelectorAll: () => [],
+  getElementById: () => null,
+  addEventListener: (type, listener) => { statusListeners[type] = listener; }
+};
+vm.runInNewContext(aggregateJs, {
+  document: statusDocument,
+  window: {}
+});
+statusListeners.click({
+  target: {
+    closest: (selector) => selector === '[data-status-close]' ? {
+      closest: () => statusDetails
+    } : null
+  }
+});
+assert.equal(statusDetails.open, false);
 track.emit('click', {
   target: {
     closest: (selector) => selector === '[data-waterfall-empty-sources]' ? {} : null

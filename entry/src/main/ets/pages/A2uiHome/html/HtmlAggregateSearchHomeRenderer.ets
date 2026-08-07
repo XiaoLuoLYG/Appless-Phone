@@ -138,12 +138,63 @@ h1, h2, h3, p { margin: 0; }
 .aggregate-status-card summary {
   position: relative;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 34px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+  min-height: 70px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.62);
+  padding: 7px;
   list-style: none;
   cursor: pointer;
+}
+.aggregate-status-summary-top,
+.aggregate-status-summary-bottom {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+}
+.aggregate-status-summary-top {
+  justify-content: flex-start;
+}
+.aggregate-status-summary-bottom {
+  justify-content: space-between;
+}
+.aggregate-status-name,
+.aggregate-status-phase,
+.aggregate-status-count {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.aggregate-status-name {
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 760;
+}
+.aggregate-status-phase,
+.aggregate-status-count {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.25;
+}
+.aggregate-status-phase {
+  margin-left: auto;
+}
+.aggregate-status-summary .aggregate-status-message {
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-size: 10px;
+  line-height: 1.35;
+  -webkit-line-clamp: 1;
+  max-height: 1.4em;
 }
 .aggregate-status-card summary::-webkit-details-marker {
   display: none;
@@ -174,6 +225,106 @@ h1, h2, h3, p { margin: 0; }
   padding: 7px;
   font-size: 11px;
   line-height: 1.35;
+}
+.aggregate-status-card[open] {
+  position: relative;
+  z-index: 6;
+}
+.aggregate-status-sheet {
+  position: fixed;
+  z-index: 15;
+  left: 14px;
+  right: 14px;
+  bottom: calc(14px + env(safe-area-inset-bottom));
+  max-height: min(48dvh, 420px);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--panel-strong);
+  box-shadow: var(--shadow);
+  padding: 16px 16px 18px;
+}
+.aggregate-status-sheet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.aggregate-status-sheet-head strong {
+  display: block;
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.25;
+}
+.aggregate-status-sheet-head span,
+.aggregate-status-sheet-summary {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.aggregate-status-sheet-head span {
+  margin-top: 4px;
+}
+.aggregate-status-sheet button {
+  flex: 0 0 auto;
+  min-height: 44px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--paper);
+  color: var(--ink);
+  padding: 0 13px;
+  font-size: 13px;
+  font-weight: 720;
+}
+.aggregate-status-sheet-summary {
+  margin: 12px 0 0;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  padding: 9px 10px;
+}
+.aggregate-status-detail {
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+.aggregate-status-detail summary {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 760;
+  cursor: pointer;
+  list-style: none;
+}
+.aggregate-status-detail summary::-webkit-details-marker {
+  display: none;
+}
+.aggregate-status-detail summary::after {
+  content: '⌄';
+  margin-left: auto;
+}
+.aggregate-status-detail[open] summary::after {
+  content: '⌃';
+}
+.aggregate-status-detail-copy {
+  max-height: min(24dvh, 220px);
+  overflow-y: auto;
+  margin: 0;
+  border-radius: 10px;
+  background: var(--paper);
+  color: var(--ink-soft);
+  padding: 10px;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.aggregate-status-summary:focus-visible,
+.aggregate-status-detail summary:focus-visible,
+.aggregate-status-sheet button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
 }
 .aggregate-section-head {
   display: flex;
@@ -630,6 +781,12 @@ const AGGREGATE_JS: string = `
   document.addEventListener('click', function (event) {
     var target = event.target;
     if (!target || typeof target.closest !== 'function') return;
+    var statusClose = target.closest('[data-status-close]');
+    if (statusClose) {
+      var statusCard = statusClose.closest('.aggregate-status-card');
+      if (statusCard) statusCard.open = false;
+      return;
+    }
     var button = target.closest('.aggregate-filter');
     if (!button) return;
     activeFilter = button.getAttribute('data-filter') || 'all';
@@ -1120,15 +1277,58 @@ function renderPostBlock(block: HtmlHomeBlock): string {
 }
 
 function renderStatusBlock(block: HtmlHomeBlock): string {
+  const source = text(block.source);
+  const sourceName = aggregateSourceLabel(source, text(block.title).length > 0 ? text(block.title) : '来源');
+  const phase = aggregateStatusLabel(text(block.status));
   const fullMessage = text(block.subtitle);
   const compactMessage = compactStatusMessage(fullMessage);
+  const count = rowValue(block, ['count']);
+  const countLabel = count.length > 0 ? '已返回 ' + count + ' 条' : '返回数量暂不可用';
+  const statusLabel = '来源状态：' + sourceName;
   return [
-    '<details class="aggregate-card aggregate-status-card" data-kind="', escapeHtml(block.kind), '" data-source="', escapeAttribute(sourceCssValue(text(block.source))), '" data-status="', escapeAttribute(text(block.status)), '">',
-    '<summary aria-label="', escapeAttribute(block.title), '">', sourceIconMarkup(text(block.source)), '<span class="aggregate-status-dot"></span></summary>',
-    fullMessage.length > 0 ? '<p class="aggregate-status-message" aria-label="' + escapeAttribute(fullMessage) + '" title="' + escapeAttribute(fullMessage) + '" data-status-detail="' + escapeAttribute(fullMessage) + '">' + escapeHtml(compactMessage) + '</p>' : '',
+    '<details class="aggregate-card aggregate-status-card" data-kind="', escapeHtml(block.kind), '" data-source="', escapeAttribute(sourceCssValue(source)), '" data-status="', escapeAttribute(text(block.status)), '">',
+    '<summary class="aggregate-status-summary" aria-label="', escapeAttribute(statusLabel + '，' + phase), '">',
+    '<div class="aggregate-status-summary-top">', sourceIconMarkup(source), '<span class="aggregate-status-dot"></span><span class="aggregate-status-name">', escapeHtml(sourceName), '</span><span class="aggregate-status-phase">', escapeHtml(phase), '</span></div>',
+    '<div class="aggregate-status-summary-bottom">',
+    fullMessage.length > 0 ? '<p class="aggregate-status-message" aria-label="' + escapeAttribute(fullMessage) + '" title="' + escapeAttribute(fullMessage) + '" data-status-detail="' + escapeAttribute(fullMessage) + '">' + escapeHtml(compactMessage) + '</p>' : '<p class="aggregate-status-message">状态摘要暂不可用</p>',
+    '<span class="aggregate-status-count">', escapeHtml(countLabel), '</span>',
+    '</div></summary>',
+    '<div class="aggregate-status-sheet" role="dialog" aria-label="', escapeAttribute(statusLabel), '">',
+    '<div class="aggregate-status-sheet-head"><div><strong>', escapeHtml(statusLabel), '</strong><span>', escapeHtml(phase), ' · ', escapeHtml(countLabel), '</span></div><button type="button" class="aggregate-status-close" data-status-close aria-label="关闭来源状态">关闭</button></div>',
+    '<p class="aggregate-status-sheet-summary">', escapeHtml(phase + ' · ' + countLabel), '</p>',
+    fullMessage.length > 0 ? '<details class="aggregate-status-detail"><summary>查看详情</summary><p class="aggregate-status-detail-copy" data-status-detail="' + escapeAttribute(fullMessage) + '">' + escapeHtml(fullMessage) + '</p></details>' : '<p class="aggregate-status-detail-copy">详细信息暂不可用</p>',
     renderRows(block),
+    '</div>',
     '</details>'
   ].join('');
+}
+
+function aggregateStatusLabel(status: string): string {
+  if (status === 'loading') {
+    return '加载中';
+  }
+  if (status === 'success' || status === 'ready') {
+    return '已完成';
+  }
+  if (status === 'partial') {
+    return '部分返回';
+  }
+  if (status === 'error') {
+    return '部分失败';
+  }
+  if (status === 'needs_auth') {
+    return '需授权';
+  }
+  if (status === 'empty') {
+    return '无结果';
+  }
+  if (status === 'unsupported') {
+    return '暂不支持';
+  }
+  if (status === 'exhausted') {
+    return '本轮结束';
+  }
+  return status.length > 0 ? status : '状态暂不可用';
 }
 
 function compactStatusMessage(value: string): string {

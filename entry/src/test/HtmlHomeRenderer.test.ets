@@ -2584,6 +2584,12 @@ export default function htmlHomeRendererTest() {
       const html = renderHtmlHomeDocument(doc);
 
       expect(html.indexOf('aggregate-status-message')).assertLarger(-1);
+      expect(html.indexOf('aggregate-status-summary')).assertLarger(-1);
+      expect(html.indexOf('来源状态：X')).assertLarger(-1);
+      expect(html.indexOf('部分失败')).assertLarger(-1);
+      expect(html.indexOf('返回数量暂不可用')).assertLarger(-1);
+      expect(html.indexOf('查看详情')).assertLarger(-1);
+      expect(html.indexOf('data-status-close')).assertLarger(-1);
       expect(html.indexOf('-webkit-line-clamp: 2')).assertLarger(-1);
       expect(html.indexOf('data-status-detail="')).assertLarger(-1);
       expect(html.indexOf(longMessage)).assertLarger(-1);
