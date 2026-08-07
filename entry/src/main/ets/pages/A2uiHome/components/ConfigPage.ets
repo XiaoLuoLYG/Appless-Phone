@@ -19,7 +19,7 @@ import {
   statusBackground,
   statusColor
 } from '../style/A2uiHomeTheme';
-import { ComposioAuthConfigItem } from '@loop/agent-core';
+import { ComposioAuthConfigItem, dashScopeModelSettings, deepSeekModelSettings } from '@loop/agent-core';
 import { PersonaPack } from '../../../model/PersonaTypes';
 import { parsePersonaMarkdown, PersonaMarkdownSection, PersonaSkillMarkdown } from '../../../model/PersonaMarkdown';
 import { connectionStatusLabel } from '../state/A2uiHomeState';
@@ -761,6 +761,22 @@ export struct ConfigPage {
           }
 
           Row() {
+            Button('DeepSeek V4')
+              .height(36)
+              .layoutWeight(1)
+              .fontSize(11)
+              .fontColor(COLOR_BUTTON_TEXT)
+              .backgroundColor(COLOR_ACCENT_DEEP)
+              .borderRadius(9)
+              .border({ width: 1, color: COLOR_ACCENT })
+              .margin({ right: 8 })
+              .onClick(() => {
+                const settings = deepSeekModelSettings();
+                this.apiKey = settings.apiKey;
+                this.baseUrl = settings.baseUrl;
+                this.selectedModel = settings.model;
+                this.customParametersJson = settings.customParametersJson;
+              })
             Button('云端 Qwen Max')
               .height(36)
               .layoutWeight(1)
@@ -771,9 +787,11 @@ export struct ConfigPage {
               .border({ width: 1, color: COLOR_ACCENT })
               .margin({ right: 8 })
               .onClick(() => {
-                this.baseUrl = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
-                this.selectedModel = 'qwen-max';
-                this.customParametersJson = '{"enable_thinking":false}';
+                const settings = dashScopeModelSettings();
+                this.apiKey = settings.apiKey;
+                this.baseUrl = settings.baseUrl;
+                this.selectedModel = settings.model;
+                this.customParametersJson = settings.customParametersJson;
               })
             Button('本地 Qwen')
               .height(36)
