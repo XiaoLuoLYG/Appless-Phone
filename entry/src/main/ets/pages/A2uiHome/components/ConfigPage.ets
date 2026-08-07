@@ -103,6 +103,20 @@ export struct ConfigPage {
     return this.personaPacks.length > 0 ? this.personaPacks[0] : null;
   }
 
+  private isDeepSeekPresetSelected(): boolean {
+    return this.selectedModel === 'Deepseek-V4-Flash-0731' &&
+      this.baseUrl === 'http://113.46.219.251:8080/v1/chat/completions';
+  }
+
+  private isDashScopePresetSelected(): boolean {
+    return this.selectedModel === 'qwen-max' &&
+      this.baseUrl === 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
+  }
+
+  private isLocalPresetSelected(): boolean {
+    return this.selectedModel === 'Qwen3-8B' && this.baseUrl === 'http://127.0.0.1:11434';
+  }
+
   private sectionBody(sections: PersonaMarkdownSection[], title: string): string {
     for (let index = 0; index < sections.length; index++) {
       if (sections[index].title === title) {
@@ -760,52 +774,58 @@ export struct ConfigPage {
             .margin({ bottom: 14 })
           }
 
-          Row() {
-            Button('DeepSeek V4')
-              .height(36)
-              .layoutWeight(1)
-              .fontSize(11)
-              .fontColor(COLOR_BUTTON_TEXT)
-              .backgroundColor(COLOR_ACCENT_DEEP)
-              .borderRadius(9)
-              .border({ width: 1, color: COLOR_ACCENT })
-              .margin({ right: 8 })
-              .onClick(() => {
-                const settings = deepSeekModelSettings();
-                this.apiKey = settings.apiKey;
-                this.baseUrl = settings.baseUrl;
-                this.selectedModel = settings.model;
-                this.customParametersJson = settings.customParametersJson;
-              })
-            Button('云端 Qwen Max')
-              .height(36)
-              .layoutWeight(1)
-              .fontSize(11)
-              .fontColor(COLOR_BUTTON_TEXT)
-              .backgroundColor(COLOR_ACCENT_DEEP)
-              .borderRadius(9)
-              .border({ width: 1, color: COLOR_ACCENT })
-              .margin({ right: 8 })
-              .onClick(() => {
-                const settings = dashScopeModelSettings();
-                this.apiKey = settings.apiKey;
-                this.baseUrl = settings.baseUrl;
-                this.selectedModel = settings.model;
-                this.customParametersJson = settings.customParametersJson;
-              })
-            Button('本地 Qwen')
-              .height(36)
-              .layoutWeight(1)
-              .fontSize(11)
-              .fontColor(COLOR_INK)
-              .backgroundColor(COLOR_CARD_RAISED)
-              .borderRadius(9)
-              .border({ width: 1, color: COLOR_CARD_EDGE })
-              .onClick(() => {
-                this.baseUrl = 'http://127.0.0.1:11434';
-                this.selectedModel = 'Qwen3-8B';
-                this.customParametersJson = '';
-              })
+          Column() {
+            Row() {
+              Button('DeepSeek V4')
+                .height(36)
+                .layoutWeight(1)
+                .fontSize(11)
+                .fontColor(this.isDeepSeekPresetSelected() ? COLOR_BUTTON_TEXT : COLOR_INK)
+                .backgroundColor(this.isDeepSeekPresetSelected() ? COLOR_ACCENT_DEEP : COLOR_CARD_RAISED)
+                .borderRadius(9)
+                .border({ width: 1, color: this.isDeepSeekPresetSelected() ? COLOR_ACCENT : COLOR_CARD_EDGE })
+                .margin({ right: 8 })
+                .onClick(() => {
+                  const settings = deepSeekModelSettings();
+                  this.apiKey = settings.apiKey;
+                  this.baseUrl = settings.baseUrl;
+                  this.selectedModel = settings.model;
+                  this.customParametersJson = settings.customParametersJson;
+                })
+              Button('云端 Qwen Max')
+                .height(36)
+                .layoutWeight(1)
+                .fontSize(11)
+                .fontColor(this.isDashScopePresetSelected() ? COLOR_BUTTON_TEXT : COLOR_INK)
+                .backgroundColor(this.isDashScopePresetSelected() ? COLOR_ACCENT_DEEP : COLOR_CARD_RAISED)
+                .borderRadius(9)
+                .border({ width: 1, color: this.isDashScopePresetSelected() ? COLOR_ACCENT : COLOR_CARD_EDGE })
+                .onClick(() => {
+                  const settings = dashScopeModelSettings();
+                  this.apiKey = settings.apiKey;
+                  this.baseUrl = settings.baseUrl;
+                  this.selectedModel = settings.model;
+                  this.customParametersJson = settings.customParametersJson;
+                })
+            }
+            .width('100%')
+            Row() {
+              Button('本地 Qwen')
+                .height(36)
+                .width('100%')
+                .fontSize(11)
+                .fontColor(this.isLocalPresetSelected() ? COLOR_BUTTON_TEXT : COLOR_INK)
+                .backgroundColor(this.isLocalPresetSelected() ? COLOR_ACCENT_DEEP : COLOR_CARD_RAISED)
+                .borderRadius(9)
+                .border({ width: 1, color: this.isLocalPresetSelected() ? COLOR_ACCENT : COLOR_CARD_EDGE })
+                .onClick(() => {
+                  this.baseUrl = 'http://127.0.0.1:11434';
+                  this.selectedModel = 'Qwen3-8B';
+                  this.customParametersJson = '';
+                })
+            }
+            .width('100%')
+            .margin({ top: 8 })
           }
           .width('100%')
           .margin({ bottom: 14 })
