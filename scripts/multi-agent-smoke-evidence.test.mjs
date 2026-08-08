@@ -129,6 +129,14 @@ test('holds ordinary C20 multi-agent capture until its bounded settlement window
   }), true);
 });
 
+test('does not treat a missing device curl binary as local-model reachability', () => {
+  const source = readFileSync('scripts/aiphone-device-smoke.mjs', 'utf8');
+  const probe = source.slice(source.indexOf('function probeLocalModel()'), source.indexOf('function startModelFoundation()'));
+  assert.match(probe, /probeUnavailable/);
+  assert.match(probe, /inaccessible or not found/);
+  assert.match(probe, /!probeUnavailable/);
+});
+
 test('requires correlated provider-backed dynamic discovery and keeps local manifest evidence', () => {
   assert.equal(typeof smokeLifecycle.dynamicToolDiscoveryEvidence, 'function');
   const remote = [
@@ -1867,10 +1875,10 @@ test('requires a virtual action request before its exact result', () => {
   }).complete, false);
 });
 
-test('lists exactly C01-C22 and F01-F16 without excluded sends', () => {
+test('lists exactly C01-C23 and F01-F16 without excluded sends', () => {
   const core = listedCases();
   assert.deepEqual(core.map((item) => item.id),
-    Array.from({ length: 22 }, (_value, index) => `C${String(index + 1).padStart(2, '0')}`));
+    Array.from({ length: 23 }, (_value, index) => `C${String(index + 1).padStart(2, '0')}`));
   const full = listedCases(['--full-regression']);
   assert.deepEqual(full.map((item) => item.id), [
     ...core.map((item) => item.id),

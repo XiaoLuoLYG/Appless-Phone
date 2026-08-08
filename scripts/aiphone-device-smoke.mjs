@@ -1060,14 +1060,17 @@ function probeLocalModel() {
   });
   const output = `${result.stdout || ''}${result.stderr || ''}`.trim();
   const hdcUnavailable = /Connect server failed/i.test(output);
+  const probeUnavailable = /(?:curl:\s*inaccessible or not found|curl:\s*not found|command not found)/i.test(output);
   const connectionRefused = hdcUnavailable || /Failed to connect|Couldn.t connect|Connection refused|curl:\s*\(7\)/i.test(output);
   const listenerReachable = !connectionRefused && (
+    !probeUnavailable &&
     /403|Call is not allowed/i.test(output) ||
-    (result.status === 0 && output.length > 0 && !/curl:\s*\(\d+\)/i.test(output))
+    (!probeUnavailable && result.status === 0 && output.length > 0 && !/curl:\s*\(\d+\)/i.test(output))
   );
   return {
     status: result.status,
     hdcUnavailable,
+    probeUnavailable,
     listenerReachable,
     connectionRefused,
     output: output.length > 500 ? `${output.slice(0, 500)}...<truncated>` : output
