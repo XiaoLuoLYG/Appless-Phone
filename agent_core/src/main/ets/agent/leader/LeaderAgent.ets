@@ -557,6 +557,12 @@ export class LeaderAgent extends MessageDrivenAgent {
       this.publishDecisionDataTask(message, state, decision.dataTasks[index]);
     }
     if (decision.actionIntent !== undefined && dataTaskIds.length === 0) {
+      if (state.dataTaskIds.length > 0) {
+        state.pendingActionDecision = decision;
+        state.uiIntent = decision.uiIntent.purpose;
+        this.publishObservedFallback(message, state);
+        return;
+      }
       state.virtualActionTaskId = uiTaskId;
       this.publishActionPlanRequest(
         message,

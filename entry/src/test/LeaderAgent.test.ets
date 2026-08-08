@@ -1317,6 +1317,109 @@ export default function leaderAgentTest() {
       observer.close();
     });
 
+    it('keeps accumulated Data UI when a later round contains only virtual Actions', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const first = semanticDecision([semanticDataTask('ride', 'ride.estimate')]);
+      first.reasonCode = 'sequence_requires_next_round';
+      const second = semanticDecision([]);
+      second.actionIntent = {
+        goal: 'Preview coffee, then open payment confirmation',
+        allowedActionIds: ['luckin.order.preview', 'payment.send']
+      };
+      second.requestedCapabilityIds.push('luckin.order.preview', 'payment.send');
+      const context = semanticPlanningContext();
+      context.tools.push({
+        toolId: 'ride.estimate',
+        domain: 'ride',
+        intent: 'ride.estimate',
+        riskLevel: 'read',
+        registeredBackends: ['local_adapter'],
+        inputSchema: 'rideEstimateQuery',
+        outputSchema: 'genericToolResults',
+        actions: []
+      }, {
+        toolId: 'luckin.order.preview',
+        domain: 'food',
+        intent: 'luckin.order.preview',
+        riskLevel: 'draft',
+        registeredBackends: ['local_adapter'],
+        inputSchema: 'luckinOrderPreviewRequest',
+        outputSchema: 'genericToolResults',
+        actions: []
+      }, {
+        toolId: 'payment.send',
+        domain: 'payment',
+        intent: 'payment.send',
+        riskLevel: 'confirm_required',
+        registeredBackends: ['local_adapter'],
+        inputSchema: 'paymentSendRequest',
+        outputSchema: 'genericToolResults',
+        actions: []
+      });
+      const planner = new RoundScriptedPlanner([first, second]);
+      const leader = new LeaderAgent(bus, planner, context);
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage(
+        'conversation-later-actions',
+        'turn-later-actions',
+        'input-later-actions',
+        '打车、点瑞幸并转账'
+      ));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      const dataTask = await receive(observer);
+      expect(dataTask.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+      bus.publish(dataResultMessage(dataTask));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      const uiTask = await receive(observer);
+      const ui = uiTask.payload as CreateUiTaskPayload;
+
+      expect(uiTask.type).assertEqual(AgentMessageType.TASK_CREATE_UI);
+      expect(ui.dataTaskIds.join(',')).assertEqual(dataTask.taskId);
+      bus.publish({
+        type: AgentMessageType.TASK_RESULT_UI,
+        conversationId: uiTask.conversationId,
+        turnId: uiTask.turnId,
+        taskId: uiTask.taskId,
+        payload: {
+          surfaceId: 'surface-later-actions',
+          state: 'result'
+        } as UiRenderResultPayload
+      });
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_UI);
+      const actionRequest = await receive(observer);
+      const action = actionRequest.payload as ActionPlanRequestPayload;
+      expect(actionRequest.type).assertEqual(AgentMessageType.ACTION_PLAN_REQUEST);
+      expect(action.allowedActionIds.join(',')).assertEqual(
+        'luckin.order.preview,payment.send'
+      );
+      expect(action.virtual).assertTrue();
+      const runId = 'virtual:' + actionRequest.taskId;
+      bus.publish({
+        type: AgentMessageType.ACTION_RESULT,
+        conversationId: actionRequest.conversationId,
+        turnId: actionRequest.turnId,
+        taskId: actionRequest.taskId,
+        payload: {
+          surfaceId: runId,
+          planId: 'direct:' + runId,
+          runId,
+          status: 'success',
+          completedStepIds: ['step-1', 'step-2'],
+          outputs: []
+        } as ActionResultPayload
+      });
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.ACTION_RESULT);
+      const terminal = await receive(observer);
+      expect(terminal.type).assertEqual(AgentMessageType.TURN_RESULT);
+      expect((terminal.payload as TurnResultPayload).roundCount).assertEqual(2);
+      expect((terminal.payload as TurnResultPayload).surfaceId).assertEqual('surface-later-actions');
+      expect(planner.calls).assertEqual(2);
+      leader.stop();
+      observer.close();
+    });
+
     it('publishes only the source from a hostile custom same-round dependency', 0, async () => {
       const search = semanticDataTask('place-search', 'maps.place.search');
       search.input = JSON.parse('{"query":"深圳咖啡"}') as Object;

@@ -1074,6 +1074,22 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.conversations[0][0]).assertEqual('user:我现在在深圳，想去上海');
     });
 
+    it('includes the current persona memory in the final Leader prompt', 0, async () => {
+      const model = new QueueLocalModel([FOOD_COFFEE_DECISION]);
+      const context = planningContext();
+      context.personas[0].memory = '用户咖啡偏好：只喝瑞幸咖啡。';
+
+      await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: '点一杯咖啡' },
+        context,
+        1
+      );
+
+      expect(model.prompts.length).assertEqual(1);
+      expect(model.prompts[0].indexOf('用户咖啡偏好：只喝瑞幸咖啡。') >= 0).assertTrue();
+    });
+
     it('keeps internal food intent aliases out of Leader capability IDs', 0, async () => {
       const context = planningContext();
       let foodToolIndex: number = -1;
