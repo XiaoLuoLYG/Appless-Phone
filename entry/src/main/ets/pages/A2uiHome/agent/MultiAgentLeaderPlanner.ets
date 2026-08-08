@@ -588,6 +588,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         '\nAction-owned repair freeze: preserve personaId, skillId, requestedCapabilityIds, roundAction, answer, ' +
           'uiIntent, each non-Action Data task, all existing Action IDs, and the original request intent exactly. ' +
           'Move exactly one Action-only capability ID from Data positions to actionIntent.allowedActionIds. ' +
+          'When that move leaves dataTasks empty, set continuationMode to complete. ' +
           'Do not add, remove, reorder, or change any other field or capability.' :
         bimStateOnlyRepair ?
         '\nFor a BIM state-only answer, clear all three frozen capability sets and preserve personaId and skillId. ' +
@@ -2086,19 +2087,28 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     const rawTasks = values['dataTasks'];
     const rawAction = values['actionIntent'];
     const rawRequested = values['requestedCapabilityIds'];
-    if (!Array.isArray(rawTasks) || rawAction === null || typeof rawAction !== 'object' ||
-      Array.isArray(rawAction) || !Array.isArray(rawRequested)) {
+    if (!Array.isArray(rawTasks) || !Array.isArray(rawRequested)) {
       return;
     }
-    const actionValues =
-      rawAction as Record<string, Object | string | number | boolean | null | undefined>;
-    const rawActionIds = actionValues['allowedActionIds'];
-    if (Object.keys(rawAction).sort().join(',') !== ACTION_INTENT_KEYS ||
-      !Array.isArray(rawActionIds)) {
-      return;
+    let actionValues:
+      Record<string, Object | string | number | boolean | null | undefined> = {};
+    let rawActionIds: Object[] = [];
+    if (rawAction !== undefined) {
+      if (rawAction === null || typeof rawAction !== 'object' || Array.isArray(rawAction) ||
+        Object.keys(rawAction).sort().join(',') !== ACTION_INTENT_KEYS) {
+        return;
+      }
+      actionValues =
+        rawAction as Record<string, Object | string | number | boolean | null | undefined>;
+      const actionIds = actionValues['allowedActionIds'];
+      if (!Array.isArray(actionIds)) {
+        return;
+      }
+      rawActionIds = actionIds as Object[];
     }
     let misplacedIndex: number = -1;
     let misplacedId: string = '';
+    let misplacedGoal: string = '';
     const tasks = rawTasks as Object[];
     for (let index = 0; index < tasks.length; index++) {
       const rawTask = tasks[index];
@@ -2109,6 +2119,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       const task =
         rawTask as Record<string, Object | string | number | boolean | null | undefined>;
       const toolId = task['toolId'];
+      const goal = task['goal'];
       const allowedToolIds = task['allowedToolIds'];
       if (typeof toolId !== 'string' ||
         leaderIsDataCapability(context, toolId) ||
@@ -2116,20 +2127,24 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         continue;
       }
       if (misplacedIndex >= 0 || !Array.isArray(allowedToolIds) ||
-        allowedToolIds.length !== 1 || allowedToolIds[0] !== toolId) {
+        allowedToolIds.length !== 1 || allowedToolIds[0] !== toolId ||
+        typeof goal !== 'string' || goal.trim().length === 0) {
         return;
       }
       misplacedIndex = index;
       misplacedId = toolId;
+      misplacedGoal = goal;
     }
     if (misplacedIndex < 0 || rawRequested.indexOf(misplacedId) < 0) {
       return;
     }
-    const actionIds = rawActionIds as Object[];
+    if (rawAction === undefined && values['continuationMode'] !== 'sequence') {
+      return;
+    }
     const requestedIds = rawRequested as Object[];
     const existingActionIds: string[] = [];
-    for (let index = 0; index < actionIds.length; index++) {
-      const actionId: Object = actionIds[index];
+    for (let index = 0; index < rawActionIds.length; index++) {
+      const actionId: Object = rawActionIds[index];
       if (typeof actionId !== 'string' || actionId === misplacedId ||
         existingActionIds.indexOf(actionId) >= 0 ||
         !leaderIsActionCapability(context, actionId)) {
@@ -2140,18 +2155,35 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     const orderedActionIds: string[] = [];
     for (let index = 0; index < requestedIds.length; index++) {
       const capabilityId: Object = requestedIds[index];
-      if (typeof capabilityId === 'string' &&
-        (capabilityId === misplacedId || existingActionIds.indexOf(capabilityId) >= 0)) {
+      if (typeof capabilityId === 'string' && (capabilityId === misplacedId ||
+        existingActionIds.indexOf(capabilityId) >= 0 ||
+        (rawAction === undefined && this.actionOnlyCapability(context, capabilityId)))) {
         orderedActionIds.push(capabilityId);
       }
     }
-    if (orderedActionIds.length !== existingActionIds.length + 1) {
+    const expectedActionCount: number = existingActionIds.length +
+      (rawAction === undefined ? 2 : 1);
+    if (orderedActionIds.length !== expectedActionCount ||
+      orderedActionIds.indexOf(misplacedId) < 0) {
       return;
     }
-    values['dataTasks'] = tasks.filter(
+    if (rawAction === undefined) {
+      const normalizedActionIntent: LeaderActionIntent = {
+        goal: misplacedGoal,
+        allowedActionIds: orderedActionIds
+      };
+      values['actionIntent'] = normalizedActionIntent;
+      actionValues = normalizedActionIntent as Object as
+        Record<string, Object | string | number | boolean | null | undefined>;
+    }
+    const retainedTasks: Object[] = tasks.filter(
       (_task: Object, index: number): boolean => index !== misplacedIndex
     );
+    values['dataTasks'] = retainedTasks;
     actionValues['allowedActionIds'] = orderedActionIds;
+    if (retainedTasks.length === 0 && values['continuationMode'] === 'sequence') {
+      values['continuationMode'] = 'complete';
+    }
   }
 
   private hostReasonCode(action: LeaderRoundAction): string {

@@ -1429,7 +1429,8 @@ export default function hotelAgentRuntimeTest() {
         new RecordingOpener(),
         (surface: A2uiSurfaceState): void => {
           visible.push(surface.surfaceId);
-        }
+        },
+        5000
       ));
 
       const first = runtime.submit(SEARCH_QUERY);
@@ -1438,7 +1439,7 @@ export default function hotelAgentRuntimeTest() {
       const firstOutcome = await first;
       expect(firstOutcome.status).assertEqual('canceled');
       const secondOutcome = await second;
-      expect(secondOutcome.ok).assertTrue();
+      expect(secondOutcome.status).assertEqual('success');
       const messages = bus.messages;
       let cancelIndex = -1;
       let secondInputIndex = -1;
@@ -1473,7 +1474,8 @@ export default function hotelAgentRuntimeTest() {
         new RecordingOpener(),
         (surface: A2uiSurfaceState): void => {
           visible.push(surface.surfaceId);
-        }
+        },
+        5000
       ));
 
       const first = runtime.submit(SEARCH_QUERY);
@@ -1481,7 +1483,7 @@ export default function hotelAgentRuntimeTest() {
       const second = runtime.submit(SEARCH_QUERY);
       expect((await first).status).assertEqual('canceled');
       const secondOutcome = await second;
-      expect(secondOutcome.ok).assertTrue();
+      expect(secondOutcome.status).assertEqual('success');
       expect(visible[visible.length - 1]).assertEqual(secondOutcome.surfaceId);
       writer.release.open();
       await flush(20);
