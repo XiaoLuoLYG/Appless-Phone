@@ -924,6 +924,43 @@ function semanticMessages(layout) {
   return { articleCount, messages, validPairs };
 }
 
+function plainChatReply(layout) {
+  let heading = false;
+  let context = false;
+  const replies = [];
+  const visit = (node) => {
+    if (node === null || typeof node !== 'object') return;
+    const type = node.attributes?.type || '';
+    const text = String(node.attributes?.text || '').trim();
+    if (type === 'heading' && text === '和 Appless 聊聊') heading = true;
+    if (type === 'disclosureTriangle' && /^上下文\s+\d+\s+条/.test(text)) context = true;
+    if (type === 'article') {
+      const values = [];
+      nodeTextValues(node, values);
+      if (!values.some((value) => value === 'user' || value === 'assistant') && values.length === 1) {
+        replies.push(values[0]);
+      }
+      return;
+    }
+    for (const child of Array.isArray(node.children) ? node.children : []) visit(child);
+  };
+  visit(layout);
+  return heading && context && replies.length === 1 ? replies[0] : '';
+}
+
+function layoutHasInputText(layout, expected) {
+  let found = false;
+  const visit = (node) => {
+    if (node === null || typeof node !== 'object' || found) return;
+    const type = node.attributes?.type || '';
+    const text = String(node.attributes?.text || '').trim();
+    if ((type === 'TextInput' || type === 'TextArea') && text === expected) found = true;
+    for (const child of Array.isArray(node.children) ? node.children : []) visit(child);
+  };
+  visit(layout);
+  return found;
+}
+
 export function directTextVisibleEvidence(logText, baselineLayout, finalLayout, query, options = {}) {
   const text = String(logText || '');
   const failures = [];
@@ -979,17 +1016,20 @@ export function directTextVisibleEvidence(logText, baselineLayout, finalLayout, 
   const user = historyMatches ? messages[userIndex] : undefined;
   const assistant = historyMatches ? messages[userIndex + 1] : undefined;
   const expectedChars = Number(terminal?.fields.messageChars || 0);
-  if (!historyMatches || expectedQuery.length === 0 || user?.role !== 'user' ||
+  const plainReply = plainChatReply(finalLayout);
+  const plainChatMatches = expectedQuery.length > 0 && layoutHasInputText(baselineLayout, expectedQuery) &&
+    plainReply.length > 0 && plainReply !== expectedQuery && plainReply.length === expectedChars;
+  if (!plainChatMatches && (!historyMatches || expectedQuery.length === 0 || user?.role !== 'user' ||
     user.text !== expectedQuery ||
     assistant?.role !== 'assistant' || assistant.text.length === 0 ||
-    assistant.text === expectedQuery || assistant.text.length !== expectedChars) {
+    assistant.text === expectedQuery || assistant.text.length !== expectedChars)) {
     failures.push('missing_current_visible_reply');
   }
 
   return {
     ok: failures.length === 0,
-    replyText: assistant?.text || '',
-    replyChars: assistant?.text.length || 0,
+    replyText: assistant?.text || plainReply,
+    replyChars: assistant?.text.length || plainReply.length,
     baselineMessageCount: baseline.messages.length,
     finalMessageCount: final.messages.length,
     failures

@@ -781,6 +781,18 @@ function directTextLayout(messages) {
   };
 }
 
+function plainChatLayout(query, reply) {
+  return {
+    attributes: { type: 'root', text: '' },
+    children: [
+      textNode('heading', '和 Appless 聊聊'),
+      messageArticle('', reply),
+      textNode('disclosureTriangle', '上下文 1 条 +'),
+      textNode('TextArea', query)
+    ]
+  };
+}
+
 test('requires the current direct reply as the final semantic user-assistant pair', () => {
   const baseline = directTextLayout([]);
   const layout = directTextLayout([
@@ -816,6 +828,19 @@ test('requires the current direct reply as the final semantic user-assistant pai
   invalidLayouts.forEach((candidate) => {
     assert.equal(directTextVisibleEvidence(cloudStreamTurn, baseline, candidate, '你好').ok, false);
   });
+});
+
+test('accepts the current roleless plain-chat reply exposed by ArkWeb', () => {
+  const baseline = directTextLayout([]);
+  baseline.children.push(textNode('TextArea', '你好'));
+  const evidence = directTextVisibleEvidence(
+    cloudStreamTurn,
+    baseline,
+    plainChatLayout('', '你好！有什么可以帮助你的吗？'),
+    '你好'
+  );
+  assert.equal(evidence.ok, true);
+  assert.equal(evidence.replyText, '你好！有什么可以帮助你的吗？');
 });
 
 test('requires the final semantic messages to be the exact baseline plus one new pair', () => {
