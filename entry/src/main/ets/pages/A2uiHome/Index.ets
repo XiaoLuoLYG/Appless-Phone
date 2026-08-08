@@ -12,7 +12,9 @@ import {
   RuntimeOwner,
   StripeReceivingAccountCardData,
   UserInputPayload,
-  defaultLocalModelSettings
+  defaultLocalModelSettings,
+  dashScopeModelSettings,
+  deepSeekModelSettings
 } from '@loop/agent-core';
 import { isRollingGoHotelBookingUrl } from '@loop/agent-core';
 import {
@@ -307,6 +309,8 @@ const PAYMENT_ACCOUNT_BOOK_KEY: string = 'payment_account_book';
 const STRIPE_RECEIVING_PROFILE_KEY: string = 'stripe_receiving_profile';
 const COMPOSIO_AUTH_STORE_NAME: string = 'aiphone_composio_auth_store';
 const COMPOSIO_USER_ID_KEY: string = 'composio_user_id';
+const MODEL_PRESET_STORE_NAME: string = 'aiphone_model_preset_store';
+const MODEL_PRESET_KEY: string = 'model_preset';
 const ANYTHING_DEMO_ROUTE_URL: string = 'pages/A2uiHome/AnythingDemo';
 const MOVIE_DEMO_ROUTE_URL: string = 'pages/A2uiHome/MovieDemo';
 const READ_CALENDAR_PERMISSION: Permissions = 'ohos.permission.READ_CALENDAR';
@@ -1438,6 +1442,7 @@ struct Index {
   }
 
   aboutToAppear(): void {
+    this.loadModelPreset();
     this.loadBimMotionPreference();
     this.readDebugBuildState();
     this.configureDidiMcpSandboxRuntime(true);
@@ -1995,6 +2000,35 @@ struct Index {
       customParametersJson: this.customParametersJson,
       ignoreToolSurfaceUpdates: this.ignoreToolSurfaceUpdates
     };
+  }
+
+  private modelPresetPreferences(): preferences.Preferences | null {
+    const context = this.getUIContext().getHostContext() as common.Context;
+    try {
+      return preferences.getPreferencesSync(context, { name: MODEL_PRESET_STORE_NAME });
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  private loadModelPreset(): void {
+    const store = this.modelPresetPreferences();
+    const preset = store === null ? '' : this.preferenceText(store.getSync(MODEL_PRESET_KEY, ''));
+    const settings = preset === 'qwen' ? dashScopeModelSettings() :
+      (preset === 'deepseek' ? deepSeekModelSettings() : null);
+    if (settings === null) return;
+    this.baseUrl = settings.baseUrl;
+    this.apiKey = settings.apiKey;
+    this.selectedModel = settings.model;
+    this.customParametersJson = settings.customParametersJson;
+  }
+
+  private saveModelPreset(preset: string): void {
+    const store = this.modelPresetPreferences();
+    if (store !== null) {
+      store.putSync(MODEL_PRESET_KEY, preset);
+      store.flushSync();
+    }
   }
 
   private currentLocalDate(): string {
@@ -6765,6 +6799,9 @@ struct Index {
         composioAuthBusy: this.composioAuthBusy,
         onBack: () => {
           this.showConfigPage = false;
+        },
+        onSelectModelPreset: (preset: string) => {
+          this.saveModelPreset(preset);
         },
         onTestConnection: () => {
           this.testConnection();

@@ -65,6 +65,7 @@ export struct ConfigPage {
   @State editingPersonaDoc: string = '';
   @State showComposioAuthPanel: boolean = false;
   onBack: () => void = () => {};
+  onSelectModelPreset: (preset: string) => void = (_preset: string) => {};
   onTestConnection: () => void = () => {};
   onOpenComposioAuth: () => void = () => {};
   onRefreshComposioAuth: () => void = () => {};
@@ -791,6 +792,7 @@ export struct ConfigPage {
                   this.baseUrl = settings.baseUrl;
                   this.selectedModel = settings.model;
                   this.customParametersJson = settings.customParametersJson;
+                  this.onSelectModelPreset('deepseek');
                 })
               Button('云端 Qwen Max')
                 .height(36)
@@ -806,6 +808,7 @@ export struct ConfigPage {
                   this.baseUrl = settings.baseUrl;
                   this.selectedModel = settings.model;
                   this.customParametersJson = settings.customParametersJson;
+                  this.onSelectModelPreset('qwen');
                 })
             }
             .width('100%')
@@ -822,6 +825,7 @@ export struct ConfigPage {
                   this.baseUrl = 'http://127.0.0.1:11434';
                   this.selectedModel = 'Qwen3-8B';
                   this.customParametersJson = '';
+                  this.onSelectModelPreset('local-qwen');
                 })
             }
             .width('100%')
